@@ -1,0 +1,31 @@
+{
+  "schema_version": "contextdb.version-manifest/v1",
+  "product_version": "0.1.0-alpha.1",
+  "release_channel": "development",
+  "source": {
+    "git_commit": "0000000000000000000000000000000000000000",
+    "dirty": true,
+    "repository": "https://github.com/mikhailbovt/ContextDB",
+    "rfc_revision": "RFC-0001-v0.3",
+    "errata": ["ERRATA-0001"],
+    "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]
+  },
+  "build": {
+    "timestamp": "2026-08-12T08:51:12Z",
+    "rustc": "rustc 1.97.1",
+    "cargo": "cargo 1.97.1",
+    "target": "x86_64-pc-windows-msvc",
+    "profile": "release",
+    "reproducible": false,
+    "builder": "local-m2-bakeoff-rerun-after-evidence-drift"
+  },
+  "formats": {
+    "logical_record": {"writer":1,"read_min":1,"read_max":1,"required_features":[]}
+  },
+  "feature_profile": "research",
+  "features": ["storage-bakeoff"],
+  "storage_backend": {
+    "name": "multi-backend-bakeoff",
+    "version": "memory+fjall-3.1.8+redb-4.1.0+rocksdb-0.24.0"
+  }
+}

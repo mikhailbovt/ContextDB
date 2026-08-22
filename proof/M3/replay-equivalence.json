@@ -1,0 +1,25 @@
+{
+  "schema_version": "contextdb.conformance-report/v1",
+  "milestone": "M3",
+  "generated_at": "2026-08-22T08:35:15.606Z",
+  "status": "package_conformance_passed",
+  "command": "cargo +1.97.1 test -p contextdb-journal --no-fail-fast",
+  "exit_code": 0,
+  "checks": {
+    "acknowledged_sync_reopen_exact_bytes": true,
+    "idempotent_retry_no_logical_duplicate": true,
+    "partial_semantic_publication_hidden": true,
+    "atomic_outbox_visibility": true,
+    "portable_cross_backend_frame_replay": true,
+    "tampered_backup_rejected": true
+  },
+  "result": {"passed": 16, "failed": 0},
+  "source_sha256": {
+    "crates/contextdb-journal/src/tests.rs": "f22e69d6759dae15fc998e9906890cfd7d32a9b249e66520c25bb2a8719dcd02",
+    "crates/contextdb-reference/tests/reference_semantics.rs": "2a81b3f217a96e9d0629ad51c5e5c6b162df04caa65f8a1273a5dd8293309b6e"
+  },
+  "limitations": [
+    "The journal suite checks byte/frame and logical replay invariants but does not run the full M1-vs-persistent differential corpus in a separate process.",
+    "Cross-platform crash equivalence remains unobserved."
+  ]
+}

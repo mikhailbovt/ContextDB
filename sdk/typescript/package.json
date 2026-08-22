@@ -1,0 +1,30 @@
+{
+  "name": "@contextdb/sdk",
+  "version": "0.1.0-alpha.1",
+  "description": "Dependency-light HTTP SDK and agent middleware for ContextDB",
+  "type": "module",
+  "sideEffects": false,
+  "files": ["dist", "examples", "README.md"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@noble/hashes": "1.8.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "license": "Apache-2.0"
+}

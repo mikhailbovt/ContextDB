@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/roadmap-gate-ledger/v1.json",
+  "title": "ContextDB roadmap gate ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "roadmap_revision", "status_vocabulary", "rules", "milestones"],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.roadmap-gate-ledger/v1"
+    },
+    "roadmap_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status_vocabulary": {
+      "type": "array",
+      "const": ["not_started", "in_progress", "blocked", "passed", "failed", "waived"]
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dependency_closure_required", "proof_required", "waiver_policy", "release_gate"],
+      "properties": {
+        "dependency_closure_required": {
+          "const": true
+        },
+        "proof_required": {
+          "const": true
+        },
+        "waiver_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "release_gate": {
+          "const": "M19"
+        }
+      }
+    },
+    "milestones": {
+      "type": "array",
+      "minItems": 20,
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/milestone"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyStringArray": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "milestone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "status",
+        "depends_on",
+        "objective",
+        "artifacts",
+        "tests",
+        "benchmarks",
+        "demo",
+        "exit_criteria",
+        "required_proof"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^M(?:[0-9]|1[0-9])$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": ["not_started", "in_progress", "blocked", "passed", "failed", "waived"]
+        },
+        "status_reason": {
+          "type": "string"
+        },
+        "depends_on": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^M(?:[0-9]|1[0-9])$"
+          }
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifacts": {
+          "$ref": "#/$defs/nonEmptyStringArray"
+        },
+        "tests": {
+          "$ref": "#/$defs/nonEmptyStringArray"
+        },
+        "benchmarks": {
+          "$ref": "#/$defs/nonEmptyStringArray"
+        },
+        "demo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exit_criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "text"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^M(?:[0-9]|1[0-9])-E[0-9]{2}$"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "enum": [
+                  "not_evaluated",
+                  "in_progress",
+                  "passed",
+                  "blocked",
+                  "failed"
+                ]
+              },
+              "evidence": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(?![A-Za-z]:|/|\\\\)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                }
+              },
+              "status_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "required_proof": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "path"],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "adr",
+                  "artifact_manifest",
+                  "benchmark_result",
+                  "ci_report",
+                  "conformance_report",
+                  "demo_log",
+                  "documentation",
+                  "release_manifest",
+                  "security_report",
+                  "test_report"
+                ]
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?![A-Za-z]:|/|\\\\)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+              },
+              "schema_id": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https://contextdb\\.dev/schemas/[a-z0-9-]+/v[0-9]+\\.json$"
+              }
+            }
+          }
+        },
+        "waiver": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["adr", "expires", "residual_risk"],
+          "properties": {
+            "adr": {
+              "type": "string",
+              "pattern": "^ADR-[0-9]{4}$"
+            },
+            "expires": {
+              "type": "string",
+              "format": "date"
+            },
+            "residual_risk": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "waived"
+              }
+            }
+          },
+          "then": {
+            "required": ["waiver", "status_reason"]
+          },
+          "else": {
+            "not": {
+              "required": ["waiver"]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "M19"
+              }
+            },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "not": {
+                  "const": "waived"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

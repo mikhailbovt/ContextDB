@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/clean-install-receipt/v1.json",
+  "title": "ContextDB clean-install receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "verifier_version",
+    "generated_at",
+    "profile",
+    "host_target",
+    "isolated_copy",
+    "verification",
+    "subject_artifacts",
+    "probes",
+    "passed",
+    "release_ready",
+    "docker_runtime_executed"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.clean-install-receipt/v1"
+    },
+    "verifier_version": {"$ref": "#/$defs/semver"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "profile": {
+      "enum": ["contract", "release"]
+    },
+    "host_target": {
+      "enum": [
+        "linux-x86-64",
+        "linux-arm64",
+        "macos-arm64",
+        "windows-x86-64",
+        "unsupported"
+      ]
+    },
+    "isolated_copy": {"const": true},
+    "verification": {
+      "type": "object",
+      "required": ["schema_version", "profile", "contract_valid", "release_ready"],
+      "properties": {
+        "schema_version": {
+          "const": "contextdb.release-verification-report/v1"
+        },
+        "profile": {"enum": ["contract", "release"]},
+        "contract_valid": {"type": "boolean"},
+        "release_ready": {"type": "boolean"}
+      }
+    },
+    "subject_artifacts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "sha256", "version"],
+        "properties": {
+          "id": {"$ref": "#/$defs/identifier"},
+          "path": {"$ref": "#/$defs/relativePath"},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "version": {"$ref": "#/$defs/semver"}
+        }
+      }
+    },
+    "probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "evidence_level", "argv"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["passed", "failed", "not-run"]},
+          "evidence_level": {"const": "runtime"},
+          "argv": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "detail": {"type": "string"},
+          "exit_code": {"type": "integer"},
+          "stdout_sha256": {"$ref": "#/$defs/sha256"},
+          "stderr_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "passed": {"type": "boolean"},
+    "release_ready": {"type": "boolean"},
+    "docker_runtime_executed": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"profile": {"const": "contract"}}},
+      "then": {"properties": {"release_ready": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"release_ready": {"const": true}}},
+      "then": {"properties": {"passed": {"const": true}}}
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

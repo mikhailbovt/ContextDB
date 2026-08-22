@@ -1,0 +1,30 @@
+{
+  "schema_version": "contextdb.portable-example/v1",
+  "fixture_id": "japan-bar-history",
+  "contains_synthetic_data_only": true,
+  "logical_archive": {
+    "path": "japan-bar.ctxb",
+    "format": "contextdb.logical.v1",
+    "size_bytes": 2839,
+    "sha256": "3e9af8c750eee85830bf666b1c041f6521f4c53ba46d94b3de3dee921d2172b0",
+    "blake3": "6fcab0b21e9dbaa2d06baed1da6be05c7ffb534f0d7eb93d695fdc1cac3b53ce",
+    "commit_seq": 1
+  },
+  "expected_doctor": {
+    "valid": true,
+    "commit_seq": 1,
+    "archive_digest": "6fcab0b21e9dbaa2d06baed1da6be05c7ffb534f0d7eb93d695fdc1cac3b53ce"
+  },
+  "security": {
+    "contains_private_key": false,
+    "contains_real_personal_data": false,
+    "contains_provider_credentials": false,
+    "external_token_key_required": true,
+    "automatic_key_persistence": false
+  },
+  "evidence_boundary": {
+    "windows_import_doctor_observed": true,
+    "required_platform_receipts_complete": false,
+    "release_ready": false
+  }
+}

@@ -1,0 +1,20 @@
+schema_version=contextdb.demo-log/v1
+milestone=M0
+generated_at=2026-08-12T13:26:44.321Z
+status=local_demo_passed
+
+command=cargo +1.97.1 run -p contextdb-cli --quiet -- --version
+exit_code=0
+stdout=contextdb 0.1.0-alpha.1
+
+command=cargo +1.97.1 run -p contextdb-example-embedded-rust --quiet
+exit_code=0
+stdout=ContextDB embedded reference example 0.1.0-alpha.1 at commit 0
+
+command=python .github/scripts/validate_governance.py .
+exit_code=0
+stdout=governance validation passed: 17 schemas, 20 milestones, 6 accepted ADRs, workflows and labels
+
+source_sha256.examples/embedded-rust/src/main.rs=9bb40096ed493d70e6508f546479cfc40d17fdc1cbd7ca1e736a79b747820b6c
+source_sha256..github/scripts/validate_governance.py=59ceff136dfb084513ea1f798373836fa98728c9aa22ad68f422ff4959c8b1d4
+limitation=All three local demo steps passed, but remote required-platform CI remains separate M0-E01 evidence.

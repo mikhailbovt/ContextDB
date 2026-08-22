@@ -1,0 +1,33 @@
+[package]
+name = "contextdb-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic M17 performance, scale, and operations benchmark harness for ContextDB"
+publish = false
+
+[[bin]]
+name = "contextdb-bench"
+path = "src/main.rs"
+
+[dependencies]
+blake3.workspace = true
+contextdb-core.workspace = true
+contextdb-graph.workspace = true
+contextdb-index = { workspace = true, features = ["ann-hnsw"] }
+contextdb-journal.workspace = true
+contextdb-storage.workspace = true
+contextdb-storage-fjall.workspace = true
+contextdb-storage-memory.workspace = true
+contextdb-storage-redb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

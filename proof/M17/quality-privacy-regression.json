@@ -1,0 +1,114 @@
+{
+  "schema_version": "contextdb.quality-privacy-regression/v1",
+  "milestone": "M17",
+  "generated_at": "2026-08-12T14:12:17Z",
+  "status": "partial_pass",
+  "decision": "nonwaivable_correctness_and_privacy_checks_passed_but_release_regression_gate_remains_open",
+  "optimization_under_test": {
+    "name": "streaming expected digest with bounded full-MVCC differential",
+    "reason": "The clone-on-write full-MVCC oracle retains a quadratic number of record copies and was unsafe at the ten-million-storage-record development scale.",
+    "candidate_mode": "streaming_with_bounded_mvcc_probe",
+    "candidate_records": 10000000,
+    "independent_full_mvcc_probe_records": 4096
+  },
+  "checks": [
+    {
+      "id": "logical-oracle-equivalence",
+      "source": "proof/M17/BENCH-H.json",
+      "metric": "correctness.oracle_digest_equal",
+      "expected": 1,
+      "observed": 1,
+      "passed": true
+    },
+    {
+      "id": "bounded-full-mvcc-differential",
+      "source": "proof/M17/BENCH-H.json",
+      "metric": "correctness.bounded_mvcc_differential_equal",
+      "expected": 1,
+      "observed": 1,
+      "passed": true
+    },
+    {
+      "id": "snapshot-rebuild-compaction-reopen-restore",
+      "source": "proof/M17/BENCH-H.json",
+      "metrics": [
+        "correctness.snapshot_consistent",
+        "correctness.rebuild_equal",
+        "correctness.compaction_preserved",
+        "correctness.reopen_preserved",
+        "correctness.restore_equal",
+        "correctness.journal_reopen_equal"
+      ],
+      "expected": "all equal 1",
+      "observed": "all equal 1",
+      "passed": true
+    },
+    {
+      "id": "acknowledged-durability",
+      "source": "proof/M17/BENCH-H.json",
+      "metric": "durability.synchronized_acknowledgement_bps",
+      "expected": 10000,
+      "observed": 10000,
+      "passed": true
+    },
+    {
+      "id": "privacy-no-influence",
+      "source": "docs/release/evidence/historical-m16/BENCH-G.json",
+      "expected": "9/9 cases pass with zero prohibited touches and bytes",
+      "observed": "9/9 cases pass; prohibited_touches=0; prohibited_bytes=0",
+      "passed": true
+    },
+    {
+      "id": "conversation-quality-social-calibration",
+      "source": "proof/M11/BENCH-A.json",
+      "expected": "all 18 published gates pass, sensitive leak zero",
+      "observed": "18/18 pass; sensitive_memory_leak=0; unsolicited_mention=0",
+      "passed": true
+    },
+    {
+      "id": "ann-exact-overlap-floor",
+      "source": "proof/M7/ann-quality.json",
+      "expected": "recall_at_10 >= 0.90",
+      "observed": "recall_at_10=0.925",
+      "passed": true
+    },
+    {
+      "id": "coding-quality-and-tool-use",
+      "source": "proof/M14/BENCH-F.json",
+      "expected": "full task accuracy >= 0.90 and fewer calls than frozen baseline",
+      "observed": "accuracy=1.0; ContextDB=5 calls; grep baseline=12 calls",
+      "passed": true
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "proof/M17/BENCH-H.json",
+      "sha256": "07559be38972a5c693e9711451b16490058b55d6dfc2ae3f87ec7a9a75cb21f4"
+    },
+    {
+      "path": "docs/release/evidence/historical-m16/BENCH-G.json",
+      "sha256": "c59fd5f66b4a8cf142aa3d633bbb89e0b17796f7245865e51a14efc370277fc9"
+    },
+    {
+      "path": "proof/M11/BENCH-A.json",
+      "sha256": "2e4ebf5c197c649b0520ea837c6155fdf6bcd033840c8a1cd3de97c2bc74f9cc"
+    },
+    {
+      "path": "proof/M7/ann-quality.json",
+      "sha256": "ffdcb0441667b55de11c02f7f3ff0a12a3ee1a91bb928dc2b459d90459057fbf"
+    },
+    {
+      "path": "proof/M14/BENCH-F.json",
+      "sha256": "403d45333264947a565bf9b5a7de47eb17a2182025c6c1222e108f42f3d41eb7"
+    }
+  ],
+  "limitations": [
+    "The ten-million-record BENCH-H run is Windows x86_64 native development evidence from a dirty tree, not a signed release candidate.",
+    "No prior qualifying release report was supplied to the implemented direction-aware comparator, so this is not a cross-release performance or quality verdict.",
+    "The ten-million workload is storage-shaped, has certification_node_count=0, and does not execute the full semantic graph, ANN, model, or multimodal stack at that scale.",
+    "The expected/actual bounded MVCC digest fields were reconstructed by rerunning only the deterministic 4096-record probe; the frozen 10M timing run was not repeated.",
+    "BENCH-C and BENCH-D currently have deterministic package-oracle evidence only; full real-provider Beta runs remain unmeasured.",
+    "M16 was not complete when BENCH-H ran, and the report correctly records m16_deep_scan_passed=false.",
+    "M17-E01, M17-E02, and M17-E03 remain open; this receipt does not certify a v1 release."
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "schema_version": "contextdb.storage-bakeoff-raw/v1",
+  "captured_at": "2026-08-12T08:51:12Z",
+  "commands": [
+    "cargo run --release --quiet -p contextdb-storage-bench -- 50000",
+    "cargo run --release --quiet --manifest-path crates/contextdb-storage-rocksdb-bench/Cargo.toml -- 50000"
+  ],
+  "repetitions": 3,
+  "environment": {
+    "os": "Windows 11 Pro 10.0.26200",
+    "architecture": "x86_64-pc-windows-msvc",
+    "cpu": "Intel Core Ultra 9 275HX",
+    "logical_cores": 24,
+    "memory_bytes": 68044750848,
+    "storage": "Samsung SSD 990 PRO 2TB NVMe",
+    "filesystem": "NTFS",
+    "rustc": "rustc 1.97.1",
+    "cargo": "cargo 1.97.1",
+    "profile": "release",
+    "native_benchmark_toolchain": "LLVM 22.1.8 + MSVC 14.51.36231"
+  },
+  "workload": {
+    "semantic_records": 50000,
+    "graph_records": 50000,
+    "value_bytes": 256,
+    "batch_records": 250,
+    "synced_commits": 200,
+    "point_reads": 50000,
+    "subject_prefix_scans": 64,
+    "graph_prefix_scans": 256,
+    "seed": 13870620500457160706
+  },
+  "runs": [
+    [
+      {"backend":"memory","batch_write_ns":2227122200,"point_reads_ns":20612000,"subject_prefix_scans_ns":23763500,"graph_prefix_scans_ns":63198200,"verify_ns":900,"checksum":6566008},
+      {"backend":"fjall-3.1.8","batch_write_ns":468892100,"point_reads_ns":53385800,"subject_prefix_scans_ns":22131700,"graph_prefix_scans_ns":18502200,"verify_ns":16765300,"checksum":6566008},
+      {"backend":"redb-4.1.0","batch_write_ns":2364951300,"point_reads_ns":70112600,"subject_prefix_scans_ns":8006600,"graph_prefix_scans_ns":27209300,"verify_ns":22700,"checksum":6566008},
+      {"backend":"rocksdb-0.24.0/librocksdb-10.4.2","batch_write_ns":519770000,"point_reads_ns":25120400,"subject_prefix_scans_ns":40111300,"graph_prefix_scans_ns":141238500,"verify_ns":70661300,"checksum":6566008}
+    ],
+    [
+      {"backend":"memory","batch_write_ns":2214642400,"point_reads_ns":21157600,"subject_prefix_scans_ns":24268400,"graph_prefix_scans_ns":70462900,"verify_ns":1000,"checksum":6566008},
+      {"backend":"fjall-3.1.8","batch_write_ns":474921200,"point_reads_ns":51582000,"subject_prefix_scans_ns":19076700,"graph_prefix_scans_ns":20899400,"verify_ns":25112900,"checksum":6566008},
+      {"backend":"redb-4.1.0","batch_write_ns":2525755900,"point_reads_ns":70052500,"subject_prefix_scans_ns":7970100,"graph_prefix_scans_ns":26078400,"verify_ns":12300,"checksum":6566008},
+      {"backend":"rocksdb-0.24.0/librocksdb-10.4.2","batch_write_ns":526426400,"point_reads_ns":25217200,"subject_prefix_scans_ns":39911300,"graph_prefix_scans_ns":145104500,"verify_ns":73857100,"checksum":6566008}
+    ],
+    [
+      {"backend":"memory","batch_write_ns":2056591600,"point_reads_ns":22989500,"subject_prefix_scans_ns":25240200,"graph_prefix_scans_ns":66743200,"verify_ns":1400,"checksum":6566008},
+      {"backend":"fjall-3.1.8","batch_write_ns":468360400,"point_reads_ns":49364000,"subject_prefix_scans_ns":15223100,"graph_prefix_scans_ns":16496700,"verify_ns":17961500,"checksum":6566008},
+      {"backend":"redb-4.1.0","batch_write_ns":2675925100,"point_reads_ns":73109100,"subject_prefix_scans_ns":8368800,"graph_prefix_scans_ns":26755500,"verify_ns":12100,"checksum":6566008},
+      {"backend":"rocksdb-0.24.0/librocksdb-10.4.2","batch_write_ns":517375000,"point_reads_ns":24851200,"subject_prefix_scans_ns":40758300,"graph_prefix_scans_ns":141325500,"verify_ns":72192700,"checksum":6566008}
+    ]
+  ],
+  "medians": [
+    {"backend":"memory","batch_write_ns":2214642400,"point_reads_ns":21157600,"subject_prefix_scans_ns":24268400,"graph_prefix_scans_ns":66743200,"verify_ns":1000,"checksum":6566008},
+    {"backend":"fjall-3.1.8","batch_write_ns":468892100,"point_reads_ns":51582000,"subject_prefix_scans_ns":19076700,"graph_prefix_scans_ns":18502200,"verify_ns":17961500,"checksum":6566008},
+    {"backend":"redb-4.1.0","batch_write_ns":2525755900,"point_reads_ns":70112600,"subject_prefix_scans_ns":8006600,"graph_prefix_scans_ns":26755500,"verify_ns":12300,"checksum":6566008},
+    {"backend":"rocksdb-0.24.0/librocksdb-10.4.2","batch_write_ns":519770000,"point_reads_ns":25120400,"subject_prefix_scans_ns":40111300,"graph_prefix_scans_ns":141325500,"verify_ns":72192700,"checksum":6566008}
+  ]
+}

@@ -1,0 +1,10 @@
+schema_version=contextdb.demo-log/v1
+milestone=M10
+generated_at=2026-08-22T08:39:13.939Z
+status=package_demo_passed
+command=cargo +1.97.1 test -p contextdb-cognition deterministic_post_turn_baseline_prefers_noop_and_extracts_explicit_signals -- --nocapture
+exit_code=0
+result=1 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out
+observed=The deterministic post-turn baseline selected no-op for irrelevant material and extracted only explicit supported signals.
+source_sha256.crates/contextdb-cognition/src/tests.rs=a4254b4b70416011e7bb240e46466d5553e06c72da6dffe4445c95041ee39798
+limitation=The targeted demo is deterministic package evidence; the full labelled precision/recall write benchmark remains observation-only.

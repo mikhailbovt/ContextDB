@@ -1,0 +1,23 @@
+{
+  "schema_version": "contextdb.security-report/v1",
+  "milestone": "M12",
+  "generated_at": "2026-08-12T13:18:44.813Z",
+  "status": "package_conformance_passed",
+  "subject": "recipient-authorized model handoff and lifecycle isolation",
+  "command": "cargo +1.97.1 test -p contextdb-continuity --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 25, "failed": 0},
+  "tests": [
+    {"name": "agent_private_handoff_is_rejected_before_any_provider_access", "result": "passed"},
+    {"name": "handoff_policy_denial_happens_before_any_provider_access", "result": "passed"},
+    {"name": "recipient_denied_raw_evidence_cannot_affect_handoff_output", "result": "passed"},
+    {"name": "handoff_rebuilds_from_recipient_authorized_sources_and_has_expiry_manifest", "result": "passed"},
+    {"name": "property_forbidden_handoff_payload_is_output_invariant", "result": "passed"},
+    {"name": "model_lineage_rejects_policy_weakening", "result": "passed"}
+  ],
+  "source_sha256": {"crates/contextdb-continuity/src/tests.rs": "c03091365b076358aa3b92460474e4b1babb60bb3a0ec256cc025ee81fda918a"},
+  "limitations": [
+    "Isolation was tested in process with deterministic providers and does not establish transport or operating-system tenant isolation.",
+    "The transfer manifest is hashed by the package contract; production signing/key-custody evidence is not part of this receipt."
+  ]
+}

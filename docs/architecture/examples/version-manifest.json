@@ -1,0 +1,61 @@
+{
+  "schema_version": "contextdb.version-manifest/v1",
+  "product_version": "0.1.0-alpha.1",
+  "release_channel": "development",
+  "source": {
+    "git_commit": "0000000000000000000000000000000000000000",
+    "dirty": true,
+    "repository": "https://github.com/mikhailbovt/ContextDB",
+    "rfc_revision": "RFC-0001-v0.3",
+    "errata": [
+      "ERRATA-0001"
+    ],
+    "adrs": [
+      "ADR-0001",
+      "ADR-0002",
+      "ADR-0003",
+      "ADR-0004",
+      "ADR-0005"
+    ]
+  },
+  "build": {
+    "timestamp": "2026-08-12T00:00:00Z",
+    "rustc": "rustc 1.97.1",
+    "cargo": "cargo 1.97.1",
+    "target": "x86_64-unknown-linux-gnu",
+    "profile": "dev",
+    "reproducible": false,
+    "builder": "documentation-example"
+  },
+  "formats": {
+    "logical_record": {
+      "writer": 0,
+      "read_min": 0,
+      "read_max": 0,
+      "required_features": []
+    },
+    "portable_archive": {
+      "writer": 0,
+      "read_min": 0,
+      "read_max": 0,
+      "required_features": []
+    },
+    "protobuf_api": {
+      "writer": 0,
+      "read_min": 0,
+      "read_max": 0,
+      "required_features": []
+    }
+  },
+  "feature_profile": "embedded-minimal",
+  "features": [],
+  "storage_backend": {
+    "name": "memory",
+    "version": "0",
+    "configuration_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "migration": {
+    "applied": [],
+    "rollback_supported": true
+  }
+}

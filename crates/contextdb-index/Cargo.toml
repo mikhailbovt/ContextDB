@@ -1,0 +1,33 @@
+[package]
+name = "contextdb-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Policy-safe rebuildable lexical, vector, ANN, and artifact projections for ContextDB"
+
+[features]
+default = []
+lexical-tantivy = ["dep:tantivy"]
+ann-hnsw = ["dep:contextdb-storage"]
+
+[dependencies]
+blake3.workspace = true
+contextdb-core.workspace = true
+contextdb-storage = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+tantivy = { version = "0.27.0", git = "https://github.com/quickwit-oss/tantivy", rev = "1f32c1a8af0eb9d68bd3f5576caf20941364b657", default-features = false, optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+contextdb-storage-memory.workspace = true
+contextdb-storage-redb.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

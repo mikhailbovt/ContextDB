@@ -1,0 +1,23 @@
+{
+  "schema_version": "contextdb.security-report/v1",
+  "milestone": "M10",
+  "generated_at": "2026-08-22T08:39:13.939Z",
+  "status": "package_conformance_passed",
+  "subject": "write-pipeline poisoning resistance and evidence lineage",
+  "command": "cargo +1.97.1 test -p contextdb-cognition --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 26, "failed": 0},
+  "tests": [
+    {"name": "hallucinated_and_wrong_hash_evidence_are_rejected_before_resolution", "result": "passed"},
+    {"name": "prompt_injection_cannot_create_boundary_authority", "result": "passed"},
+    {"name": "repeated_mirror_sources_do_not_fake_corroboration", "result": "passed"},
+    {"name": "self_reference_and_derived_only_evidence_are_rejected", "result": "passed"},
+    {"name": "validated_model_output_is_digest_bound_and_has_no_commit_capability", "result": "passed"},
+    {"name": "unauthorized_catalog_entries_have_zero_influence", "result": "passed"}
+  ],
+  "source_sha256": {"crates/contextdb-cognition/src/tests.rs": "a4254b4b70416011e7bb240e46466d5553e06c72da6dffe4445c95041ee39798"},
+  "limitations": [
+    "This package suite does not replace a full repository security scan or live provider red-team exercise.",
+    "Statistical poisoning rates on a public labelled corpus remain unmeasured."
+  ]
+}

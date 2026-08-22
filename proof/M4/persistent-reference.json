@@ -1,0 +1,24 @@
+{
+  "schema_version": "contextdb.conformance-report/v1",
+  "milestone": "M4",
+  "generated_at": "2026-08-22T08:39:37.618Z",
+  "status": "package_conformance_passed",
+  "command": "cargo +1.97.1 test -p contextdb-graph --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 26, "failed": 0, "ignored": 0},
+  "checks": {
+    "persistent_traversal_matches_reference_oracle": true,
+    "stable_external_and_dense_ids_survive_revision_compaction": true,
+    "bitemporal_conflicts_and_artifacts_are_snapshot_consistent": true,
+    "journal_projection_is_atomic_and_replay_safe": true,
+    "redb_reopen_preserves_public_graph": true
+  },
+  "source_sha256": {
+    "crates/contextdb-graph/src/lib.rs": "5706a845e29fb51700d698fdc3dcc6516716c5ba73f3f7c4fe0d2e606ba5dd06",
+    "crates/contextdb-graph/tests/persistent_graph.rs": "09ccb1f76589837f566c20adb69fbc936b9ec780486d1aaa18a2b0ec9f7e54f6"
+  },
+  "limitations": [
+    "The differential suite is deterministic and package-scoped; it is not the roadmap's million-scale workload.",
+    "Only the local Windows test profile was observed."
+  ]
+}

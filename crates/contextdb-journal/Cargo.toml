@@ -1,0 +1,28 @@
+[package]
+name = "contextdb-journal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Durable semantic journal, commit coordination, replay, recovery, and atomic outbox"
+
+[dependencies]
+blake3.workspace = true
+contextdb-core.workspace = true
+contextdb-format.workspace = true
+contextdb-storage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+contextdb-storage-fault.workspace = true
+contextdb-storage-memory.workspace = true
+contextdb-storage-redb.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

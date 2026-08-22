@@ -1,0 +1,30 @@
+[package]
+name = "contextdb-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[[bin]]
+name = "record_envelope"
+path = "fuzz_targets/record_envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "security_envelope"
+path = "fuzz_targets/security_envelope.rs"
+test = false
+doc = false
+bench = false
+
+[dependencies]
+libfuzzer-sys = "0.4.10"
+contextdb-format = { path = "../crates/contextdb-format" }
+contextdb-security = { path = "../crates/contextdb-security" }
+serde_json = "1.0.151"
+
+[workspace]

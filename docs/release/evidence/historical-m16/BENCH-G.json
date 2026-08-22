@@ -1,0 +1,20 @@
+{
+  "schema": "contextdb.bench-g.v1",
+  "dataset_digest": "56e6bada80858ab5d7103c75810777984ceea4393f02e5d5059e27bd63597f84",
+  "cases": [
+    { "case_id": "bench-g:0:UserPrivateVsShared", "scenario": "user_private_vs_shared", "candidates_invariant": true, "ranking_invariant": true, "summary_invariant": true, "evidence_invariant": true, "strict_no_touch": true, "timing_within_budget": true, "passed": true },
+    { "case_id": "bench-g:1:PairwiseVsTeam", "scenario": "pairwise_vs_team", "candidates_invariant": true, "ranking_invariant": true, "summary_invariant": true, "evidence_invariant": true, "strict_no_touch": true, "timing_within_budget": true, "passed": true },
+    { "case_id": "bench-g:2:RevokedConsent", "scenario": "revoked_consent", "candidates_invariant": true, "ranking_invariant": true, "summary_invariant": true, "evidence_invariant": true, "strict_no_touch": true, "timing_within_budget": true, "passed": true },
+    { "case_id": "bench-g:3:DoNotMention", "scenario": "do_not_mention", "candidates_invariant": true, "ranking_invariant": true, "summary_invariant": true, "evidence_invariant": true, "strict_no_touch": true, "timing_within_budget": true, "passed": true },
+    { "case_id": "bench-g:4:LocalOnly", "scenario": "local_only", "candidates_invariant": true, "ranking_invariant": true, "summary_invariant": true, "evidence_invariant": true, "strict_no_touch": true, "timing_within_budget": true, "passed": true },
+    { "case_id": "bench-g:5:HardDelete", "scenario": "hard_delete", "candidates_invariant": true, "ranking_invariant": true, "summary_invariant": true, "evidence_invariant": true, "strict_no_touch": true, "timing_within_budget": true, "passed": true },
+    { "case_id": "bench-g:6:BackupLineage", "scenario": "backup_lineage", "candidates_invariant": true, "ranking_invariant": true, "summary_invariant": true, "evidence_invariant": true, "strict_no_touch": true, "timing_within_budget": true, "passed": true },
+    { "case_id": "bench-g:7:ExportSubset", "scenario": "export_subset", "candidates_invariant": true, "ranking_invariant": true, "summary_invariant": true, "evidence_invariant": true, "strict_no_touch": true, "timing_within_budget": true, "passed": true },
+    { "case_id": "bench-g:8:MaliciousSource", "scenario": "malicious_source", "candidates_invariant": true, "ranking_invariant": true, "summary_invariant": true, "evidence_invariant": true, "strict_no_touch": true, "timing_within_budget": true, "passed": true }
+  ],
+  "total_cases": 9,
+  "passed_cases": 9,
+  "prohibited_touches": 0,
+  "prohibited_bytes": 0,
+  "passed": true
+}

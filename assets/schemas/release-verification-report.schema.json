@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-verification-report/v1.json",
+  "title": "ContextDB release bundle verification report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "verifier_version",
+    "profile",
+    "release_version",
+    "release_channel",
+    "outcome",
+    "contract_valid",
+    "release_ready",
+    "summary",
+    "checks",
+    "issues",
+    "unresolved_gates",
+    "evidence_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-verification-report/v1"
+    },
+    "verifier_version": {"$ref": "#/$defs/semver"},
+    "profile": {
+      "enum": ["contract", "release"]
+    },
+    "release_version": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+        }
+      ]
+    },
+    "release_channel": {
+      "oneOf": [
+        {"type": "null"},
+        {"enum": ["development", "alpha", "beta", "stable"]}
+      ]
+    },
+    "outcome": {
+      "enum": ["failed", "contract_valid", "release_ready"]
+    },
+    "contract_valid": {
+      "type": "boolean"
+    },
+    "release_ready": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["errors", "warnings"],
+      "properties": {
+        "errors": {"type": "integer", "minimum": 0},
+        "warnings": {"type": "integer", "minimum": 0}
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "detail"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["passed", "evaluated", "failed", "warning"]},
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "code", "message", "context"],
+        "properties": {
+          "severity": {"enum": ["error", "warning"]},
+          "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
+          "message": {"type": "string", "minLength": 1},
+          "context": {
+            "oneOf": [{"type": "null"}, {"type": "string", "minLength": 1}]
+          }
+        }
+      }
+    },
+    "unresolved_gates": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "evidence_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_profile_is_release_proof",
+        "release_profile_requires_production_signatures",
+        "docker_runtime_executed_by_verifier",
+        "publication_receipts_cryptographically_bound",
+        "publication_live_retrieval_performed"
+      ],
+      "properties": {
+        "contract_profile_is_release_proof": {"const": false},
+        "release_profile_requires_production_signatures": {"const": true},
+        "docker_runtime_executed_by_verifier": {"const": false},
+        "publication_receipts_cryptographically_bound": {"const": true},
+        "publication_live_retrieval_performed": {"const": false}
+      }
+    }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"profile": {"const": "contract"}}},
+      "then": {"properties": {"release_ready": {"const": false}}}
+    },
+    {
+      "if": {"properties": {"release_ready": {"const": true}}},
+      "then": {
+        "properties": {
+          "profile": {"const": "release"},
+          "contract_valid": {"const": true},
+          "outcome": {"const": "release_ready"}
+        }
+      }
+    }
+  ]
+}

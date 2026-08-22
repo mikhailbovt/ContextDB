@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/m16-security-gates/v1.json",
+  "title": "ContextDB M16 security gates receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "milestone",
+    "generated_at",
+    "status",
+    "frozen_inputs",
+    "source_manifest",
+    "codex_security",
+    "scan",
+    "findings",
+    "gates",
+    "supply_chain",
+    "unsafe_review",
+    "artifacts",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.m16-security-gates/v1"
+    },
+    "milestone": {
+      "const": "M16"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/status"
+    },
+    "frozen_inputs": {
+      "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/frozenInputs"
+    },
+    "source_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "row_format", "sort", "file_count", "sha256", "files"],
+      "properties": {
+        "algorithm": {
+          "const": "sha256"
+        },
+        "row_format": {
+          "const": "path<TAB>sha256<LF>"
+        },
+        "sort": {
+          "const": "utf8_path_bytes_ascending"
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/sha256"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/artifact"
+          }
+        }
+      }
+    },
+    "codex_security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scan_id",
+        "snapshot_digest",
+        "scan_manifest",
+        "findings",
+        "coverage"
+      ],
+      "properties": {
+        "scan_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "snapshot_digest": {
+          "type": "string",
+          "pattern": "^codex-security-snapshot/v1:sha256:[0-9a-f]{64}$"
+        },
+        "scan_manifest": {
+          "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/artifact"
+        },
+        "findings": {
+          "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/artifact"
+        },
+        "coverage": {
+          "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/artifact"
+        }
+      }
+    },
+    "scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "started_at", "finished_at", "command", "exit_code", "completed"],
+      "properties": {
+        "profile": {
+          "const": "deep"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "completed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "informational",
+        "unresolved_critical",
+        "unresolved_high",
+        "unresolved_high_critical"
+      ],
+      "properties": {
+        "critical": {"type": "integer", "minimum": 0},
+        "high": {"type": "integer", "minimum": 0},
+        "medium": {"type": "integer", "minimum": 0},
+        "low": {"type": "integer", "minimum": 0},
+        "informational": {"type": "integer", "minimum": 0},
+        "unresolved_critical": {"type": "integer", "minimum": 0},
+        "unresolved_high": {"type": "integer", "minimum": 0},
+        "unresolved_high_critical": {"type": "integer", "minimum": 0}
+      }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/check"
+      }
+    },
+    "supply_chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cargo_audit_passed", "cargo_deny_passed", "passed"],
+      "properties": {
+        "cargo_audit_passed": {"type": "boolean"},
+        "cargo_deny_passed": {"type": "boolean"},
+        "passed": {"type": "boolean"}
+      }
+    },
+    "unsafe_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rust_unsafe_code_tokens", "reviewed_files", "passed"],
+      "properties": {
+        "rust_unsafe_code_tokens": {"type": "integer", "minimum": 0},
+        "reviewed_files": {"type": "integer", "minimum": 0},
+        "passed": {"type": "boolean"}
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/artifact"
+      }
+    },
+    "limitations": {
+      "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/limitations"
+    }
+  }
+}

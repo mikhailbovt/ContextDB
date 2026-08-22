@@ -1,0 +1,39 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "c972c7c0-30f9-4498-9084-4065543d342c",
+  "started_at": "2026-08-22T08:39:34.765Z",
+  "finished_at": "2026-08-22T08:39:37.618Z",
+  "status": "observation_only",
+  "benchmark": {
+    "id": "BENCH-0401",
+    "family": "BENCH-H",
+    "name": "M4 persistent graph package observation",
+    "version": "1",
+    "dataset_version": "persistent-graph-tests-v1",
+    "scenario": "reference differential, policy, snapshots, compaction and redb reopen",
+    "tier": "package-conformance-not-million-scale"
+  },
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1", "product_version": "0.1.0-alpha.1", "release_channel": "development",
+      "source": {"git_commit": "99d6a6d6a15835ca8c06c0602c9b13982529e3e7", "dirty": true, "rfc_revision": "RFC-0001-v0.3", "errata": ["ERRATA-0001"], "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]},
+      "build": {"timestamp": "2026-08-22T08:39:34.765Z", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "target": "x86_64-pc-windows-msvc", "profile": "test", "reproducible": false, "builder": "local-proof-refresh"},
+      "formats": {"logical_record": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": []}},
+      "feature_profile": "research", "features": ["local-package-conformance"]
+    },
+    "version_manifest_sha256": "1ad1fad3562b70782369b92a9ce9389c9285c2de179b2862794517cd4831ebda"
+  },
+  "environment": {"os": "Microsoft Windows NT", "os_version": "10.0.26200.0", "architecture": "x86_64", "cpu": "Intel(R) Core(TM) Ultra 9 275HX", "logical_cores": 24, "memory_bytes": 68044750848, "storage": "local NVMe SSD", "filesystem": "NTFS", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "storage_backend": "redb-and-memory-test-fixtures", "storage_backend_version": "0.1.0-alpha.1", "build_profile": "test"},
+  "configuration": {"seed": 0, "features": ["local-package-conformance"], "budgets": {}, "parameters": {"command": "cargo +1.97.1 test -p contextdb-graph --no-fail-fast --quiet", "exit_code": 0, "claim_scope": "package tests; million-node workload absent"}, "index_watermarks": {}},
+  "metrics": [
+    {"name": "graph.tests_passed", "unit": "tests", "direction": "informational", "observed": 26},
+    {"name": "graph.command_elapsed", "unit": "milliseconds", "direction": "informational", "observed": 2853.420},
+    {"name": "graph.million_scale_runs", "unit": "runs", "direction": "informational", "observed": 0}
+  ],
+  "artifacts": [{"kind": "test-source", "uri": "crates/contextdb-graph/tests/persistent_graph.rs", "sha256": "09ccb1f76589837f566c20adb69fbc936b9ec780486d1aaa18a2b0ec9f7e54f6"}],
+  "limitations": [
+    "No million-node graph workload was run; this required M4 scale gate remains incomplete.",
+    "Elapsed time is Cargo test process time and must not be interpreted as query latency.",
+    "No current/historical latency or compaction throughput floor is claimed."
+  ]
+}

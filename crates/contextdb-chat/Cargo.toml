@@ -1,0 +1,38 @@
+[package]
+name = "contextdb-chat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Persistent conversational-memory middleware and BENCH-A harness for ContextDB"
+
+[features]
+default = []
+service-adapter = ["dep:contextdb-service"]
+
+[dependencies]
+blake3.workspace = true
+contextdb-cognition.workspace = true
+contextdb-context.workspace = true
+contextdb-core.workspace = true
+contextdb-format.workspace = true
+contextdb-journal.workspace = true
+contextdb-recall.workspace = true
+contextdb-reference.workspace = true
+contextdb-service = { workspace = true, optional = true }
+contextdb-storage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+contextdb-storage-memory.workspace = true
+contextdb-storage-redb.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,187 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "019ff4a7-bd0e-7140-b8ec-fc5c2fdd3073",
+  "started_at": "2026-08-12T09:44:22.573Z",
+  "finished_at": "2026-08-12T09:44:36.073Z",
+  "status": "passed",
+  "benchmark": {
+    "id": "BENCH-0014",
+    "family": "BENCH-F",
+    "name": "Six-Month Repository Memory deterministic Go reference vertical",
+    "version": "1",
+    "dataset_version": "rift-go-six-month-v1",
+    "scenario": "rename-move-algorithm-transition-rationale-history-preflight",
+    "tier": "m14-reference-correctness"
+  },
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1",
+      "product_version": "0.1.0-alpha.1",
+      "release_channel": "development",
+      "source": {
+        "git_commit": "0000000000000000000000000000000000000000",
+        "dirty": true,
+        "repository": "https://github.com/mikhailbovt/ContextDB",
+        "rfc_revision": "RFC-0001-v0.3",
+        "errata": ["ERRATA-0001"],
+        "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]
+      },
+      "build": {
+        "timestamp": "2026-08-12T09:44:36.073Z",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "target": "x86_64-pc-windows-msvc",
+        "profile": "release",
+        "reproducible": false,
+        "builder": "local-m14-bench-f"
+      },
+      "formats": {
+        "logical_record": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": []},
+        "code_domain": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["code-domain-pack"]}
+      },
+      "feature_profile": "research",
+      "features": ["code-domain-pack", "go-compiler-index", "git-history", "ci-preflight"],
+      "storage_backend": {
+        "name": "in-memory-code-fixture",
+        "version": "contextdb-domain-code-v1"
+      }
+    },
+    "version_manifest_sha256": "759f69ff7412bd0912ad43e1c12f594968b7775b8920f07212579702533bb53a"
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Pro",
+    "os_version": "10.0.26200",
+    "kernel": "Windows NT",
+    "architecture": "x86_64",
+    "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+    "logical_cores": 24,
+    "memory_bytes": 68044750848,
+    "storage": "WD_BLACK SN850X 4000GB NVMe SSD",
+    "filesystem": "NTFS",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "storage_backend": "in-memory-code-fixture",
+    "storage_backend_version": "contextdb-domain-code-v1",
+    "storage_configuration_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "build_profile": "release"
+  },
+  "configuration": {
+    "seed": 1,
+    "features": ["code-domain-pack", "git-history", "go-compiler-index", "ci-preflight", "portable-archive"],
+    "budgets": {
+      "max_relation_visits": 32,
+      "full_exploratory_tool_calls": 5,
+      "latency_iterations": 501
+    },
+    "parameters": {
+      "monthly_snapshots": 6,
+      "labelled_tasks": 10,
+      "quality_floor": 0.9,
+      "baseline_margin_floor": 0.2,
+      "baselines": "no-memory,grep-tool,lexical,bag-of-words-vector,reduced-feature"
+    },
+    "index_watermarks": {
+      "repository_snapshot": 6,
+      "compiler_index": 6,
+      "ci_snapshot": 6
+    }
+  },
+  "metrics": [
+    {
+      "name": "bench_f.full_task_accuracy",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 1.0,
+      "threshold": {"operator": "gte", "value": 0.9},
+      "passed": true
+    },
+    {
+      "name": "bench_f.quality_margin_over_best_baseline",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 0.30000000000000004,
+      "threshold": {"operator": "gte", "value": 0.2},
+      "passed": true
+    },
+    {
+      "name": "bench_f.exact_symbol_accuracy",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 1.0
+    },
+    {
+      "name": "bench_f.evidence_location_accuracy",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 1.0
+    },
+    {
+      "name": "bench_f.temporal_correctness",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 1.0
+    },
+    {
+      "name": "bench_f.regression_preflight_recall",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 1.0
+    },
+    {
+      "name": "bench_f.full_exploratory_tool_calls",
+      "unit": "calls",
+      "direction": "lower_is_better",
+      "observed": 5,
+      "threshold": {"operator": "lte", "value": 5},
+      "passed": true
+    },
+    {
+      "name": "bench_f.grep_exploratory_tool_calls",
+      "unit": "calls",
+      "direction": "informational",
+      "observed": 12
+    },
+    {
+      "name": "bench_f.query_median",
+      "unit": "nanoseconds",
+      "direction": "informational",
+      "observed": 5600
+    }
+  ],
+  "quality_gates": [
+    {
+      "gate_id": "M14-E01",
+      "metric": "bench_f.full_task_accuracy",
+      "passed": true,
+      "note": "All ten exact location, history, rename/move, rationale, unknown, test, impact, CI, and hierarchy tasks passed."
+    },
+    {
+      "gate_id": "M14-E03",
+      "metric": "bench_f.quality_margin_over_best_baseline",
+      "passed": true,
+      "note": "Full quality was 1.0 versus 0.7 for the strongest reduced-feature baseline; five exploratory calls versus eight."
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "raw-result",
+      "uri": "docs/benchmarks/results/m14-bench-f-windows-2026-08-12.raw.json",
+      "sha256": "8100f8acd132c4e09c336beeae810da8e2b24e4c3569007ab48e52a268ff32ae"
+    },
+    {
+      "kind": "version-manifest",
+      "uri": "docs/benchmarks/results/m14-bench-f-windows-2026-08-12.version.json",
+      "sha256": "759f69ff7412bd0912ad43e1c12f594968b7775b8920f07212579702533bb53a"
+    },
+    {
+      "kind": "benchmark-source",
+      "uri": "crates/contextdb-domain-code/examples/bench_f.rs",
+      "sha256": "dcecfdb103576ca73885111434e08e0c97139150c990675d0386b62c0a2da410"
+    }
+  ],
+  "limitations": [
+    "This is the deterministic M14 reference correctness tier; M17 owns official-server scale, concurrency, and latency certification.",
+    "The Go fixture is synthetic and labelled, with six monthly snapshots; it does not claim that the frozen baseline scores generalize to external tools or models.",
+    "The vector baseline is an executable bag-of-words cosine route, not a hosted embedding model."
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "status": "sufficient",
+  "selected": [
+    "situation:japan-bar",
+    "fact:hypothetical",
+    "preference:atmosphere",
+    "boundary:short-menu",
+    "unknown:budget",
+    "unknown:location"
+  ],
+  "section_counts": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    2
+  ],
+  "evidence": [
+    "evidence:boundary",
+    "evidence:preference",
+    "evidence:status"
+  ],
+  "directives": [
+    [
+      "boundary:short-menu",
+      "constraint_only"
+    ],
+    [
+      "fact:hypothetical",
+      "mention_naturally"
+    ],
+    [
+      "preference:atmosphere",
+      "style_only"
+    ],
+    [
+      "situation:japan-bar",
+      "mention_naturally"
+    ],
+    [
+      "unknown:budget",
+      "mention_naturally"
+    ],
+    [
+      "unknown:location",
+      "mention_naturally"
+    ]
+  ],
+  "missing_facets": [],
+  "unresolved_conflicts": 0,
+  "rendered_tokens": 2541,
+  "canonical_digest": "75c8826c7385f1f9831d12addd96898e6f8df92dab8fdd0c8299fcd94d6eef17"
+}

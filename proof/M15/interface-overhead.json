@@ -1,0 +1,30 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "b4566495-edf3-4bcd-8cfc-edefcf02374d",
+  "started_at": "2026-08-22T09:02:46.103Z",
+  "finished_at": "2026-08-22T09:02:57.675Z",
+  "status": "observation_only",
+  "benchmark": {"id": "BENCH-1501", "family": "BENCH-H", "name": "M15 interface conformance process observation", "version": "1", "dataset_version": "canonical-interface-fixtures-v1", "scenario": "embedded, HTTP, gRPC, MCP, archive, stream and compatibility tests", "tier": "conformance-not-overhead-benchmark"},
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1", "product_version": "0.1.0-alpha.1", "release_channel": "development",
+      "source": {"git_commit": "99d6a6d6a15835ca8c06c0602c9b13982529e3e7", "dirty": true, "rfc_revision": "RFC-0001-v0.3", "errata": ["ERRATA-0001"], "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]},
+      "build": {"timestamp": "2026-08-22T09:02:46.103Z", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "target": "x86_64-pc-windows-msvc", "profile": "test", "reproducible": false, "builder": "local-proof-refresh"},
+      "formats": {"logical_record": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": []}}, "feature_profile": "research", "features": ["local-package-conformance"]
+    },
+    "version_manifest_sha256": "6a6fffcf8b8d7d7c422bbb9c88d77f58a7445776f06272f39d9953cef1fed486"
+  },
+  "environment": {"os": "Microsoft Windows NT", "os_version": "10.0.26200.0", "architecture": "x86_64", "cpu": "Intel(R) Core(TM) Ultra 9 275HX", "logical_cores": 24, "memory_bytes": 68044750848, "storage": "local NVMe SSD", "filesystem": "NTFS", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "storage_backend": "in-process-reference-service", "storage_backend_version": "0.1.0-alpha.1", "build_profile": "test"},
+  "configuration": {"seed": 0, "features": ["local-package-conformance", "real-cli-subprocess"], "budgets": {}, "parameters": {"command": "CONTEXTDB_CONFORMANCE_CLI=target/debug/contextdb.exe cargo +1.97.1 test -p contextdb-conformance --locked --no-fail-fast", "exit_code": 0, "claim_scope": "conformance tests including real CLI; no criterion or throughput runner"}, "index_watermarks": {}},
+  "metrics": [
+    {"name": "interfaces.tests_passed", "unit": "tests", "direction": "informational", "observed": 24},
+    {"name": "interfaces.command_elapsed", "unit": "milliseconds", "direction": "informational", "observed": 11571.798},
+    {"name": "interfaces.overhead_benchmark_runs", "unit": "runs", "direction": "informational", "observed": 0}
+  ],
+  "artifacts": [{"kind": "test-source", "uri": "crates/contextdb-conformance/src/tests.rs", "sha256": "9166f230c5c04a9b5ee737e2bc6d2d6ded3deb940c9063c817ec8227d1d6132a"}],
+  "limitations": [
+    "No embedded-vs-HTTP-vs-gRPC latency or streaming-throughput benchmark runner was executed.",
+    "Elapsed time is Cargo suite time and cannot be interpreted as interface overhead.",
+    "The real CLI subprocess was exercised for correctness, but CLI process overhead and external SDK overhead were not measured."
+  ]
+}

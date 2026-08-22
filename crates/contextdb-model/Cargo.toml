@@ -1,0 +1,23 @@
+[package]
+name = "contextdb-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Provider-neutral model capability runtime for ContextDB"
+
+[dependencies]
+blake3.workspace = true
+contextdb-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

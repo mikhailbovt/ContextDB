@@ -1,0 +1,490 @@
+name: Non-publishing release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Candidate policy stage; this does not publish or pass a gate
+        required: true
+        type: choice
+        options:
+          - alpha
+          - beta
+          - stable
+        default: alpha
+      version:
+        description: Exact semantic version expected from the candidate binary
+        required: true
+        type: string
+        default: 0.1.0-alpha.1
+      source_date_epoch:
+        description: Fixed UTC epoch used for deterministic candidate metadata
+        required: true
+        type: string
+        default: "1786579200"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "release-candidate-${{ github.ref }}-${{ inputs.stage }}"
+  cancel-in-progress: false
+
+jobs:
+  release-contracts:
+    name: Fail-closed release contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install pinned Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned release verifier dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check --no-input
+          -r tools/contextdb-release/requirements.txt
+      - name: Validate workflow inputs
+        env:
+          CANDIDATE_STAGE: "${{ inputs.stage }}"
+          CANDIDATE_VERSION: "${{ inputs.version }}"
+          SOURCE_DATE_EPOCH: "${{ inputs.source_date_epoch }}"
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          semver = re.compile(
+              r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+              r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+          )
+          version = os.environ["CANDIDATE_VERSION"]
+          stage = os.environ["CANDIDATE_STAGE"]
+          assert semver.fullmatch(version)
+          workspace = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))
+          assert workspace["workspace"]["package"]["version"] == version
+          prerelease = version.split("+", 1)[0].partition("-")[2]
+          if stage == "stable":
+              assert not prerelease, "stable candidate must not use a prerelease version"
+          else:
+              assert prerelease.split(".", 1)[0] == stage
+          epoch = os.environ["SOURCE_DATE_EPOCH"]
+          assert epoch.isascii() and epoch.isdigit() and int(epoch) >= 315532800
+          PY
+      - name: Run all release contract tests
+        run: python -m unittest discover -s tools/contextdb-release/tests -v
+      - name: Audit source/package inventory without promotion
+        run: >-
+          python tools/contextdb-release/contextdb_release.py audit-source
+          --repo-root . --matrix release/package-matrix.json
+          --report target/release-source-audit.json
+      - name: Report unresolved stage gates without changing them
+        run: >-
+          python tools/contextdb-release/contextdb_release.py readiness-report
+          --repo-root . --ledger docs/roadmap/gates.json
+          --matrix release/package-matrix.json --stage "${{ inputs.stage }}"
+          --report target/release-readiness.json
+
+  native-candidate-inputs:
+    name: "Candidate inputs ${{ matrix.platform }} (${{ matrix.tier }})"
+    needs: release-contracts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86-64
+            rust_target: x86_64-unknown-linux-gnu
+            tier: required
+            experimental: false
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            rust_target: aarch64-unknown-linux-gnu
+            tier: required
+            experimental: false
+          - os: macos-14
+            platform: macos-arm64
+            rust_target: aarch64-apple-darwin
+            tier: required
+            experimental: false
+          - os: windows-2025
+            platform: windows-x86-64
+            rust_target: x86_64-pc-windows-msvc
+            tier: best-effort
+            experimental: true
+    runs-on: "${{ matrix.os }}"
+    continue-on-error: "${{ matrix.experimental }}"
+    timeout-minutes: 60
+    env:
+      CANDIDATE_PLATFORM: "${{ matrix.platform }}"
+      CANDIDATE_RUST_TARGET: "${{ matrix.rust_target }}"
+      CANDIDATE_STAGE: "${{ inputs.stage }}"
+      CANDIDATE_VERSION: "${{ inputs.version }}"
+      SOURCE_DATE_EPOCH: "${{ inputs.source_date_epoch }}"
+      PYO3_PYTHON: python
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install pinned Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned candidate tooling
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --no-input \
+            -r tools/contextdb-release/requirements.txt maturin==1.10.2
+          cargo install cargo-cyclonedx --locked --version 0.5.9
+      - name: Report native builder identity
+        shell: bash
+        run: |
+          python --version
+          rustc -vV
+          cargo --version
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Build exact native binary and embedded wheel
+        shell: bash
+        run: |
+          cargo build --locked --release -p contextdb-cli
+          python -m maturin build \
+            --manifest-path bindings/python/Cargo.toml \
+            --locked --release --out target/python-wheels
+      - name: Generate fresh dependency SBOM source
+        shell: bash
+        run: |
+          cargo cyclonedx --format json --spec-version 1.5 \
+            --target "$CANDIDATE_RUST_TARGET" \
+            --manifest-path crates/contextdb-cli/Cargo.toml
+          cargo cyclonedx --format json --spec-version 1.5 \
+            --target "$CANDIDATE_RUST_TARGET" \
+            --manifest-path bindings/python/Cargo.toml
+      - name: Rebuild the portable example twice
+        shell: bash
+        run: |
+          python tools/contextdb-release/contextdb_release.py package-example \
+            --source examples/portable-database/payload \
+            --output target/portable-example-a.zip --force >/dev/null
+          python tools/contextdb-release/contextdb_release.py package-example \
+            --source examples/portable-database/payload \
+            --output target/portable-example-b.zip --force >/dev/null
+          python - <<'PY'
+          from pathlib import Path
+
+          left = Path("target/portable-example-a.zip").read_bytes()
+          right = Path("target/portable-example-b.zip").read_bytes()
+          assert left == right, "portable package assembly is not deterministic"
+          PY
+      - name: Stage digest-bound, unsigned candidate inputs
+        shell: bash
+        env:
+          CANDIDATE_REPOSITORY: "${{ github.server_url }}/${{ github.repository }}"
+          CANDIDATE_WORKFLOW_REF: "${{ github.workflow_ref }}"
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import copy
+          import hashlib
+          import json
+          import os
+          import shutil
+          import subprocess
+          import sys
+          from datetime import UTC, datetime
+          from pathlib import Path
+
+          tool_root = Path("tools/contextdb-release").resolve()
+          sys.path.insert(0, str(tool_root))
+          import contextdb_release as release
+
+          def sha256(path: Path) -> str:
+              value = hashlib.sha256()
+              with path.open("rb") as stream:
+                  for block in iter(lambda: stream.read(1024 * 1024), b""):
+                      value.update(block)
+              return value.hexdigest()
+
+          def write_json(path: Path, value: object) -> None:
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_text(
+                  json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                  encoding="utf-8",
+                  newline="\n",
+              )
+
+          platform = os.environ["CANDIDATE_PLATFORM"]
+          target = os.environ["CANDIDATE_RUST_TARGET"]
+          version = os.environ["CANDIDATE_VERSION"]
+          stage = os.environ["CANDIDATE_STAGE"]
+          epoch = int(os.environ["SOURCE_DATE_EPOCH"])
+          timestamp = datetime.fromtimestamp(epoch, UTC).isoformat().replace("+00:00", "Z")
+          commit = os.environ["GITHUB_SHA"]
+          repository = os.environ["CANDIDATE_REPOSITORY"]
+          workflow_ref = os.environ["CANDIDATE_WORKFLOW_REF"]
+          output = Path("target/release-candidate") / platform
+          artifacts = output / "artifacts"
+          evidence = output / "evidence"
+          release_dir = output / "release"
+          artifacts.mkdir(parents=True)
+          evidence.mkdir(parents=True)
+          release_dir.mkdir(parents=True)
+
+          binary_source = Path("target/release/contextdb.exe" if os.name == "nt" else "target/release/contextdb")
+          reported_version = subprocess.check_output(
+              [str(binary_source), "version"], text=True
+          ).splitlines()[0]
+          assert reported_version == f"contextdb {version}", reported_version
+          binary_name = f"contextdb-{platform}" + (".exe" if os.name == "nt" else "")
+          binary = artifacts / binary_name
+          shutil.copyfile(binary_source, binary)
+          if os.name != "nt":
+              binary.chmod(0o755)
+          wheels = sorted(Path("target/python-wheels").glob("*.whl"))
+          assert len(wheels) == 1, wheels
+          wheel = artifacts / wheels[0].name
+          shutil.copyfile(wheels[0], wheel)
+          portable = artifacts / "contextdb-portable-example.zip"
+          shutil.copyfile("target/portable-example-a.zip", portable)
+
+          cli_source_bom = json.loads(
+              Path("crates/contextdb-cli/contextdb-cli.cdx.json").read_text(encoding="utf-8")
+          )
+          python_source_bom = json.loads(
+              Path("bindings/python/contextdb-python.cdx.json").read_text(encoding="utf-8")
+          )
+          for source_bom in (cli_source_bom, python_source_bom):
+              assert source_bom["bomFormat"] == "CycloneDX"
+              assert source_bom["specVersion"] in {"1.5", "1.6"}
+
+          def bound_sbom(
+              subject: Path,
+              artifact_name: str,
+              component_type: str,
+              dependency_bom: dict[str, object],
+          ) -> Path:
+              bom = copy.deepcopy(dependency_bom)
+              metadata = bom.setdefault("metadata", {})
+              metadata["timestamp"] = timestamp
+              component = metadata.setdefault("component", {})
+              component["type"] = component_type
+              component["name"] = artifact_name
+              component["version"] = version
+              component["hashes"] = [{"alg": "SHA-256", "content": sha256(subject)}]
+              destination = evidence / f"{artifact_name}.cdx.json"
+              write_json(destination, bom)
+              return destination
+
+          binary_sbom = bound_sbom(
+              binary, f"contextdb-{platform}", "application", cli_source_bom
+          )
+          wheel_sbom = bound_sbom(
+              wheel, wheel.stem, "library", python_source_bom
+          )
+
+          def provenance(subject: Path) -> Path:
+              relative = subject.relative_to(output).as_posix()
+              statement = {
+                  "_type": "https://in-toto.io/Statement/v1",
+                  "subject": [{"name": relative, "digest": {"sha256": sha256(subject)}}],
+                  "predicateType": "https://slsa.dev/provenance/v1",
+                  "predicate": {
+                      "buildDefinition": {
+                          "buildType": workflow_ref,
+                          "externalParameters": {
+                              "platform": platform,
+                              "rust_target": target,
+                              "stage": stage,
+                              "version": version,
+                          },
+                          "internalParameters": {},
+                          "resolvedDependencies": [
+                              {"uri": repository, "digest": {"gitCommit": commit}}
+                          ],
+                      },
+                      "runDetails": {
+                          "builder": {"id": workflow_ref},
+                          "metadata": {"invocationId": os.environ["GITHUB_RUN_ID"]},
+                      },
+                  },
+              }
+              destination = evidence / f"{subject.name}.provenance.json"
+              write_json(destination, statement)
+              return destination
+
+          binary_provenance = provenance(binary)
+          wheel_provenance = provenance(wheel)
+
+          rustc = subprocess.check_output(["rustc", "--version"], text=True).strip()
+          cargo = subprocess.check_output(["cargo", "--version"], text=True).strip()
+          version_manifest = {
+              "schema_version": "contextdb.version-manifest/v1",
+              "product_version": version,
+              "release_channel": stage,
+              "source": {
+                  "git_commit": commit,
+                  "dirty": False,
+                  "repository": repository,
+                  "rfc_revision": "RFC-0001-v0.3",
+                  "errata": ["ERRATA-0001"],
+                  "adrs": [
+                      "ADR-0001",
+                      "ADR-0002",
+                      "ADR-0003",
+                      "ADR-0004",
+                      "ADR-0005",
+                      "ADR-0006",
+                      "ADR-0007",
+                      "ADR-0008",
+                  ],
+              },
+              "build": {
+                  "timestamp": timestamp,
+                  "rustc": rustc,
+                  "cargo": cargo,
+                  "target": target,
+                  "profile": "release",
+                  "reproducible": False,
+                  "builder": workflow_ref,
+              },
+              "formats": {
+                  "logical": {
+                      "writer": 1,
+                      "read_min": 1,
+                      "read_max": 1,
+                      "required_features": [],
+                  }
+              },
+              "feature_profile": "custom",
+              "features": ["current-server", "mcp"],
+          }
+          release.validate_json_contract(version_manifest, "candidate version manifest")
+          write_json(release_dir / "version.json", version_manifest)
+          shutil.copyfile("release/package-matrix.json", release_dir / "package-matrix.json")
+
+          staged = [
+              binary,
+              wheel,
+              portable,
+              binary_sbom,
+              wheel_sbom,
+              binary_provenance,
+              wheel_provenance,
+              release_dir / "version.json",
+              release_dir / "package-matrix.json",
+          ]
+          build_record = {
+              "document_kind": "contextdb-unsigned-self-asserted-candidate-inputs",
+              "version": version,
+              "stage": stage,
+              "platform": platform,
+              "rust_target": target,
+              "source_commit": commit,
+              "source_date_epoch": epoch,
+              "files": [
+                  {
+                      "path": path.relative_to(output).as_posix(),
+                      "sha256": sha256(path),
+                      "size_bytes": path.stat().st_size,
+                  }
+                  for path in sorted(staged, key=lambda item: item.relative_to(output).as_posix())
+              ],
+              "evidence_boundary": {
+                  "release_ready": False,
+                  "production_signatures_created": False,
+                  "published": False,
+                  "docker_executed": False,
+                  "platform_install_receipt_created": False,
+              },
+              "limitations": [
+                  "workflow artifact is an unsigned, non-publishing build input",
+                  "SBOM and provenance are self-asserted metadata until independently attested and signed",
+                  "no milestone status or production release claim is made",
+              ],
+          }
+          record_path = output / "candidate-build.json"
+          write_json(record_path, build_record)
+          staged.append(record_path)
+          checksum_path = output / "SHA256SUMS"
+          checksum_path.write_text(
+              "".join(
+                  f"{sha256(path)}  {path.relative_to(output).as_posix()}\n"
+                  for path in sorted(staged, key=lambda item: item.relative_to(output).as_posix().encode())
+              ),
+              encoding="utf-8",
+              newline="\n",
+          )
+
+          binary_artifact = {
+              "id": f"contextdb-{platform}",
+              "path": binary.relative_to(output).as_posix(),
+              "sha256": sha256(binary),
+              "version": version,
+              "provenance": {"source_commit": commit},
+          }
+          wheel_artifact = {
+              "id": f"contextdb-python-{platform}",
+              "path": wheel.relative_to(output).as_posix(),
+              "sha256": sha256(wheel),
+              "version": version,
+              "provenance": {"source_commit": commit},
+          }
+          release.BundleVerifier._verify_cyclonedx_binding(
+              binary_artifact, binary_sbom, "candidate binary SBOM"
+          )
+          release.BundleVerifier._verify_slsa_provenance_binding(
+              binary_artifact, binary_provenance, "candidate binary provenance"
+          )
+          release.BundleVerifier._verify_cyclonedx_binding(
+              wheel_artifact, wheel_sbom, "candidate wheel SBOM"
+          )
+          release.BundleVerifier._verify_slsa_provenance_binding(
+              wheel_artifact, wheel_provenance, "candidate wheel provenance"
+          )
+          assert not list(output.rglob("*.sig"))
+          PY
+      - name: Verify staged checksums and non-release boundary
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("target/release-candidate") / os.environ["CANDIDATE_PLATFORM"]
+          lines = (root / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+          paths = []
+          for line in lines:
+              digest, relative = line.split("  ", 1)
+              path = root.joinpath(*Path(relative).parts)
+              assert path.is_file()
+              assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+              paths.append(relative)
+          assert paths == sorted(paths, key=lambda value: value.encode("utf-8"))
+          record = json.loads((root / "candidate-build.json").read_text(encoding="utf-8"))
+          boundary = record["evidence_boundary"]
+          assert boundary == {
+              "docker_executed": False,
+              "platform_install_receipt_created": False,
+              "production_signatures_created": False,
+              "published": False,
+              "release_ready": False,
+          }
+          PY
+      - name: Upload non-publishing unsigned candidate inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "nonrelease-candidate-inputs-${{ matrix.platform }}-${{ github.sha }}"
+          path: "target/release-candidate/${{ matrix.platform }}"
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7

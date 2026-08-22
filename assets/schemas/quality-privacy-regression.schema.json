@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/quality-privacy-regression/v1.json",
+  "title": "ContextDB quality and privacy regression receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "milestone",
+    "generated_at",
+    "status",
+    "decision",
+    "optimization_under_test",
+    "checks",
+    "artifacts",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.quality-privacy-regression/v1"
+    },
+    "milestone": {
+      "type": "string",
+      "pattern": "^M(?:[0-9]|1[0-9])$"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "enum": ["passed", "partial_pass", "failed", "error"]
+    },
+    "decision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "optimization_under_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "reason", "candidate_mode"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidate_mode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidate_records": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "independent_full_mvcc_probe_records": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "source", "expected", "observed", "passed"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "source": {
+            "$ref": "#/$defs/repositoryPath"
+          },
+          "metric": {
+            "type": "string",
+            "minLength": 1
+          },
+          "metrics": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "expected": {
+            "$ref": "#/$defs/scalar"
+          },
+          "observed": {
+            "$ref": "#/$defs/scalar"
+          },
+          "passed": {
+            "type": "boolean"
+          }
+        },
+        "not": {
+          "required": ["metric", "metrics"]
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {
+            "$ref": "#/$defs/repositoryPath"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "repositoryPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![A-Za-z]:|/|\\\\)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "scalar": {
+      "type": ["string", "number", "boolean"]
+    }
+  }
+}

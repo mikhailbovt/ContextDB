@@ -1,0 +1,82 @@
+{
+  "schema_version": "contextdb.local-mcp-profile/v1",
+  "profile_id": "contextdb-local-mcp-windows-x86_64",
+  "profile_revision": 1,
+  "release_class": "developer-preview",
+  "core_version": "0.1.0-alpha.1",
+  "formal_release": {
+    "m18_alpha": false,
+    "release_ready": false,
+    "signed": false,
+    "published": false
+  },
+  "build": {
+    "package": "contextdb-cli",
+    "binary": "contextdb",
+    "locked": true,
+    "release_mode": true,
+    "default_features": false,
+    "features": [
+      "local-mcp"
+    ]
+  },
+  "runtime": {
+    "supported_platforms": [
+      {
+        "operating_system": "windows",
+        "architecture": "x86_64",
+        "support": "developer-preview"
+      }
+    ],
+    "transports": [
+      "mcp-stdio",
+      "windows-local-named-pipe"
+    ],
+    "network_listeners": false,
+    "excluded_cli_commands": [
+      "probe",
+      "serve"
+    ],
+    "external_authorities": [
+      "token-key",
+      "state-head"
+    ]
+  },
+  "compatibility": {
+    "service": "contextdb.service/v1",
+    "wire_schema": 1,
+    "semantic_schema": 1,
+    "storage_format": 1,
+    "context_pack_schema": 1,
+    "logical_archive": "contextdb.logical.v1",
+    "mcp_protocols": [
+      "2025-03-26",
+      "2025-06-18",
+      "2025-11-25",
+      "2026-07-28"
+    ],
+    "consumer_binding": "exact-core-version-and-artifact-sha256"
+  },
+  "package_files": [
+    "CHANGELOG.md",
+    "LICENSE",
+    "SECURITY.md",
+    "docs/api/compatibility.md",
+    "docs/release/local-mcp-developer-preview.md",
+    "docs/release/third-party-dependencies.md",
+    "release/THIRD_PARTY_NOTICES.txt",
+    "release/contextdb-local-mcp-supply-chain.json",
+    "release/contextdb-local-mcp.cdx.json",
+    "release/local-mcp-profile.json",
+    "release/rust-runtime/COPYRIGHT.html",
+    "release/rust-runtime/LICENSE-APACHE",
+    "release/rust-runtime/LICENSE-MIT"
+  ],
+  "limitations": [
+    "This profile is not the formal ContextDB M18 Alpha release.",
+    "Only Windows x86_64 is supported by this developer-preview package contract.",
+    "The package is unsigned and unpublished; consumers must pin its SHA-256.",
+    "No production hard-delete, KMS, multi-tenant, remote gateway, or network service claim is made.",
+    "Use synthetic or non-critical data until the remaining security and recovery gates close."
+  ]
+}

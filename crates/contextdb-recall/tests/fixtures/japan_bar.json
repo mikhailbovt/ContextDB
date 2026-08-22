@@ -1,0 +1,6 @@
+{
+  "query": "стоит открывать?",
+  "active_surface": "бар в Японии",
+  "recommendation_text": "Рекомендация по проекту: осторожный пилот, а не полноценный запуск",
+  "expected_document": "claim:japan-bar-recommendation"
+}

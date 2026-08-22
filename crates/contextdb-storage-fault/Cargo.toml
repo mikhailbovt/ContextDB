@@ -1,0 +1,23 @@
+[package]
+name = "contextdb-storage-fault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic physical fault injection for ContextDB conformance tests"
+publish = false
+
+[dependencies]
+contextdb-storage.workspace = true
+
+[dev-dependencies]
+contextdb-storage-memory.workspace = true
+contextdb-storage-redb.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

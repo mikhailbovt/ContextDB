@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-bundle-assembly-receipt/v1.json",
+  "title": "ContextDB offline release bundle assembly receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "assembler_version",
+    "generated_at",
+    "release",
+    "sources",
+    "output",
+    "checks",
+    "unresolved_release_gates",
+    "release_ready",
+    "evidence_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-bundle-assembly-receipt/v1"
+    },
+    "assembler_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "channel"],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/semver"
+        },
+        "channel": {
+          "enum": ["development", "alpha", "beta", "stable"]
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_manifest", "package_matrix"],
+      "properties": {
+        "input_manifest": {
+          "$ref": "#/$defs/sourceFile"
+        },
+        "package_matrix": {
+          "$ref": "#/$defs/sourceFile"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directory_name",
+        "artifact_manifest_sha256",
+        "checksum_file_sha256",
+        "tree_sha256",
+        "file_count",
+        "total_size_bytes",
+        "deterministic_mtime_epoch"
+      ],
+      "properties": {
+        "directory_name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "artifact_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "checksum_file_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "tree_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "file_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "total_size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "deterministic_mtime_epoch": {
+          "type": "integer",
+          "minimum": 315532800
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "detail"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "status": {
+            "const": "passed"
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "unresolved_release_gates": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "release_ready": {
+      "const": false
+    },
+    "evidence_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "network_accessed",
+        "artifacts_built",
+        "signatures_created",
+        "publication_verified",
+        "platform_install_receipts_generated",
+        "release_readiness_decided_by_assembler"
+      ],
+      "properties": {
+        "network_accessed": {
+          "const": false
+        },
+        "artifacts_built": {
+          "const": false
+        },
+        "signatures_created": {
+          "const": false
+        },
+        "publication_verified": {
+          "const": false
+        },
+        "platform_install_receipts_generated": {
+          "const": false
+        },
+        "release_readiness_decided_by_assembler": {
+          "const": false
+        }
+      }
+    }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "size_bytes", "media_type"],
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "media_type": {
+          "const": "application/json"
+        }
+      }
+    }
+  }
+}

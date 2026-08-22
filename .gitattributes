@@ -1,0 +1,8 @@
+# Keep repository text byte-stable across Windows, macOS, and Linux checkouts.
+# rustfmt.toml requires Unix newlines, so relying on each machine's
+# core.autocrlf setting makes the Windows CI checkout fail before compilation.
+* text=auto eol=lf
+
+# This file is copied byte-for-byte from the pinned Rust sysroot and is hash
+# checked as runtime license evidence. Preserve upstream whitespace verbatim.
+/release/rust-runtime/COPYRIGHT.html -whitespace

@@ -1,0 +1,134 @@
+M11 BENCH-A Lifetime Conversation Memory release evidence
+run_id=45658171-1a33-43dc-b693-af250ccef357
+started_at_utc=2026-08-12T11:03:02.000Z
+finished_at_utc=2026-08-12T11:09:35.440Z
+result=PASS
+
+Host and toolchain
+os=Microsoft Windows 11 Pro 10.0.26200 build 26200
+architecture=x86_64
+cpu=Intel(R) Core(TM) Ultra 9 275HX
+logical_cores=24
+memory_bytes=68044750848
+storage=WD_BLACK SN850X 4000GB NVMe SSD
+filesystem=NTFS
+rustc=rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo=cargo 1.97.1 (c980f4866 2026-06-30)
+target=x86_64-pc-windows-msvc
+git_commit=745bdb5a2e3580f8ca8f44d8a765d6210b1c9057
+git_dirty=true
+
+Build
+command=cargo build -p contextdb-chat --example bench_a_full --release
+result=PASS
+elapsed_seconds=59.0
+binary=target/release/examples/bench_a_full.exe
+binary_sha256=93e977165d2004a079658669c88a79a1d0004da1cde3fcee8b8d94f890fad252
+
+Profiling run
+command=cargo run -p contextdb-chat --example bench_a_full --release -- --smoke --output target/bench-a-smoke.json
+scale=smoke (40 sessions, 2,000 turns, 100 queries, all ten classes)
+result=PASS after negative-query lexical fixture correction and explicit sensitive-policy probes
+all_published_gates=true
+
+Discarded full invocation
+command=target/release/examples/bench_a_full.exe --output target/bench-a-full-raw.json
+result=INTERRUPTED_BY_SHELL_TIMEOUT
+shell_timeout_seconds=120
+accepted_as_evidence=false
+note=The process was externally terminated before report creation. No result from this invocation was reused.
+
+Superseded full invocation
+command=target/release/examples/bench_a_full.exe --output target/bench-a-full-raw.json
+process_exit_code=0
+result=SUPERSEDED_BEFORE_PUBLICATION
+accepted_as_evidence=false
+note=The run passed, but final audit found appropriate-silence could skip recall before directly proving policy exclusion. Its report and timings were discarded.
+
+Superseded strict full invocation
+command=target/release/examples/bench_a_full.exe --output target/bench-a-full-final.json
+process_exit_code=0
+result=SUPERSEDED_BEFORE_PUBLICATION
+accepted_as_evidence=false
+note=The strict policy-probe run passed, but a subsequent lint-only source annotation changed the release binary hash. Its report and timings were discarded to retain exact binary/source provenance.
+
+Canonical full invocation
+command=target/release/examples/bench_a_full.exe --output target/bench-a-full-evidence.json
+shell_timeout_seconds=900
+process_exit_code=0
+elapsed_seconds=394.1
+result=PASS
+
+Workload
+virtual_years=5
+sessions=1000
+turns=50000
+people=50
+topics=200
+shared_references=120
+preference_changes=120
+corrections=120
+open_loops=120
+sensitive_memories=120
+model_migrations=4
+query_classes=10
+queries_per_class=100
+queries_total=1000
+query_executions=3000 (primary before restart, primary after restart, secondary after restart)
+dataset_digest_blake3=b0a1a29afc68d7242043f26e5831588d05524e1539c4636e7ed1133c370a59df
+
+Reference stack
+capture=contextdb-chat ChatStore
+storage=contextdb-storage-redb redb 4.1.0
+durability=Sync
+journal=contextdb-journal
+semantic_projection=contextdb-reference ContextDb
+recall=contextdb-recall RecallEngine + ReferenceProvider
+context=contextdb-context ContextCompiler + canonical ContextPack validation
+runtime_primary=SeparatedChannelsAdapter
+runtime_secondary=SinglePromptJsonAdapter
+network_calls=0
+provider_sdk_calls=0
+api_keys=0
+
+Durability and restart
+acknowledged_turns=50000
+chat_journal_head=50000
+verified_sessions=1000
+verified_turns=50000
+verified_semantic_jobs=50000
+pending_capture_sagas=0
+storage_deep_verify=PASS
+labelled_sensitive_policy_probes=300
+labelled_sensitive_records_excluded_before_planner=36000
+restart_and_verify_micros=7807631
+database_file_bytes=1370570752
+
+Quality gates
+memory_precision=100.00% threshold>=90.00% PASS
+memory_recall=100.00% threshold>=85.00% PASS
+referent_resolution=100.00% threshold>=95.00% PASS
+current_truth=100.00% threshold>=95.00% PASS
+historical_truth=100.00% threshold>=95.00% PASS
+temporal_leakage=0ppm threshold<=10000ppm PASS
+wrong_person=0ppm threshold<=10000ppm PASS
+correction_retention=100.00% threshold>=99.00% PASS
+shared_reference=100.00% threshold>=95.00% PASS
+implicit_continuity=100.00% threshold>=90.00% PASS
+unknown_precision=100.00% threshold>=99.00% PASS
+continuity_preference=100.00% threshold>=90.00% PASS
+sensitive_memory_leak=0ppm threshold=0ppm PASS
+unsolicited_mention=0ppm threshold<=5000ppm PASS
+restart_consistency=100.00% threshold=100.00% PASS
+cross_runtime_consistency=100.00% threshold=100.00% PASS
+context_tokens_p95=891 threshold<=4096 PASS
+hot_recall_stack_p95_micros=11149 threshold<=500000 PASS
+
+Raw result
+path=docs/benchmarks/results/m11-bench-a-windows-2026-08-12.raw.json
+source_target_sha256=4f27c562174a8307112c98a5f5e84400c14fdd1f4254b4e336f44a80df3d1718
+
+Limitations
+- This is a deterministic synthetic reference correctness workload, not a claim about unlabelled real-user conversations.
+- Runtime lanes validate provider-neutral formatting and semantic consistency without invoking an external model; naturalness still needs the RFC human acceptability set.
+- M17 owns official concurrent-server throughput, memory ceilings, and hardware-normalized performance certification.

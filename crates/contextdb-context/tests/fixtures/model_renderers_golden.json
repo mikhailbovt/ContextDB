@@ -1,0 +1,52 @@
+{
+  "semantic_ids": [
+    "situation:japan-bar",
+    "fact:hypothetical",
+    "preference:atmosphere",
+    "boundary:short-menu",
+    "unknown:budget",
+    "unknown:location"
+  ],
+  "rows": [
+    {
+      "renderer": "compact",
+      "control_tokens": 211,
+      "data_tokens": 2295,
+      "total_tokens": 2506,
+      "control_digest": "40116b554fd256bfd31a7b94021b392cbd74c41cd5532724d91ef38ccfea57ab",
+      "data_digest": "03e7118f13badd14b2d386db49df36cd2f617e6ba1056a3cff0b5086c39bd40a"
+    },
+    {
+      "renderer": "hosted_structured",
+      "control_tokens": 211,
+      "data_tokens": 2324,
+      "total_tokens": 2535,
+      "control_digest": "40116b554fd256bfd31a7b94021b392cbd74c41cd5532724d91ef38ccfea57ab",
+      "data_digest": "92b58b77f8689c4d990bd7b6b2386a83cbf34f66602471a2e46790e12e4cab5d"
+    },
+    {
+      "renderer": "chat",
+      "control_tokens": 211,
+      "data_tokens": 2330,
+      "total_tokens": 2541,
+      "control_digest": "40116b554fd256bfd31a7b94021b392cbd74c41cd5532724d91ef38ccfea57ab",
+      "data_digest": "7279fe18e19f535f4e9b5f9b65134c8f7d9741400690fb2875c9ad85deda0e76"
+    },
+    {
+      "renderer": "coding",
+      "control_tokens": 211,
+      "data_tokens": 2325,
+      "total_tokens": 2536,
+      "control_digest": "40116b554fd256bfd31a7b94021b392cbd74c41cd5532724d91ef38ccfea57ab",
+      "data_digest": "b8c6a9019c9c5e70080e1c9869fb1b03a0a003c506aebe9f17dbbc272691e9dc"
+    },
+    {
+      "renderer": "canonical_json",
+      "control_tokens": 211,
+      "data_tokens": 3217,
+      "total_tokens": 3428,
+      "control_digest": "40116b554fd256bfd31a7b94021b392cbd74c41cd5532724d91ef38ccfea57ab",
+      "data_digest": "5e5d757c92f522440db71b757298e6c627bbd60beb8afe5c3f91b6663eea4b2f"
+    }
+  ]
+}

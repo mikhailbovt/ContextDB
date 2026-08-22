@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "workload": "m6-balanced-topic-ablation-v1",
+  "parameters": {
+    "branches": 64,
+    "leaves_per_branch": 64,
+    "semantic_leaves": 4096,
+    "beam_width": 1,
+    "max_depth": 2,
+    "iterations": 201,
+    "target_branch": 17,
+    "target_leaf": 29
+  },
+  "flat": {
+    "nodes_examined": 4096,
+    "median_latency_ns": 3500,
+    "precision_at_1": 1.0,
+    "recall_at_1": 1.0,
+    "navigation_label_whitespace_tokens_examined": 24576
+  },
+  "hierarchy": {
+    "nodes_examined": 129,
+    "edge_expansions": 128,
+    "median_latency_ns": 39100,
+    "precision_at_1": 1.0,
+    "recall_at_1": 1.0,
+    "navigation_label_whitespace_tokens_examined": 579
+  },
+  "reductions": {
+    "nodes_examined_fraction": 0.968505859375,
+    "navigation_token_fraction": 0.9764404296875
+  },
+  "quality_collapse": false,
+  "notes": [
+    "The target and routing confidences are predeclared; this isolates hierarchy pruning from model quality.",
+    "Token cost is an exact whitespace-token count over policy-safe navigation labels, not a production model tokenizer.",
+    "Latency includes query execution only; generation validation and publication are excluded."
+  ]
+}

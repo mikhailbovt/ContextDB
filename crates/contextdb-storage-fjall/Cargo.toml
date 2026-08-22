@@ -1,0 +1,19 @@
+[package]
+name = "contextdb-storage-fjall"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fjall physical storage adapter for ContextDB"
+
+[dependencies]
+contextdb-storage.workspace = true
+fjall.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

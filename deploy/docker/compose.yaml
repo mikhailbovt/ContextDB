@@ -1,0 +1,46 @@
+name: contextdb-local
+
+services:
+  contextdb:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: contextdb/contextdb:0.1.0-alpha.1-local
+    read_only: true
+    init: true
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - contextdb-data:/var/lib/contextdb
+      - contextdb-authority:/var/lib/contextdb-authority
+      - type: bind
+        source: ${CONTEXTDB_DOCKER_TOKEN_KEY_FILE:?set an external token-key file path}
+        target: /run/contextdb-secrets/token-key
+        read_only: true
+      - type: bind
+        source: ${CONTEXTDB_DOCKER_GATEWAY_KEY_FILE:?set an external gateway-key file path}
+        target: /run/contextdb-secrets/gateway-key
+        read_only: true
+    environment:
+      CONTEXTDB_TOKEN_KEY_FILE: /run/contextdb-secrets/token-key
+      CONTEXTDB_STATE_HEAD_FILE: /var/lib/contextdb-authority/state-head.json
+      CONTEXTDB_GATEWAY_ID: ${CONTEXTDB_DOCKER_GATEWAY_ID:?set the trusted gateway identity}
+      CONTEXTDB_GATEWAY_KEY_FILE: /run/contextdb-secrets/gateway-key
+    ports:
+      - "127.0.0.1:7733:7733"
+      - "127.0.0.1:7734:7734"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/contextdb-entrypoint", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  contextdb-data:
+  contextdb-authority:

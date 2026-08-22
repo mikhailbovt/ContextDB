@@ -1,0 +1,52 @@
+{
+  "schema_version": "contextdb.ci-report/v1",
+  "milestone": "M0",
+  "generated_at": "2026-08-12T13:26:44.321Z",
+  "status": "local_partial_pass",
+  "environment": {
+    "os": "Microsoft Windows NT 10.0.26200.0",
+    "architecture": "x86_64",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "python": "Python 3.14.5"
+  },
+  "commands": [
+    {
+      "command": "python -m unittest discover -s tools/contextdb-release/tests -v",
+      "exit_code": 0,
+      "result": {"passed": 23, "failed": 0}
+    },
+    {
+      "command": "python .github/scripts/validate_governance.py .",
+      "exit_code": 0,
+      "result": {"schemas": 17, "milestones": 20, "accepted_adrs": 6, "workflows": "passed", "labels": "passed"},
+      "stdout": "governance validation passed: 17 schemas, 20 milestones, 6 accepted ADRs, workflows and labels"
+    },
+    {
+      "command": "cargo +1.97.1 run -p contextdb-cli --quiet -- --version",
+      "exit_code": 0,
+      "stdout": "contextdb 0.1.0-alpha.1"
+    },
+    {
+      "command": "cargo +1.97.1 run -p contextdb-example-embedded-rust --quiet",
+      "exit_code": 0,
+      "stdout": "ContextDB embedded reference example 0.1.0-alpha.1 at commit 0"
+    }
+  ],
+  "required_platforms": {
+    "linux_x86_64": "not_observed",
+    "linux_arm64": "not_observed",
+    "macos_arm64": "not_observed",
+    "windows_x86_64": "local_governance_and_demo_pass"
+  },
+  "source_sha256": {
+    ".github/scripts/validate_governance.py": "59ceff136dfb084513ea1f798373836fa98728c9aa22ad68f422ff4959c8b1d4",
+    "docs/roadmap/gates.json": "d5274f6ff575f04eff853348dde33975cf12d9e789b777c145e1f2db6c5571e0",
+    "rust-toolchain.toml": "43358408302939979f90396cc6648aa8326277cd58856f7b1196e2d139cd96a3"
+  },
+  "limitations": [
+    "No remote CI run or supported Linux/macOS runner result was available in this local backfill.",
+    "The governance validator passed locally, but M0-E01 still requires remote Linux x86_64, Linux arm64 and macOS arm64 CI evidence.",
+    "A passing release-tool unit suite is source-level evidence only and does not replace target-platform CI."
+  ]
+}

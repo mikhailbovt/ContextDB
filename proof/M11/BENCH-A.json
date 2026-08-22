@@ -1,0 +1,179 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "45658171-1a33-43dc-b693-af250ccef357",
+  "started_at": "2026-08-12T11:03:02.000Z",
+  "finished_at": "2026-08-12T11:09:35.440Z",
+  "status": "passed",
+  "benchmark": {
+    "id": "BENCH-0011",
+    "family": "BENCH-A",
+    "name": "Lifetime Conversation Memory full deterministic reference vertical",
+    "version": "1",
+    "dataset_version": "contextdb-bench-a-v1",
+    "scenario": "five-year-persistent-conversation-restart-two-runtime-policy-safe-recall",
+    "tier": "m11-reference-correctness-and-hot-path"
+  },
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1",
+      "product_version": "0.1.0-alpha.1",
+      "release_channel": "development",
+      "source": {
+        "git_commit": "745bdb5a2e3580f8ca8f44d8a765d6210b1c9057",
+        "dirty": true,
+        "repository": "https://github.com/mikhailbovt/ContextDB",
+        "rfc_revision": "RFC-0001-v0.3",
+        "errata": ["ERRATA-0001"],
+        "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]
+      },
+      "build": {
+        "timestamp": "2026-08-12T11:02:51.000Z",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "target": "x86_64-pc-windows-msvc",
+        "profile": "release",
+        "reproducible": false,
+        "builder": "local-m11-bench-a"
+      },
+      "formats": {
+        "chat": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["persistent-chat"]},
+        "journal": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["sync-durability"]},
+        "context_pack": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["context-compiler"]},
+        "recall_plan": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["deterministic-recall"]}
+      },
+      "feature_profile": "research",
+      "features": [
+        "context-compiler",
+        "deterministic-recall",
+        "persistent-chat",
+        "reference-semantic-projection",
+        "sync-durability",
+        "two-runtime-adapters"
+      ],
+      "storage_backend": {
+        "name": "contextdb-storage-redb",
+        "version": "redb-4.1.0",
+        "configuration_digest": "56d7c070f6f96ff69240eb4dbd824927cf5f470319ee773ceae0d3919ab43697"
+      }
+    },
+    "version_manifest_sha256": "17576b270fd11572dbd21641777a954faf92574502f283ca012388b1fb4dbbe5"
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Pro",
+    "os_version": "10.0.26200",
+    "kernel": "Windows NT build 26200",
+    "architecture": "x86_64",
+    "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+    "logical_cores": 24,
+    "memory_bytes": 68044750848,
+    "storage": "WD_BLACK SN850X 4000GB NVMe SSD",
+    "filesystem": "NTFS",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "storage_backend": "contextdb-storage-redb",
+    "storage_backend_version": "redb-4.1.0",
+    "storage_configuration_digest": "56d7c070f6f96ff69240eb4dbd824927cf5f470319ee773ceae0d3919ab43697",
+    "build_profile": "release"
+  },
+  "configuration": {
+    "seed": 0,
+    "features": [
+      "canonical-context-pack",
+      "deep-storage-verification",
+      "deterministic-reference-recall",
+      "persistent-chat-store",
+      "process-equivalent-restart",
+      "sync-redb",
+      "two-runtime-adapters"
+    ],
+    "budgets": {
+      "recall_deadline_micros": 500000,
+      "recall_max_nodes": 2048,
+      "recall_max_context_tokens": 512,
+      "compiled_context_hard_tokens": 4096,
+      "compiled_context_soft_tokens": 3584,
+      "published_context_tokens_p95_ceiling": 4096
+    },
+    "parameters": {
+      "virtual_years": 5,
+      "sessions": 1000,
+      "turns": 50000,
+      "people": 50,
+      "topics": 200,
+      "shared_references": 120,
+      "preference_changes": 120,
+      "corrections": 120,
+      "open_loops": 120,
+      "sensitive_memories": 120,
+      "model_migrations": 4,
+      "queries_per_class": 100,
+      "query_classes": 10,
+      "durability": "sync",
+      "external_model_calls": 0
+    },
+    "index_watermarks": {
+      "chat_journal": 50000,
+      "semantic": 1,
+      "lexical": 1,
+      "graph": 1
+    }
+  },
+  "metrics": [
+    {"name": "bench_a.memory_precision", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.9}, "passed": true},
+    {"name": "bench_a.memory_recall", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.85}, "passed": true},
+    {"name": "bench_a.referent_resolution", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.95}, "passed": true},
+    {"name": "bench_a.current_truth", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.95}, "passed": true},
+    {"name": "bench_a.historical_truth", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.95}, "passed": true},
+    {"name": "bench_a.temporal_leakage", "unit": "ppm", "direction": "lower_is_better", "observed": 0, "threshold": {"operator": "lte", "value": 10000}, "passed": true},
+    {"name": "bench_a.wrong_person", "unit": "ppm", "direction": "lower_is_better", "observed": 0, "threshold": {"operator": "lte", "value": 10000}, "passed": true},
+    {"name": "bench_a.correction_retention", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.99}, "passed": true},
+    {"name": "bench_a.shared_reference", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.95}, "passed": true},
+    {"name": "bench_a.implicit_continuity", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.9}, "passed": true},
+    {"name": "bench_a.unknown_precision", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.99}, "passed": true},
+    {"name": "bench_a.continuity_preference", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "gte", "value": 0.9}, "passed": true},
+    {"name": "bench_a.sensitive_memory_leak", "unit": "ppm", "direction": "lower_is_better", "observed": 0, "threshold": {"operator": "eq", "value": 0}, "passed": true},
+    {"name": "bench_a.unsolicited_mention", "unit": "ppm", "direction": "lower_is_better", "observed": 0, "threshold": {"operator": "lte", "value": 5000}, "passed": true},
+    {"name": "bench_a.restart_consistency", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "eq", "value": 1.0}, "passed": true},
+    {"name": "bench_a.cross_runtime_consistency", "unit": "ratio", "direction": "higher_is_better", "observed": 1.0, "threshold": {"operator": "eq", "value": 1.0}, "passed": true},
+    {"name": "bench_a.context_tokens_p95", "unit": "tokens", "direction": "lower_is_better", "observed": 891, "threshold": {"operator": "lte", "value": 4096}, "passed": true},
+    {"name": "bench_a.hot_recall_stack_p95", "unit": "microseconds", "direction": "lower_is_better", "observed": 11149, "threshold": {"operator": "lte", "value": 500000}, "passed": true},
+    {"name": "bench_a.sensitive_policy_exclusions", "unit": "records", "direction": "informational", "observed": 36000},
+    {"name": "bench_a.sync_ingestion_total", "unit": "microseconds", "direction": "informational", "observed": 358458956},
+    {"name": "bench_a.restart_and_deep_verify", "unit": "microseconds", "direction": "informational", "observed": 7807631},
+    {"name": "bench_a.database_file_size", "unit": "bytes", "direction": "informational", "observed": 1370570752}
+  ],
+  "quality_gates": [
+    {
+      "gate_id": "M11-E01",
+      "metric": "bench_a.referent-temporal-correction-continuity-quality-floor",
+      "passed": true,
+      "note": "All published referent, current/historical, temporal-leakage, correction, shared-reference, implicit-continuity, unknown, token, and latency floors passed."
+    },
+    {
+      "gate_id": "M11-E02",
+      "metric": "bench_a.social-calibration-and-privacy",
+      "passed": true,
+      "note": "Unsolicited mention, labelled sensitive-memory leak, and wrong-person rates were all zero; 300 policy-first probes excluded 36,000 labelled sensitive record/query executions before planner visibility."
+    },
+    {
+      "gate_id": "M11-E03",
+      "metric": "bench_a.hot-recall-and-runtime-portability",
+      "passed": true,
+      "note": "Hot recall-stack p95 was 11.149 ms against 500 ms; normalized semantics were identical across all 1,000 separated-channel and single-prompt runtime comparisons."
+    }
+  ],
+  "artifacts": [
+    {"kind": "raw-result", "uri": "docs/benchmarks/results/m11-bench-a-windows-2026-08-12.raw.json", "sha256": "4b91e39de0abbba6ad30ba76dbd52516b75e9c9c0b76a32a9ac8c0e80f1b1be5"},
+    {"kind": "version-manifest", "uri": "docs/benchmarks/results/m11-bench-a-windows-2026-08-12.version.json", "sha256": "17576b270fd11572dbd21641777a954faf92574502f283ca012388b1fb4dbbe5"},
+    {"kind": "command-log", "uri": "proof/M11/lifetime-conversation.log", "sha256": "4cfd8189050bd7039a92ca2e7bc199ca46c13d4f06f236027c4a1141383ee01f"},
+    {"kind": "conformance-report", "uri": "proof/M11/two-runtimes.json", "sha256": "a53badc79dff43fe0ae491f923a19a3527400a24b55c114234bf445b6e371aec"},
+    {"kind": "benchmark-source", "uri": "crates/contextdb-chat/examples/bench_a_full.rs", "sha256": "a8750eac5e91a411e166e19cec562a9f9bfa1b75941ba44839cb8863bdf88400"},
+    {"kind": "benchmark-contract", "uri": "crates/contextdb-chat/src/benchmark.rs", "sha256": "a142384513d8aeafd072b845597a2501db195a0dae5b3fe0667934c78e77fc64"}
+  ],
+  "limitations": [
+    "This is a deterministic synthetic reference correctness workload; it does not establish generalization to unlabelled real-user conversation histories.",
+    "The two provider-neutral runtime paths validate trust-channel formatting and semantic consistency without external model calls; prose naturalness and creepiness still require the RFC human acceptability review set.",
+    "The correctness projection indexes the labelled query-target, temporal-distractor, wrong-person, and sensitive-adversarial subset while all 50,000 raw turns remain Sync-durable in the chat journal.",
+    "M17 owns official concurrent-server throughput, bounded-memory, recovery-target, and hardware-normalized performance certification."
+  ]
+}

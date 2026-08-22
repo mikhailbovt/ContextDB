@@ -1,0 +1,55 @@
+{
+  "schema_version": "contextdb.security-report/v1",
+  "milestone": "M7",
+  "generated_at": "2026-08-12T08:44:21.196Z",
+  "status": "package_conformance_passed",
+  "subject": "Policy-first lexical, vector, ANN, and artifact retrieval",
+  "normative_boundary": "ERRATA-0001 E-005 strict no-touch",
+  "implementation": {
+    "authorization_order": "Routing-only IndexPolicy metadata produces opaque snapshot/generation-bound universes before text, vector values, selectors, hashes, or blob locators may be materialized.",
+    "lexical": "Tantivy indexes only authorized documents for each query, preventing denied text from altering corpus statistics, candidates, scores, order, or reported counts.",
+    "ann": "HNSW is partitioned by the canonical full policy digest. Search accepts only authorized partition keys. A partial/tombstoned partition falls back to exact scoring over the authorized intersection and never traverses a denied bridge node.",
+    "artifact": "Artifact and representation route tables are content-free. Original metadata, selectors, hashes, derived records, and locators are returned only after source and derived policy both authorize.",
+    "trace": "Traces report authorized work only and contain no rejected counts, IDs, text, vector values, or partition cardinality."
+  },
+  "tests": [
+    {
+      "name": "denied_lexical_payload_never_changes_visible_result",
+      "kind": "property",
+      "result": "passed",
+      "assertions": ["same visible hit count", "same score", "same authorized examined count"]
+    },
+    {
+      "name": "lexical_tantivy_is_policy_first_and_delta_survives_partial_publish",
+      "kind": "adversarial",
+      "result": "passed",
+      "assertions": ["denied repeated query term cannot change BM25 result", "trace exposes one authorized document only"]
+    },
+    {
+      "name": "ann_never_traverses_denied_partition_and_matches_exact_top_hit",
+      "kind": "adversarial",
+      "result": "passed",
+      "assertions": ["twelve super-scoring denied vectors do not enter traversal", "ANN and exact top identity match", "authorized scored count excludes denied records"]
+    },
+    {
+      "name": "artifact_derived_lineage_policy_and_deletion_closure_are_enforced",
+      "kind": "policy-lineage",
+      "result": "passed",
+      "assertions": ["source and derived authorization required", "post-tombstone materialization denied", "closure includes every derived locator"]
+    }
+  ],
+  "command": "cargo test -p contextdb-index --no-fail-fast",
+  "result": {"passed": 8, "failed": 0},
+  "source_sha256": {
+    "crates/contextdb-index/src/lib.rs": "454958c28d01dfd42789e274d5a7428aceac68eaa9b2949dc846103ba96ae157",
+    "crates/contextdb-index/src/lexical.rs": "ee02e3fd570805285ec8dcd7136d0c70a2f67b875b06c49e796690dee7b2cb8e",
+    "crates/contextdb-index/src/vector.rs": "ad1c3d200d154aea4d9e64d8c53ebfd170609d4134c0fa32b9c973b08accfb4e",
+    "crates/contextdb-index/src/artifact.rs": "7430d14bb40cd2356e89908feade1869f1b7b5ef780ccfd74b480da8bb92b982",
+    "crates/contextdb-index/src/tests.rs": "da8b00d0424843ccd81da7fde3bbca73938d8a89b3250904a338530a3f6592b2"
+  },
+  "remaining_release_evidence": [
+    "BENCH-G aggregate leakage/timing analysis is a later M16 release gate.",
+    "Server transport and concurrent multi-principal tests require the M15 server integration.",
+    "This report does not claim constant-time behavior."
+  ]
+}

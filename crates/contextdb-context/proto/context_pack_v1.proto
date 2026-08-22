@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package contextdb.context.v1;
+
+// Canonical outer schema. Domain records use canonical JSON strings so their
+// independently versioned core schemas can evolve without reusing wire fields.
+// Repeated records MUST be sorted as specified by the Rust API.
+message ContextPack {
+  string schema_version = 1;
+  string id = 2;
+  PackStatus status = 3;
+  string snapshot_json = 4;
+  PackPurpose purpose = 5;
+  string scope_manifest_json = 6;
+  repeated Section sections = 7;
+  repeated string evidence_json = 8;
+  repeated string use_directive_json = 9;
+  string freshness_json = 10;
+  string provenance_json = 11;
+  optional string continuation_opaque = 12;
+  string compilation_json = 13;
+  optional string no_memory_json = 14;
+  string graph_manifest_json = 15;
+}
+
+message Section {
+  BlockKind kind = 1;
+  repeated string block_json = 2;
+}
+
+enum PackStatus {
+  PACK_STATUS_UNKNOWN = 0;
+  PACK_STATUS_SUFFICIENT = 1;
+  PACK_STATUS_PARTIAL = 2;
+  PACK_STATUS_NO_MEMORY = 3;
+}
+
+enum PackPurpose {
+  PACK_PURPOSE_UNKNOWN = 0;
+  PACK_PURPOSE_CONVERSATION = 1;
+  PACK_PURPOSE_CONTINUITY = 2;
+  PACK_PURPOSE_AUTOBIOGRAPHICAL = 3;
+  PACK_PURPOSE_KNOWLEDGE = 4;
+  PACK_PURPOSE_REFLECTIVE = 5;
+  PACK_PURPOSE_ACTION = 6;
+  PACK_PURPOSE_HANDOFF = 7;
+  PACK_PURPOSE_BOOTSTRAP = 8;
+  PACK_PURPOSE_HISTORICAL = 9;
+}
+
+enum BlockKind {
+  BLOCK_KIND_UNKNOWN_VALUE = 0;
+  BLOCK_KIND_SITUATION = 1;
+  BLOCK_KIND_SELF_CONTEXT = 2;
+  BLOCK_KIND_PARTICIPANT = 3;
+  BLOCK_KIND_SHARED_HISTORY = 4;
+  BLOCK_KIND_EPISODE = 5;
+  BLOCK_KIND_FACT = 6;
+  BLOCK_KIND_TIMELINE = 7;
+  BLOCK_KIND_PREFERENCE = 8;
+  BLOCK_KIND_BOUNDARY = 9;
+  BLOCK_KIND_RELATIONSHIP = 10;
+  // Reserved legacy pre-v1 split value; decoders reject it rather than
+  // guessing whether the payload meant a goal, constraint, or open loop.
+  BLOCK_KIND_LEGACY_GOAL_OR_OPEN_LOOP = 11;
+  BLOCK_KIND_PROCEDURE = 12;
+  BLOCK_KIND_DECISION = 13;
+  BLOCK_KIND_CONFLICT = 14;
+  BLOCK_KIND_UNKNOWN = 15;
+  BLOCK_KIND_GOAL = 16;
+  BLOCK_KIND_CONSTRAINT = 17;
+  BLOCK_KIND_OPEN_LOOP = 18;
+}

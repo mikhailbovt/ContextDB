@@ -1,0 +1,29 @@
+[package]
+name = "contextdb-storage-rocksdb-bench"
+version = "0.1.0-alpha.1"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+description = "Explicit C++/FFI RocksDB comparison adapter for the ContextDB M2 bake-off"
+
+[workspace]
+
+[dependencies]
+contextdb-storage = { path = "../contextdb-storage" }
+rocksdb = { version = "0.24.0", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"

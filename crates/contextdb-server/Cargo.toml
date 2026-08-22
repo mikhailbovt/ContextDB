@@ -1,0 +1,43 @@
+[package]
+name = "contextdb-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Canonical ContextDB gRPC and HTTP/JSON transport adapters"
+
+[features]
+default = ["server", "http"]
+wire = ["dep:contextdb-proto"]
+server = [
+    "wire",
+    "contextdb-proto/grpc",
+    "dep:prost",
+    "dep:tokio",
+    "dep:tokio-stream",
+    "dep:tonic",
+]
+http = ["dep:axum", "dep:tokio"]
+
+[dependencies]
+axum = { workspace = true, optional = true }
+blake3.workspace = true
+contextdb-proto = { workspace = true, optional = true }
+contextdb-service.workspace = true
+prost = { workspace = true, optional = true }
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+tokio = { workspace = true, optional = true }
+tokio-stream = { workspace = true, optional = true }
+tonic = { workspace = true, optional = true }
+zeroize.workspace = true
+
+[dev-dependencies]
+contextdb-reference.workspace = true
+tower.workspace = true
+
+[lints]
+workspace = true

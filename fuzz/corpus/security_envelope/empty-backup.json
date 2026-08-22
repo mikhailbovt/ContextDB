@@ -1,0 +1,22 @@
+{
+  "header": {
+    "format_version": 1,
+    "database_id": "fuzz-database",
+    "archive_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "scopes": ["fuzz-scope"],
+    "policy_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "created_at_micros": 0,
+    "expires_at_micros": 2,
+    "encryption_key_id": "fuzz-encryption-key",
+    "signing_key_id": "fuzz-signing-key",
+    "parent_manifest_digest": null
+  },
+  "manifest": {
+    "header_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "ciphertext_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "nonce": [],
+    "signature": [],
+    "manifest_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "ciphertext": []
+}

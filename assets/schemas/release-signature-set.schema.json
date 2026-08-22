@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-signature-set/v1.json",
+  "title": "ContextDB detached release signature set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release_version", "created_at", "signatures"],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-signature-set/v1"
+    },
+    "release_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/signature"
+      }
+    }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "subject_path",
+        "subject_sha256",
+        "signature_path",
+        "signature_sha256",
+        "algorithm",
+        "encoding",
+        "key_id",
+        "key_fingerprint_sha256",
+        "trust"
+      ],
+      "properties": {
+        "role": {
+          "enum": ["artifact-manifest", "checksums", "proof-index", "version-manifest"]
+        },
+        "subject_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "subject_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "signature_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "signature_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "encoding": {
+          "const": "raw"
+        },
+        "key_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "key_fingerprint_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "trust": {
+          "enum": ["test", "production"]
+        }
+      }
+    }
+  }
+}

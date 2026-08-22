@@ -1,0 +1,18 @@
+[package]
+name = "contextdb-storage-memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic in-memory ContextDB storage backend"
+
+[dependencies]
+contextdb-storage.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,26 @@
+{
+  "determinism": {
+    "compression": "deflate-9",
+    "entry_order": "utf8-bytewise",
+    "timestamp": "1980-01-01T00:00:00Z",
+    "unix_mode": "0644"
+  },
+  "entries": [
+    {
+      "path": "example.json",
+      "sha256": "8da83b3cd089d331c9d7e4c9e063b9beee1238f2cf5a00cdf16abfd99f3e7333",
+      "size_bytes": 967
+    },
+    {
+      "path": "japan-bar.ctxb",
+      "sha256": "3e9af8c750eee85830bf666b1c041f6521f4c53ba46d94b3de3dee921d2172b0",
+      "size_bytes": 2839
+    }
+  ],
+  "output": "contextdb-portable-example.zip",
+  "packager_version": "0.1.0-alpha.2",
+  "release_ready": false,
+  "schema_version": "contextdb.portable-example-package-receipt/v1",
+  "sha256": "79d1307cad57b8c62c6188b5de5bcc75967eb106ead3dd4cc6575e683bf21c21",
+  "size_bytes": 1567
+}

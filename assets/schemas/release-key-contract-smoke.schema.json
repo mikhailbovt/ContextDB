@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-key-contract-smoke/v1.json",
+  "title": "ContextDB development key-boundary smoke receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "executed_at",
+    "scope",
+    "host_target",
+    "source",
+    "binary",
+    "key_contract",
+    "workflow",
+    "result",
+    "docker_runtime_executed",
+    "platform_gate_satisfied",
+    "release_ready",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-key-contract-smoke/v1"
+    },
+    "executed_at": {"type": "string", "format": "date-time"},
+    "scope": {"const": "development-runtime-smoke"},
+    "host_target": {"const": "windows-x86-64"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "dirty"],
+      "properties": {
+        "git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "dirty": {"const": true}
+      }
+    },
+    "binary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sha256"],
+      "properties": {
+        "version": {"$ref": "#/$defs/semver"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "key_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input",
+        "exactly_one_source",
+        "ephemeral_child_environment",
+        "secret_recorded",
+        "adjacent_key_files"
+      ],
+      "properties": {
+        "input": {"const": "CONTEXTDB_TOKEN_KEY_HEX"},
+        "exactly_one_source": {"const": true},
+        "ephemeral_child_environment": {"const": true},
+        "secret_recorded": {"const": false},
+        "adjacent_key_files": {"const": 0}
+      }
+    },
+    "workflow": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "init"},
+        {"const": "doctor-source"},
+        {"const": "export"},
+        {"const": "import"},
+        {"const": "doctor-imported"}
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_valid",
+        "imported_valid",
+        "source_commit_seq",
+        "imported_commit_seq",
+        "archive_digest",
+        "logical_digest_equal",
+        "archive_bytes_equal",
+        "archive_sha256",
+        "archive_size_bytes"
+      ],
+      "properties": {
+        "source_valid": {"const": true},
+        "imported_valid": {"const": true},
+        "source_commit_seq": {"type": "integer", "minimum": 0},
+        "imported_commit_seq": {"type": "integer", "minimum": 0},
+        "archive_digest": {"$ref": "#/$defs/digest64"},
+        "logical_digest_equal": {"const": true},
+        "archive_bytes_equal": {"const": true},
+        "archive_sha256": {"$ref": "#/$defs/sha256"},
+        "archive_size_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "docker_runtime_executed": {"const": false},
+    "platform_gate_satisfied": {"const": false},
+    "release_ready": {"const": false},
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "digest64": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

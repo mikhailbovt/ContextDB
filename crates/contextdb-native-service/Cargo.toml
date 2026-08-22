@@ -1,0 +1,29 @@
+[package]
+name = "contextdb-native-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Incremental Fjall-backed CognitiveMemoryService for ContextDB"
+
+[dependencies]
+blake3.workspace = true
+contextdb-core.workspace = true
+contextdb-recall.workspace = true
+contextdb-service.workspace = true
+contextdb-storage.workspace = true
+contextdb-storage-fjall.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+contextdb-context.workspace = true
+tempfile.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

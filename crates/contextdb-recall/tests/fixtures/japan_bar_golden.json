@@ -1,0 +1,22 @@
+{
+  "status": "complete",
+  "stop_reason": "sufficient",
+  "items": [
+    {
+      "id": "claim:japan-bar-recommendation",
+      "use": "include_silently",
+      "score": 37508906,
+      "routes": ["active_context", "structural"]
+    }
+  ],
+  "covered_facets": ["recommendation"],
+  "missing_facets": [],
+  "evidence_ids": ["evidence:claim:japan-bar-recommendation"],
+  "usage": {
+    "nodes_examined": 2,
+    "graph_edges_examined": 0,
+    "max_hop_reached": 0,
+    "evidence_units": 1,
+    "context_tokens": 15
+  }
+}

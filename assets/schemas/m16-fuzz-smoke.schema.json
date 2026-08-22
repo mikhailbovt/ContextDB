@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/m16-fuzz-smoke/v1.json",
+  "title": "ContextDB M16 fuzz smoke receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "milestone",
+    "generated_at",
+    "status",
+    "frozen_inputs",
+    "environment",
+    "targets",
+    "summary",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {"const": "contextdb.m16-fuzz-smoke/v1"},
+    "milestone": {"const": "M16"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "status": {
+      "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/status"
+    },
+    "frozen_inputs": {
+      "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/frozenInputs"
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture", "rust_toolchain", "cargo_fuzz", "sanitizer"],
+      "properties": {
+        "os": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1},
+        "rust_toolchain": {"type": "string", "minLength": 1},
+        "cargo_fuzz": {"type": "string", "minLength": 1},
+        "sanitizer": {"type": "string", "minLength": 1},
+        "sanitizer_runtime": {
+          "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/artifact"
+        }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "source",
+          "command",
+          "configured_seconds",
+          "executions",
+          "crashes",
+          "timeouts",
+          "out_of_memory",
+          "artifact_files",
+          "status"
+        ],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+          "source": {
+            "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/artifact"
+          },
+          "seed": {
+            "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/artifact"
+          },
+          "command": {"type": "string", "minLength": 1},
+          "configured_seconds": {"type": "integer", "minimum": 1},
+          "executions": {"type": "integer", "minimum": 0},
+          "crashes": {"type": "integer", "minimum": 0},
+          "timeouts": {"type": "integer", "minimum": 0},
+          "out_of_memory": {"type": "integer", "minimum": 0},
+          "artifact_files": {"type": "integer", "minimum": 0},
+          "status": {"enum": ["passed", "failed", "error", "not_run"]}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_targets", "passed_targets", "failed_targets"],
+      "properties": {
+        "total_targets": {"type": "integer", "minimum": 1},
+        "passed_targets": {"type": "integer", "minimum": 0},
+        "failed_targets": {"type": "integer", "minimum": 0}
+      }
+    },
+    "limitations": {
+      "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/limitations"
+    }
+  }
+}

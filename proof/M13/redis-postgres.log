@@ -1,0 +1,10 @@
+schema_version=contextdb.demo-log/v1
+milestone=M13
+generated_at=2026-08-12T13:17:59.693Z
+status=package_demo_passed
+command=cargo +1.97.1 test -p contextdb-knowledge redis_to_postgres_is_current_and_historical_without_invented_rationale -- --nocapture
+exit_code=0
+result=1 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out
+observed=The knowledge ledger answered Redis for the historical state and PostgreSQL for the current state while leaving unsupported rationale unknown.
+source_sha256.crates/contextdb-knowledge/src/tests.rs=dab64781db4de7694d1d26947252225603dce9de6936ad89f77373dfda373a37
+limitation=This is a deterministic source fixture and not arbitrary-document ingestion quality evidence.

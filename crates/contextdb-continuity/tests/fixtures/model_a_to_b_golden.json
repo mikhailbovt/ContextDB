@@ -1,0 +1,100 @@
+{
+  "bootstrap": {
+    "open_loops_preserved": true,
+    "pack_digest": "4d7de3bc78d8922bd6e627c690aa2556d854830ce479220dbd7cdaba1c7c63ae",
+    "profile_id": "00000000-0000-4000-8000-000000000008@model-b.1",
+    "renderer": "compact",
+    "selected_blocks": [
+      "situation:migration-resume",
+      "open-loop:job-application"
+    ],
+    "status": "sufficient",
+    "trace_digest": "2eb90c35a1285de28d0305df18a5b516bbb8cdb1882cc94c2f9221786f57d6f8"
+  },
+  "compatibility": {
+    "compatible": true,
+    "findings": [
+      {
+        "code": "context_budget_reduced",
+        "severity": "warning",
+        "subject": "context_window"
+      },
+      {
+        "code": "tokenizer_changed",
+        "severity": "warning",
+        "subject": "tokenizer"
+      },
+      {
+        "code": "tool_unavailable",
+        "severity": "warning",
+        "subject": "tool:legacy-search"
+      },
+      {
+        "code": "capability_unavailable",
+        "severity": "warning",
+        "subject": "ExtractMemoryCandidates"
+      },
+      {
+        "code": "native_citations_unavailable",
+        "severity": "warning",
+        "subject": "native_citations"
+      },
+      {
+        "code": "prompt_cache_rebuild_required",
+        "severity": "informational",
+        "subject": "prompt_cache"
+      },
+      {
+        "code": "renderer_changed",
+        "severity": "informational",
+        "subject": "renderer"
+      },
+      {
+        "code": "position_behavior_changed",
+        "severity": "warning",
+        "subject": "position_profile"
+      },
+      {
+        "code": "embedding_rebuild_required",
+        "severity": "informational",
+        "subject": "00000000-0000-4000-8000-000000000015"
+      },
+      {
+        "code": "behavioral_continuity_not_guaranteed",
+        "severity": "informational",
+        "subject": "operational_continuity"
+      },
+      {
+        "code": "style_behavior_may_differ",
+        "severity": "warning",
+        "subject": "style_realization"
+      }
+    ],
+    "reembedding": [
+      {
+        "id": "acf603f00a77d048662d768823eb333cc99fb948a63092530890beced2e1adf6",
+        "snapshot_commit": 20,
+        "source_space": "00000000-0000-4000-8000-000000000014",
+        "target_space": "00000000-0000-4000-8000-000000000015"
+      }
+    ],
+    "report_digest": "ff250a4267e16bd31cc3f864dcaae7c45c611e3ac834be1c993a3ad4b22d3c48"
+  },
+  "format_version": 1,
+  "migration_id": "migration:a-to-b",
+  "runtime": {
+    "source_profile": "00000000-0000-4000-8000-000000000007",
+    "source_renderer": "chat",
+    "source_runtime_digest": "e9fdfcb6f491b39d0986b77e4af0bbae0f56b92e3ba21ec2eefa4e24dac85ac8",
+    "target_profile": "00000000-0000-4000-8000-000000000008",
+    "target_renderer": "compact",
+    "target_runtime_digest": "8fa96ed954936aa9d8b7fcf8b25193b36d6b4f1a5e741dcd49ed7b25c8bfad19"
+  },
+  "stable": {
+    "agent_id": "00000000-0000-4000-8000-000000000002",
+    "checkpoint_id": "00000000-0000-4000-8000-000000000013",
+    "memory_subject_id": "00000000-0000-4000-8000-000000000003",
+    "open_loop_id": "00000000-0000-4000-8000-000000000006",
+    "workspace_id": "00000000-0000-4000-8000-000000000001"
+  }
+}

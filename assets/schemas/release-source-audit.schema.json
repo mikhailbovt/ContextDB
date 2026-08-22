@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-source-audit/v1.json",
+  "title": "ContextDB release source audit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "verifier_version",
+    "inputs",
+    "outcome",
+    "release_ready",
+    "package_count",
+    "packages",
+    "issues",
+    "evidence_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-source-audit/v1"
+    },
+    "verifier_version": {"$ref": "#/$defs/semver"},
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "package_matrix",
+        "documentation_matrix",
+        "dockerfile",
+        "docker_source",
+        "rust_manifests"
+      ],
+      "properties": {
+        "package_matrix": {"$ref": "#/$defs/fileReference"},
+        "documentation_matrix": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/fileReference"}]
+        },
+        "dockerfile": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/fileReference"}]
+        },
+        "docker_source": {"$ref": "#/$defs/inventoryReference"},
+        "rust_manifests": {
+          "$ref": "#/$defs/inventoryReference"
+        }
+      }
+    },
+    "outcome": {
+      "enum": ["source_inventory_valid", "failed"]
+    },
+    "release_ready": {
+      "const": false
+    },
+    "package_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "current_state", "present_source_paths", "missing_source_paths"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "current_state": {
+            "type": "string",
+            "minLength": 1
+          },
+          "present_source_paths": {
+            "$ref": "#/$defs/pathArray"
+          },
+          "missing_source_paths": {
+            "$ref": "#/$defs/pathArray"
+          }
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "code", "message", "context"],
+        "properties": {
+          "severity": {
+            "enum": ["warning", "error"]
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]+$"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "context": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "evidence_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_presence_is_package_proof",
+        "static_docker_check_is_runtime_proof",
+        "publication_checked"
+      ],
+      "properties": {
+        "source_presence_is_package_proof": {
+          "const": false
+        },
+        "static_docker_check_is_runtime_proof": {
+          "const": false
+        },
+        "publication_checked": {
+          "const": false
+        }
+      }
+    }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "fileReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+        },
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "inventoryReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "inventory_sha256"],
+      "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "inventory_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "pathArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+      }
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "compatibility": "additive",
+  "baseline": "contextdb_v1_released.proto",
+  "authentication": "full_authenticated_request_context_gateway_before_content",
+  "http_routes": {
+    "/v1/artifacts/attach-to-episode": {"operation": "AttachArtifactToEpisode", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "durable_capture_pending"},
+    "/v1/artifacts/delete-lineage": {"operation": "DeleteArtifactLineage", "request": "high_level_control", "response": "mutation", "capabilities": ["forget", "hard_delete"], "reference_semantics": "unsupported"},
+    "/v1/artifacts/derived-representations": {"operation": "AddDerivedRepresentation", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "unsupported"},
+    "/v1/artifacts/evidence-selectors": {"operation": "AddEvidenceSelector", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "durable_capture_pending"},
+    "/v1/artifacts/ingest": {"operation": "IngestArtifact", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "unsupported"},
+    "/v1/artifacts/metadata": {"operation": "GetArtifactMetadata", "request": "high_level_query", "response": "recall", "capabilities": ["recall"], "reference_semantics": "bounded_recall"},
+    "/v1/conversation/after-turn": {"operation": "AfterTurn", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "durable_capture_pending"},
+    "/v1/conversation/before-turn": {"operation": "BeforeTurn", "request": "high_level_query", "response": "recall", "capabilities": ["recall"], "reference_semantics": "bounded_recall"},
+    "/v1/conversation/begin-session": {"operation": "BeginSession", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "durable_capture_pending"},
+    "/v1/conversation/bootstrap-subject": {"operation": "BootstrapSubject", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "durable_capture_pending"},
+    "/v1/conversation/end-session": {"operation": "EndSession", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "durable_capture_pending"},
+    "/v1/conversation/recall-shared-history": {"operation": "RecallSharedHistory", "request": "high_level_query", "response": "recall", "capabilities": ["recall"], "reference_semantics": "bounded_recall"},
+    "/v1/conversation/resolve-referent": {"operation": "ResolveReferent", "request": "high_level_query", "response": "recall", "capabilities": ["recall"], "reference_semantics": "bounded_recall"},
+    "/v1/memory/change-audience": {"operation": "ChangeAudience", "request": "high_level_control", "response": "mutation", "capabilities": ["correct"], "reference_semantics": "atomic_policy_revision"},
+    "/v1/memory/change-retention": {"operation": "ChangeRetention", "request": "high_level_control", "response": "mutation", "capabilities": ["correct"], "reference_semantics": "unsupported"},
+    "/v1/memory/explain": {"operation": "ExplainMemory", "request": "high_level_query", "response": "recall", "capabilities": ["recall"], "reference_semantics": "bounded_recall"},
+    "/v1/memory/export-subject": {"operation": "ExportSubject", "request": "high_level_transfer", "response": "export", "capabilities": ["read_memory"], "reference_semantics": "unsupported"},
+    "/v1/memory/import-subject": {"operation": "ImportSubject", "request": "high_level_transfer", "response": "import", "capabilities": ["observe", "admin"], "reference_semantics": "unsupported"},
+    "/v1/memory/list-subject": {"operation": "ListSubjectMemories", "request": "high_level_query", "response": "recall", "capabilities": ["recall"], "reference_semantics": "bounded_recall"},
+    "/v1/memory/pin": {"operation": "Pin", "request": "high_level_control", "response": "mutation", "capabilities": ["correct"], "reference_semantics": "unsupported"},
+    "/v1/memory/remember": {"operation": "Remember", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "durable_capture_pending"},
+    "/v1/memory/suppress": {"operation": "Suppress", "request": "high_level_control", "response": "mutation", "capabilities": ["correct"], "reference_semantics": "atomic_policy_revision"},
+    "/v1/relationship-spaces/create": {"operation": "CreateRelationshipSpace", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "durable_capture_pending"},
+    "/v1/shared-memory/publish": {"operation": "PublishToSharedMemory", "request": "high_level_control", "response": "mutation", "capabilities": ["correct"], "reference_semantics": "atomic_policy_revision"},
+    "/v1/shared-memory/revoke": {"operation": "RevokeSharedMemory", "request": "high_level_control", "response": "mutation", "capabilities": ["correct"], "reference_semantics": "atomic_policy_revision"},
+    "/v1/subjects/agent-runtime/migrate": {"operation": "MigrateAgentRuntime", "request": "high_level_control", "response": "mutation", "capabilities": ["runtime"], "reference_semantics": "unsupported"},
+    "/v1/subjects/configured-role/update": {"operation": "UpdateConfiguredRole", "request": "high_level_control", "response": "mutation", "capabilities": ["runtime"], "reference_semantics": "unsupported"},
+    "/v1/subjects/continuity-profile": {"operation": "GetContinuityProfile", "request": "high_level_query", "response": "recall", "capabilities": ["recall"], "reference_semantics": "bounded_recall"},
+    "/v1/subjects/create": {"operation": "CreateMemorySubject", "request": "high_level_write", "response": "high_level_mutation", "capabilities": ["observe"], "reference_semantics": "durable_capture_pending"}
+  },
+  "services": {
+    "ConversationService": [
+      "AfterTurn",
+      "BeforeTurn",
+      "BeginSession",
+      "BootstrapSubject",
+      "EndSession",
+      "RecallSharedHistory",
+      "ResolveReferent"
+    ],
+    "MemoryControlService": [
+      "ChangeAudience",
+      "ChangeRetention",
+      "ExplainMemory",
+      "ExportSubject",
+      "ImportSubject",
+      "ListSubjectMemories",
+      "Pin",
+      "Remember",
+      "Suppress"
+    ],
+    "SubjectRelationshipService": [
+      "CreateMemorySubject",
+      "CreateRelationshipSpace",
+      "GetContinuityProfile",
+      "MigrateAgentRuntime",
+      "PublishToSharedMemory",
+      "RevokeSharedMemory",
+      "UpdateConfiguredRole"
+    ],
+    "ArtifactService": [
+      "AddDerivedRepresentation",
+      "AddEvidenceSelector",
+      "AttachArtifactToEpisode",
+      "DeleteArtifactLineage",
+      "GetArtifactMetadata",
+      "IngestArtifact"
+    ]
+  }
+}

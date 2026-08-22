@@ -1,0 +1,30 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "db9db530-a9e3-498e-8824-1086eba0b834",
+  "started_at": "2026-08-12T13:18:40.170Z",
+  "finished_at": "2026-08-12T13:18:41.838Z",
+  "status": "observation_only",
+  "benchmark": {"id": "BENCH-0801", "family": "BENCH-A", "name": "M8 ContextPack package-quality observation", "version": "1", "dataset_version": "model-renderers-golden-v1", "scenario": "canonical pack, budgets, evidence, conflict, unknown and renderer consistency", "tier": "golden-package-observation"},
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1", "product_version": "0.1.0-alpha.1", "release_channel": "development",
+      "source": {"git_commit": "0000000000000000000000000000000000000000", "dirty": true, "rfc_revision": "RFC-0001-v0.3", "errata": ["ERRATA-0001"], "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]},
+      "build": {"timestamp": "2026-08-12T13:17:59.693Z", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "target": "x86_64-pc-windows-msvc", "profile": "test", "reproducible": false, "builder": "local-proof-backfill"},
+      "formats": {"logical_record": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": []}}, "feature_profile": "research", "features": ["local-package-conformance"]
+    },
+    "version_manifest_sha256": "12ee5d90a01050a6f12ae9b13e0a5074efad48b10c485491cea30076ee0a25fd"
+  },
+  "environment": {"os": "Microsoft Windows NT", "os_version": "10.0.26200.0", "architecture": "x86_64", "cpu": "Intel(R) Core(TM) Ultra 9 275HX", "logical_cores": 24, "memory_bytes": 68044750848, "storage": "local NVMe SSD", "filesystem": "NTFS", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "storage_backend": "contextpack-fixture", "storage_backend_version": "0.1.0-alpha.1", "build_profile": "test"},
+  "configuration": {"seed": 0, "features": ["local-package-conformance"], "budgets": {}, "parameters": {"command": "cargo +1.97.1 test -p contextdb-context --no-fail-fast --quiet", "exit_code": 0, "claim_scope": "golden package tests; no frozen quality dataset"}, "index_watermarks": {}},
+  "metrics": [
+    {"name": "contextpack.tests_passed", "unit": "tests", "direction": "informational", "observed": 19},
+    {"name": "contextpack.renderer_golden_suites", "unit": "suites", "direction": "informational", "observed": 1},
+    {"name": "contextpack.command_elapsed", "unit": "milliseconds", "direction": "informational", "observed": 1667.969}
+  ],
+  "artifacts": [{"kind": "golden-fixture", "uri": "crates/contextdb-context/tests/fixtures/model_renderers_golden.json", "sha256": "172aded5e3ae895064aa4bf2605ceda35ce9189304c8d7292f04b016b3630452"}],
+  "limitations": [
+    "No frozen supported-facts-per-token or evidence-density benchmark runner was executed.",
+    "Elapsed time is Cargo suite time rather than ContextPack compilation latency.",
+    "This observation does not certify arbitrary production tokenizers."
+  ]
+}

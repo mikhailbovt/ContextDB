@@ -1,0 +1,35 @@
+M14 repository-memory demo
+timestamp_utc=2026-08-12T09:44:36.073Z
+command=cargo run -p contextdb-domain-code --example bench_f --release
+result=PASS
+
+Question: Where is password hashing, why are these parameters used, what was used before, and which tests are affected?
+
+Current implementation:
+- stable symbol: DerivePassword (same identity as historical HashPassword)
+- file: internal/auth/password.go
+- source: exact validated declaration containing argon2id
+- snapshot: month-6-commit
+
+History:
+- month 1 path/name: auth/password.go / HashPassword
+- historical algorithm: bcrypt
+- six immutable monthly locations retained through rename, move, and signature revisions
+
+Rationale:
+- supported by DecisionRecord evidence
+- Argon2id parameters were selected from a measured interactive-login budget
+- an unrelated Login rationale is returned as explicit unknown, not inferred
+
+Impact and preflight:
+- compiler Calls relation identifies Login as a dependent
+- TestedBy relation identifies TestPassword
+- latest snapshot-bound CI run passed and carries exact evidence
+
+BENCH-F:
+- full ContextDB: 10/10 labelled tasks, 1.0 accuracy, 5 exploratory calls
+- strongest reduced-feature baseline: 7/10, 0.7 accuracy, 8 exploratory calls
+- grep/lexical/bag-of-words baselines: 4/10 each
+- query median: 5.6 microseconds at the in-process correctness tier
+
+No unsupported rationale, provider output, or code-specific universal-core type was used.

@@ -1,0 +1,10 @@
+schema_version=contextdb.demo-log/v1
+milestone=M8
+generated_at=2026-08-12T13:17:59.693Z
+status=package_demo_passed
+command=cargo +1.97.1 test -p contextdb-context one_canonical_pack_renders_across_model_profiles_without_semantic_drift -- --nocapture
+exit_code=0
+result=1 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out
+observed=One canonical ContextPack rendered across the declared model profiles without selected-evidence semantic drift.
+source_sha256.crates/contextdb-context/tests/fixtures/model_renderers_golden.json=172aded5e3ae895064aa4bf2605ceda35ce9189304c8d7292f04b016b3630452
+limitation=This is renderer conformance, not an external model-provider execution.
