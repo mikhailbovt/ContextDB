@@ -1,0 +1,100 @@
+{
+  "schema": "contextdb.fuzz-smoke/v1",
+  "generated_at": "2026-08-12T17:23:02.6610384+03:00",
+  "evidence_kind": "native_measured",
+  "status": "passed_local_reference",
+  "environment": {
+    "os": "windows",
+    "architecture": "x86_64",
+    "rust_toolchain": "nightly-2026-08-01",
+    "rustc": "rustc 1.99.0-nightly (ad3d0bc14 2026-07-31)",
+    "llvm": "22.1.8",
+    "cargo_fuzz": "0.13.2",
+    "sanitizer": "address",
+    "target": "x86_64-pc-windows-msvc",
+    "sanitizer_runtime": {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\clang_rt.asan_dynamic-x86_64.dll",
+      "file_version": "19.51.36243.0",
+      "sha256": "e7bbdf781e09fbd00a3990ccce4a600a0724318592358e9188c5a5a025ec7753"
+    }
+  },
+  "frozen_inputs": {
+    "workspace_manifest_sha256": "5cc2211cb8baa821860c370326f6237611663f5a9f5df4fbc78579b71a45bcd6",
+    "cargo_lock_sha256": "64da061e71ff64c090ffa87fa8be34baf5d05f96e6820c3466657c1bf3b884cd",
+    "security_source_set": {
+      "files": 12,
+      "manifest_format": "<relative-path><space><sha256><LF>, sorted ordinal by filename",
+      "sha256": "5c667196e3abbfc24aab7ced23d2117801fa2b990df98ce110b7ae30b438ff56"
+    }
+  },
+  "targets": [
+    {
+      "name": "record_envelope",
+      "source": "fuzz/fuzz_targets/record_envelope.rs",
+      "source_sha256": "9634132f6740032b1535f318aa183bef6ab36d3a1595938f5262d17c8b5b0a4d",
+      "command": "$env:Path='C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64;'+$env:Path; cargo +nightly-2026-08-01 fuzz run record_envelope --sanitizer address -- -max_total_time=15 -print_final_stats=1",
+      "configured_seconds": 15,
+      "reported_elapsed_seconds": 16,
+      "max_input_bytes": 4096,
+      "executions": 5855547,
+      "average_executions_per_second": 365971,
+      "coverage_edges": 100,
+      "feature_count": 124,
+      "new_units_added": 2,
+      "final_in_memory_corpus_units": 11,
+      "final_in_memory_corpus_bytes": 1416,
+      "generated_directory_units_before_cleanup": 13,
+      "generated_directory_bytes_before_cleanup": 1552,
+      "preserved_seed_units_after_cleanup": 11,
+      "preserved_seed_bytes_after_cleanup": 1102,
+      "artifact_files": 0,
+      "peak_rss_mib": 500,
+      "crashes": 0,
+      "timeouts": 0,
+      "out_of_memory": 0,
+      "passed": true
+    },
+    {
+      "name": "security_envelope",
+      "source": "fuzz/fuzz_targets/security_envelope.rs",
+      "source_sha256": "786113715d6dbf606d9de84dcabbcfdd3fae2779d9b9fab22103a2111bb3ccf9",
+      "seed": "fuzz/corpus/security_envelope/empty-backup.json",
+      "seed_sha256": "69ede8ab20b7b7b288e929e7baebb63ab927f6a9b479a783128da782a63cc9f6",
+      "command": "$env:Path='C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64;'+$env:Path; cargo +nightly-2026-08-01 fuzz run security_envelope --sanitizer address -- -max_total_time=15 -max_len=8192 -print_final_stats=1",
+      "configured_seconds": 15,
+      "reported_elapsed_seconds": 16,
+      "max_input_bytes": 8192,
+      "executions": 267134,
+      "average_executions_per_second": 16695,
+      "coverage_edges": 1707,
+      "feature_count": 4846,
+      "new_units_added": 4663,
+      "final_in_memory_corpus_units": 1267,
+      "final_in_memory_corpus_bytes_reported": "193Kb",
+      "generated_directory_units_before_cleanup": 1266,
+      "generated_directory_bytes_before_cleanup": 197736,
+      "preserved_seed_units_after_cleanup": 1,
+      "preserved_seed_bytes_after_cleanup": 824,
+      "artifact_files": 0,
+      "peak_rss_mib": 535,
+      "crashes": 0,
+      "timeouts": 0,
+      "out_of_memory": 0,
+      "passed": true
+    }
+  ],
+  "passed_targets": 2,
+  "total_targets": 2,
+  "corpus_cleanup": {
+    "record_envelope_generated_files_removed": 2,
+    "security_envelope_generated_files_removed": 1265,
+    "committed_or_preexisting_seed_files_preserved": true,
+    "post_cleanup_verified": true
+  },
+  "limitations": [
+    "These are time-bounded 15-second native fuzz smoke runs, not exhaustive proofs of parser or cryptographic correctness.",
+    "Coverage and feature counters are libFuzzer runtime counters and are not source-line or branch coverage percentages.",
+    "Linux and macOS sanitizer runs remain target-platform release evidence.",
+    "The security target uses fixed non-production test keys and exercises fail-closed parsing, authorization, signature verification, and authenticated decryption paths."
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/m16-sbom-index/v1.json",
+  "title": "ContextDB M16 CycloneDX SBOM index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "milestone",
+    "generated_at",
+    "status",
+    "frozen_inputs",
+    "cyclonedx_spec",
+    "source_date_epoch",
+    "files",
+    "totals",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {"const": "contextdb.m16-sbom-index/v1"},
+    "milestone": {"const": "M16"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "status": {
+      "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/status"
+    },
+    "frozen_inputs": {
+      "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/frozenInputs"
+    },
+    "cyclonedx_spec": {
+      "enum": ["1.5", "1.6"]
+    },
+    "source_date_epoch": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/artifact"
+      }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files", "bytes", "components", "dependency_edges"],
+      "properties": {
+        "files": {"type": "integer", "minimum": 1},
+        "bytes": {"type": "integer", "minimum": 1},
+        "components": {"type": "integer", "minimum": 0},
+        "dependency_edges": {"type": "integer", "minimum": 0}
+      }
+    },
+    "limitations": {
+      "$ref": "https://contextdb.dev/schemas/m16-proof-common/v1.json#/$defs/limitations"
+    }
+  }
+}

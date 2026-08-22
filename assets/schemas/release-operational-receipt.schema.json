@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-operational-receipt/v1.json",
+  "title": "ContextDB upgrade, rollback, and disaster-recovery receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tool_version",
+    "generated_at",
+    "drill_id",
+    "plan_sha256",
+    "host_target",
+    "profile",
+    "isolated_copy",
+    "old_artifact",
+    "new_artifact",
+    "seed_artifact",
+    "minimum_seed_commit_seq",
+    "bundle_verifications",
+    "scenarios",
+    "activation_sequence",
+    "state_snapshots",
+    "probes",
+    "passed",
+    "release_ready",
+    "network_commands_invoked",
+    "network_isolation_enforced",
+    "docker_runtime_executed"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-operational-receipt/v1"
+    },
+    "tool_version": {"$ref": "#/$defs/semver"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "drill_id": {"$ref": "#/$defs/identifier"},
+    "plan_sha256": {"$ref": "#/$defs/sha256"},
+    "host_target": {"$ref": "#/$defs/nativePlatform"},
+    "profile": {"enum": ["contract", "release"]},
+    "isolated_copy": {"const": true},
+    "old_artifact": {"$ref": "#/$defs/artifactSubject"},
+    "new_artifact": {"$ref": "#/$defs/artifactSubject"},
+    "seed_artifact": {"$ref": "#/$defs/artifactSubject"},
+    "minimum_seed_commit_seq": {"type": "integer", "minimum": 1},
+    "bundle_verifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["old", "new"],
+      "properties": {
+        "old": {"$ref": "#/$defs/verificationSummary"},
+        "new": {"$ref": "#/$defs/verificationSummary"}
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["side-by-side-upgrade", "explicit-rollback", "disaster-recovery"]
+      }
+    },
+    "activation_sequence": {
+      "type": "array",
+      "items": {"enum": ["old", "candidate", "recovered"]}
+    },
+    "state_snapshots": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "sha256", "file_count", "total_size_bytes"],
+        "properties": {
+          "role": {
+            "enum": [
+              "old-before-upgrade",
+              "old-after-rollback",
+              "migration-export",
+              "candidate",
+              "disaster-recovery-export",
+              "recovered"
+            ]
+          },
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "file_count": {"type": "integer", "minimum": 1},
+          "total_size_bytes": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "probes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/probe"}
+    },
+    "passed": {"type": "boolean"},
+    "release_ready": {"const": false},
+    "network_commands_invoked": {"const": false},
+    "network_isolation_enforced": {"const": false},
+    "docker_runtime_executed": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"profile": {"const": "contract"}}},
+      "then": {
+        "properties": {
+          "release_ready": {"const": false}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"passed": {"const": true}}},
+      "then": {
+        "properties": {
+          "activation_sequence": {
+            "const": ["old", "candidate", "old", "recovered"]
+          },
+          "state_snapshots": {"minItems": 6}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "nativePlatform": {
+      "enum": [
+        "linux-x86-64",
+        "linux-arm64",
+        "macos-arm64",
+        "windows-x86-64"
+      ]
+    },
+    "artifactSubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256", "version"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "path": {"$ref": "#/$defs/relativePath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "version": {"$ref": "#/$defs/semver"}
+      }
+    },
+    "verificationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_sha256", "contract_valid", "release_ready"],
+      "properties": {
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "contract_valid": {"const": true},
+        "release_ready": {"type": "boolean"}
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "evidence_level", "argv"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "status": {"enum": ["passed", "failed", "not-run"]},
+        "evidence_level": {"const": "runtime"},
+        "argv": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "detail": {"type": "string"},
+        "exit_code": {"type": "integer"},
+        "stdout_sha256": {"$ref": "#/$defs/sha256"},
+        "stderr_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

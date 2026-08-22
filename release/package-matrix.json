@@ -1,0 +1,381 @@
+{
+  "schema_version": "contextdb.release-package-matrix/v1",
+  "matrix_revision": "RFC-0001-v0.3-m18-m19-source-audit-2026-08-12",
+  "platforms": [
+    {
+      "id": "linux-x86-64",
+      "os": "linux",
+      "architecture": "x86_64",
+      "rust_target": "x86_64-unknown-linux-gnu",
+      "tier": "required"
+    },
+    {
+      "id": "linux-arm64",
+      "os": "linux",
+      "architecture": "aarch64",
+      "rust_target": "aarch64-unknown-linux-gnu",
+      "tier": "required"
+    },
+    {
+      "id": "macos-arm64",
+      "os": "macos",
+      "architecture": "aarch64",
+      "rust_target": "aarch64-apple-darwin",
+      "tier": "required"
+    },
+    {
+      "id": "windows-x86-64",
+      "os": "windows",
+      "architecture": "x86_64",
+      "rust_target": "x86_64-pc-windows-msvc",
+      "tier": "best-effort"
+    }
+  ],
+  "packages": [
+    {
+      "id": "contextdb-binary",
+      "display_name": "ContextDB CLI and server binary",
+      "artifact_kind": "executable",
+      "roles": ["server", "cli"],
+      "coverage": "per-platform",
+      "platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["Cargo.toml", "Cargo.lock", "crates/contextdb-cli", "crates/contextdb-server"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "contextdb-binary",
+        "runtime_required": true,
+        "notes": "Run version, init, doctor, export, import, and doctor after import in an isolated directory."
+      },
+      "notes": "The current CLI includes the serve command; no supported-platform release binaries have been assembled yet."
+    },
+    {
+      "id": "rust-crates",
+      "display_name": "Rust crates",
+      "artifact_kind": "rust-crate",
+      "roles": ["rust-crates"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["Cargo.toml", "Cargo.lock", "crates"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "rust-crate",
+        "runtime_required": true,
+        "notes": "Each intended public crate must be packaged, unpacked in isolation, and built against registry dependencies."
+      },
+      "notes": "The public crate subset and publication policy are unresolved; five workspace packages explicitly set publish=false, but not every workspace package is necessarily a release crate."
+    },
+    {
+      "id": "python-embedded",
+      "display_name": "Embedded Python package",
+      "artifact_kind": "python-wheel",
+      "roles": ["python-package"],
+      "coverage": "per-platform",
+      "platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["bindings/python"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "python-wheel",
+        "runtime_required": true,
+        "module": "contextdb_embedded"
+      },
+      "notes": "Source exists; wheels and clean-venv receipts do not."
+    },
+    {
+      "id": "python-http-sdk",
+      "display_name": "Python HTTP SDK",
+      "artifact_kind": "python-wheel",
+      "roles": ["python-package"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["sdk/python"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "python-wheel",
+        "runtime_required": true,
+        "module": "contextdb"
+      },
+      "notes": "A pure-Python SDK source tree exists; a signed registry publication does not."
+    },
+    {
+      "id": "go-sdk",
+      "display_name": "Go SDK",
+      "artifact_kind": "go-module",
+      "roles": ["go-sdk"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["sdk/go"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "go-module",
+        "runtime_required": true
+      },
+      "notes": "Source and tests exist; version tag/proxy publication evidence does not."
+    },
+    {
+      "id": "typescript-sdk",
+      "display_name": "TypeScript SDK",
+      "artifact_kind": "typescript-package",
+      "roles": ["typescript-sdk"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["sdk/typescript"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "typescript-package",
+        "runtime_required": true
+      },
+      "notes": "Source and local build outputs exist; a signed npm publication does not."
+    },
+    {
+      "id": "chat-middleware",
+      "display_name": "Chat middleware",
+      "artifact_kind": "rust-crate",
+      "roles": ["chat-middleware"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["crates/contextdb-chat"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "rust-crate",
+        "runtime_required": true
+      },
+      "notes": "M11 source and benchmark evidence exist; no standalone published package receipt exists."
+    },
+    {
+      "id": "mcp-adapter",
+      "display_name": "MCP adapter",
+      "artifact_kind": "source-package",
+      "roles": ["mcp-adapter"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["crates/contextdb-mcp"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "source-package",
+        "runtime_required": true,
+        "notes": "Exercise MCP initialization and one tool request against an isolated database."
+      },
+      "notes": "The adapter is also exposed by the ContextDB binary, but the reference artifact remains independently identifiable."
+    },
+    {
+      "id": "document-adapter",
+      "display_name": "Generic document and knowledge adapter",
+      "artifact_kind": "source-package",
+      "roles": ["document-adapter"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["crates/contextdb-knowledge"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "source-package",
+        "runtime_required": true
+      },
+      "notes": "The knowledge vertical exists; a separately packaged generic-document distribution is not yet proven."
+    },
+    {
+      "id": "coding-plugin",
+      "display_name": "Coding reference plugin",
+      "artifact_kind": "source-package",
+      "roles": ["coding-plugin"],
+      "coverage": "declared-platforms",
+      "platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["crates/contextdb-domain-code", "tools/contextdb-go-indexer"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "source-package",
+        "runtime_required": true
+      },
+      "notes": "RFC 31.8 permits narrower support than core, but the final support subset must be explicit and every listed platform needs a receipt."
+    },
+    {
+      "id": "docker-image",
+      "display_name": "OCI/Docker image",
+      "artifact_kind": "docker-image",
+      "roles": ["docker-image"],
+      "coverage": "declared-platforms",
+      "platforms": ["linux-x86-64", "linux-arm64"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64"],
+      "source_paths": ["Cargo.toml", "Cargo.lock", "deploy/docker"],
+      "current_state": "packaging-ready-static",
+      "install_probe": {
+        "kind": "docker-image",
+        "runtime_required": true,
+        "notes": "Pull by digest, start rootless, wait for health, persist/reopen one database, and verify network interfaces."
+      },
+      "notes": "Docker runtime was intentionally not executed in this workstream; static files are not an image proof."
+    },
+    {
+      "id": "portable-example-database",
+      "display_name": "Portable example database",
+      "artifact_kind": "example-database",
+      "roles": ["example-databases"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["examples/portable-database"],
+      "current_state": "packaging-ready-static",
+      "install_probe": {
+        "kind": "portable-database",
+        "runtime_required": true,
+        "notes": "Import into a fresh destination with an externally supplied ephemeral key, reject any adjacent plaintext key, and run doctor."
+      },
+      "notes": "Packaging and integrity can be proven locally; required-platform import receipts remain release evidence."
+    },
+    {
+      "id": "benchmark-suite",
+      "display_name": "Benchmark suite",
+      "artifact_kind": "benchmark-suite",
+      "roles": ["benchmark-suite"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": ["linux-x86-64", "linux-arm64", "macos-arm64", "windows-x86-64"],
+      "source_paths": ["benchmarks", "crates/contextdb-bench"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "source-package",
+        "runtime_required": true
+      },
+      "notes": "A final release requires a versioned runnable suite, not only individual milestone harnesses."
+    },
+    {
+      "id": "benchmark-datasets",
+      "display_name": "Benchmark datasets",
+      "artifact_kind": "benchmark-dataset",
+      "roles": ["benchmark-datasets"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": [],
+      "source_paths": ["benchmarks", "proof"],
+      "current_state": "external-proof-required",
+      "install_probe": {
+        "kind": "dataset",
+        "runtime_required": false
+      },
+      "notes": "Public immutable dataset publication and final benchmark index are external release gates."
+    },
+    {
+      "id": "full-documentation",
+      "display_name": "Full documentation set",
+      "artifact_kind": "documentation",
+      "roles": ["full-docs"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": [],
+      "source_paths": ["docs", "README.md", "release/documentation-matrix.json"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "documentation",
+        "runtime_required": false
+      },
+      "notes": "The release matrix tracks every RFC 31.16 category; completeness is not inferred from this directory existing."
+    },
+    {
+      "id": "signed-checksums",
+      "display_name": "Canonical SHA-256 checksum file and detached signatures",
+      "artifact_kind": "checksum-set",
+      "roles": ["signed-checksums"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": [],
+      "source_paths": ["tools/contextdb-release", "assets/schemas"],
+      "current_state": "packaging-ready-static",
+      "install_probe": {
+        "kind": "checksum-set",
+        "runtime_required": false
+      },
+      "notes": "The contract and verifier exist; production signing key custody and signatures do not."
+    },
+    {
+      "id": "sbom",
+      "display_name": "CycloneDX SBOM set",
+      "artifact_kind": "sbom",
+      "roles": ["sbom"],
+      "coverage": "platform-independent",
+      "platforms": ["platform-independent"],
+      "runtime_platforms": [],
+      "source_paths": ["crates", "bindings/python"],
+      "current_state": "source-present",
+      "install_probe": {
+        "kind": "sbom",
+        "runtime_required": false
+      },
+      "notes": "The checked-in local-MCP developer-preview SBOM covers only its exact listener-free Windows graph. Release-candidate CI generates fresh binary- and wheel-bound SBOMs; final aggregate multi-artifact SBOM generation and verification remain required."
+    }
+  ],
+  "release_requirements": {
+    "alpha": [
+      "contextdb-binary",
+      "rust-crates",
+      "chat-middleware",
+      "document-adapter",
+      "portable-example-database",
+      "benchmark-suite",
+      "benchmark-datasets",
+      "full-documentation",
+      "signed-checksums",
+      "sbom"
+    ],
+    "beta": [
+      "contextdb-binary",
+      "rust-crates",
+      "python-embedded",
+      "python-http-sdk",
+      "go-sdk",
+      "typescript-sdk",
+      "chat-middleware",
+      "mcp-adapter",
+      "document-adapter",
+      "coding-plugin",
+      "docker-image",
+      "portable-example-database",
+      "benchmark-suite",
+      "benchmark-datasets",
+      "full-documentation",
+      "signed-checksums",
+      "sbom"
+    ],
+    "stable": [
+      "contextdb-binary",
+      "rust-crates",
+      "python-embedded",
+      "python-http-sdk",
+      "go-sdk",
+      "typescript-sdk",
+      "chat-middleware",
+      "mcp-adapter",
+      "document-adapter",
+      "coding-plugin",
+      "docker-image",
+      "portable-example-database",
+      "benchmark-suite",
+      "benchmark-datasets",
+      "full-documentation",
+      "signed-checksums",
+      "sbom"
+    ]
+  },
+  "signature_requirements": {
+    "alpha": {
+      "roles": ["artifact-manifest", "checksums"],
+      "minimum_trust": "production"
+    },
+    "beta": {
+      "roles": ["artifact-manifest", "checksums", "proof-index", "version-manifest"],
+      "minimum_trust": "production"
+    },
+    "stable": {
+      "roles": ["artifact-manifest", "checksums", "proof-index", "version-manifest"],
+      "minimum_trust": "production"
+    }
+  }
+}

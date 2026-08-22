@@ -1,0 +1,43 @@
+{
+  "schema_version": "contextdb.test-report/v1",
+  "milestone": "M7",
+  "generated_at": "2026-08-12T08:44:21.196Z",
+  "status": "package_conformance_passed",
+  "commands": [
+    {"command": "cargo test -p contextdb-index --no-fail-fast", "result": "8 passed, 0 failed"},
+    {"command": "cargo test -p contextdb-index --release --no-fail-fast", "result": "8 passed, 0 failed"},
+    {"command": "cargo clippy -p contextdb-index --all-targets -- -D warnings", "result": "passed"},
+    {"command": "RUSTDOCFLAGS=-D warnings cargo doc -p contextdb-index --no-deps", "result": "passed"},
+    {"command": "cargo fmt -p contextdb-index -- --check", "result": "passed"}
+  ],
+  "verified_invariants": [
+    "Exact full-precision vectors remain separate from and authoritative over ANN generations.",
+    "VectorSpace IDs are add-only and cannot be rebound across model revision, preprocessing, dimension, metric, or modality.",
+    "Lexical, full-precision vector, HNSW, and artifact generations carry schema versions, canonical payloads, BLAKE3 digests, and semantic watermarks.",
+    "Tampered generation payloads fail closed before publication.",
+    "Future delta survives an earlier watermark publication and is visible only at its later snapshot.",
+    "Tombstones suppress current recall immediately while the prior snapshot retains historical visibility.",
+    "Staged HNSW publication is a separate verified pointer switch; unpublished bundles are never active.",
+    "Transcript, caption, OCR, and embedding records retain original ArtifactId, source ContentBlockId, selector, source hash, pipeline derivation, and a non-broadened SemanticEnvelope.",
+    "Artifact deletion closure covers original and derived blob locators and representation IDs.",
+    "Cross-modal search compatibility is explicit and native vector space membership is validated."
+  ],
+  "restart_evidence": [
+    "Lexical generation export/import returns identical authorized Tantivy hits.",
+    "Full-precision vector-store restore plus independent HNSW-generation restore returns the expected authorized result.",
+    "Artifact generation restore preserves source selector and hash before materialization.",
+    "Corrupted HNSW generation import is rejected."
+  ],
+  "limitations": [
+    "Atomic durable storage of staged bundles plus MaintenanceOperation::IndexGenerationSwitch must still be wired through the integrated journal/server.",
+    "OS process-kill testing during generation switch is not represented by this package-level portable restore proof.",
+    "Physical space amplification and million-scale rebuild latency belong to M16/M17 BENCH-H."
+  ],
+  "source_sha256": {
+    "crates/contextdb-index/src/lib.rs": "454958c28d01dfd42789e274d5a7428aceac68eaa9b2949dc846103ba96ae157",
+    "crates/contextdb-index/src/lexical.rs": "ee02e3fd570805285ec8dcd7136d0c70a2f67b875b06c49e796690dee7b2cb8e",
+    "crates/contextdb-index/src/vector.rs": "ad1c3d200d154aea4d9e64d8c53ebfd170609d4134c0fa32b9c973b08accfb4e",
+    "crates/contextdb-index/src/artifact.rs": "7430d14bb40cd2356e89908feade1869f1b7b5ef780ccfd74b480da8bb92b982",
+    "crates/contextdb-index/src/tests.rs": "da8b00d0424843ccd81da7fde3bbca73938d8a89b3250904a338530a3f6592b2"
+  }
+}

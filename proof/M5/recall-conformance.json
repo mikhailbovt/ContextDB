@@ -1,0 +1,26 @@
+{
+  "schema_version": "contextdb.test-report/v1",
+  "milestone": "M5",
+  "generated_at": "2026-08-12T13:18:40.169Z",
+  "status": "package_conformance_passed",
+  "command": "cargo +1.97.1 test -p contextdb-recall --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 22, "failed": 0, "ignored": 0},
+  "invariants_exercised": [
+    "memory gate before snapshot and authorization",
+    "wrong-person and omitted-grant exclusion",
+    "current, historical, conflict and unknown semantics",
+    "exact vector and graph routes with stable ordering",
+    "strict node, token, hop, deadline and continuation budgets",
+    "authorized trace and evidence-only outputs"
+  ],
+  "source_sha256": {
+    "crates/contextdb-recall/src/lib.rs": "c552276c565270424117e416999511945ef4d257864795c71e3bcaee700e989e",
+    "crates/contextdb-recall/src/tests.rs": "c3ea10bb840fba2636d195f823d5dfd879250f787e9588d25e04b2df46c01677",
+    "crates/contextdb-recall/tests/fixtures/japan_bar_golden.json": "b5dc239952bed833ce7bf12ec197949984072ece5136275de471c669ab504534"
+  },
+  "limitations": [
+    "The suite uses deterministic in-process providers and exact routes; no ANN or external model is involved.",
+    "Naturalness and social calibration are not measured by M5 package conformance."
+  ]
+}

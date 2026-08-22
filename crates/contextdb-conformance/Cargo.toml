@@ -1,0 +1,37 @@
+[package]
+name = "contextdb-conformance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Cross-interface compatibility and conformance proof harness for ContextDB"
+
+[dependencies]
+axum.workspace = true
+blake3.workspace = true
+contextdb-mcp.workspace = true
+contextdb-proto = { workspace = true, features = ["grpc"] }
+contextdb-server = { workspace = true, features = ["server", "http"] }
+contextdb-service.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tonic.workspace = true
+tower.workspace = true
+
+[dev-dependencies]
+contextdb-reference.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winreg.workspace = true
+
+[lints]
+workspace = true

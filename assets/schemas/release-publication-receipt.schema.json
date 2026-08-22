@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-publication-receipt/v1.json",
+  "title": "ContextDB immutable artifact publication receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact",
+    "registry_type",
+    "immutable_uri",
+    "immutable_reference",
+    "published_at",
+    "verified_at",
+    "retrieved_sha256",
+    "status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-publication-receipt/v1"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256", "version"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "path": {"$ref": "#/$defs/relativePath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "version": {"$ref": "#/$defs/semver"}
+      }
+    },
+    "registry_type": {
+      "enum": [
+        "crates-io",
+        "pypi",
+        "go-proxy",
+        "npm",
+        "oci-registry",
+        "github-release",
+        "static-https"
+      ]
+    },
+    "immutable_uri": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "immutable_reference": {"const": true},
+    "published_at": {"type": "string", "format": "date-time"},
+    "verified_at": {"type": "string", "format": "date-time"},
+    "retrieved_sha256": {"$ref": "#/$defs/sha256"},
+    "status": {"const": "passed"},
+    "platform": {"$ref": "#/$defs/identifier"},
+    "receipt_uri": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    }
+  }
+}

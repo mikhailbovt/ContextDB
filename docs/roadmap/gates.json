@@ -1,0 +1,1030 @@
+{
+  "schema_version": "contextdb.roadmap-gate-ledger/v1",
+  "roadmap_revision": "RFC-0001-v0.3+ERRATA-0001",
+  "status_vocabulary": [
+    "not_started",
+    "in_progress",
+    "blocked",
+    "passed",
+    "failed",
+    "waived"
+  ],
+  "rules": {
+    "dependency_closure_required": true,
+    "proof_required": true,
+    "waiver_policy": "M19 cannot be waived. Any earlier waiver requires passed dependencies and exactly one Accepted ADR whose structured Waived milestone, Waiver expires, and Residual risk fields exactly match the ledger; expiry is checked against the validator host's trusted current UTC date. Correctness invariants, authorization-before-retrieval, acknowledged durability, deletion suppression, and unresolved critical/high security findings remain mandatory for M19.",
+    "release_gate": "M19"
+  },
+  "milestones": [
+    {
+      "id": "M0",
+      "title": "Repository, RFC and engineering rules",
+      "status": "in_progress",
+      "status_reason": "Foundational artifacts are being created; passing CI proof is not yet attached.",
+      "depends_on": [],
+      "objective": "Create a governed workspace in which architecture, compatibility, and benchmark evidence are versioned with the code.",
+      "artifacts": [
+        "Cargo workspace and pinned toolchain",
+        "License and community/security documents",
+        "ADR template, ADR-0001 through ADR-0005, registry, and RFC errata",
+        "Feature and dependency policy",
+        "Benchmark-result, version-manifest, gate-ledger, and issue-label schemas",
+        "Executable M0-M19 gate ledger",
+        "Target-platform CI, supply-chain checks, and fuzz smoke",
+        "Versioned issue-label manifest and minimal example binary"
+      ],
+      "tests": [
+        "Formatting, Clippy, workspace tests, audit, deny, and fuzz smoke",
+        "JSON Schema validation for all schemas and examples",
+        "YAML parse and duplicate-label validation",
+        "ADR numbering and dependency-DAG validation"
+      ],
+      "benchmarks": [
+        "Benchmark result format validates with a documentation-only example; no performance claim"
+      ],
+      "demo": "Run contextdb version, open an empty in-memory database, and run the governance validator.",
+      "exit_criteria": [
+        {
+          "id": "M0-E01",
+          "text": "Required Linux x86_64, Linux arm64, and macOS arm64 CI gates pass; Windows x86_64 is reported as best-effort without hiding its result."
+        },
+        {
+          "id": "M0-E02",
+          "text": "ADR registry has one unambiguous owner for ADR-0001 through ADR-0005 and all accepted decisions include proof obligations."
+        },
+        {
+          "id": "M0-E03",
+          "text": "All governance JSON and YAML validates, the roadmap is acyclic, and every M0-M19 gate has artifacts, tests, benchmark evidence, demo, exit criteria, and proof requirements."
+        },
+        {
+          "id": "M0-E04",
+          "text": "Release/debug profiles, deterministic seed policy, feature policy, benchmark schema, and version manifest contract are documented and machine-readable where applicable."
+        },
+        {
+          "id": "M0-E05",
+          "text": "No architecture decision required for M1 is unowned or left only as contradictory RFC prose."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "ci_report",
+          "path": "proof/M0/ci.json"
+        },
+        {
+          "kind": "test_report",
+          "path": "proof/M0/governance-validation.json"
+        },
+        {
+          "kind": "documentation",
+          "path": "docs/architecture/v1-overview.md"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M0/demo.log"
+        }
+      ]
+    },
+    {
+      "id": "M1",
+      "title": "In-memory universal reference semantics",
+      "status": "not_started",
+      "depends_on": ["M0"],
+      "objective": "Build a slow deterministic correctness oracle without disk or ANN.",
+      "artifacts": [
+        "Typed universal memory domain model",
+        "In-memory snapshots and transactions",
+        "Deterministic logical import/export",
+        "Domain-pack registry and canonical fixtures"
+      ],
+      "tests": [
+        "Temporal, perspective, policy, correction, relationship, merge/split, and serialization properties",
+        "At least 10000 deterministic state-machine operations",
+        "Logical multimodal selector conformance"
+      ],
+      "benchmarks": [
+        "Reference-engine correctness baseline for BENCH-A, BENCH-B, BENCH-C, and BENCH-G fixtures"
+      ],
+      "demo": "Resolve the Japan-bar reference and distinguish its historical discussion from current commitment state.",
+      "exit_criteria": [
+        {
+          "id": "M1-E01",
+          "text": "All universal semantic invariants and state-machine checks pass with deterministic seeds."
+        },
+        {
+          "id": "M1-E02",
+          "text": "Core contains no code-domain-specific type and domain packs use namespaced extensions."
+        },
+        {
+          "id": "M1-E03",
+          "text": "Logical export/import is canonical, deterministic, and preserves identity, perspective, ownership, consent, and lineage."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "test_report",
+          "path": "proof/M1/reference-conformance.json"
+        },
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M1/reference-baseline.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M1/japan-bar.log"
+        }
+      ]
+    },
+    {
+      "id": "M2",
+      "title": "Storage substrate bake-off",
+      "status": "not_started",
+      "depends_on": ["M1"],
+      "objective": "Select a provisional embedded substrate using measured ContextDB workloads rather than backend marketing claims.",
+      "artifacts": [
+        "StorageEngine contract",
+        "Memory, Fjall, and redb implementations",
+        "RocksDB comparison adapter",
+        "BENCH-0001 report and substrate ADR"
+      ],
+      "tests": [
+        "Backend conformance for snapshots, atomic batches, iteration, checkpoint, verify, and recovery",
+        "Crash, lost-response, corruption, ENOSPC, and compaction-interference matrix"
+      ],
+      "benchmarks": [
+        "BENCH-0001 storage bake-off with episode append, semantic transactions, adjacency, subject-local scans, revisions, vector delta, snapshots, compaction, and recovery"
+      ],
+      "demo": "Run the same durable workload against the two conforming pure-Rust candidates and emit one comparable result bundle.",
+      "exit_criteria": [
+        {
+          "id": "M2-E01",
+          "text": "A provisional default is selected by an accepted ADR with reproducible workload evidence."
+        },
+        {
+          "id": "M2-E02",
+          "text": "A second backend remains a continuously tested conformance target through M19."
+        },
+        {
+          "id": "M2-E03",
+          "text": "StorageEngine does not expose backend types or preclude ordered scans, batching, snapshots, checkpoints, and custom immutable segments."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "benchmark_result",
+          "path": "docs/benchmarks/results/m2-storage-bakeoff-windows-2026-08-12.json"
+        },
+        {
+          "kind": "conformance_report",
+          "path": "proof/M2/storage-conformance.json"
+        },
+        {
+          "kind": "documentation",
+          "path": "docs/architecture/feature-policy.md"
+        }
+      ]
+    },
+    {
+      "id": "M3",
+      "title": "Durable semantic journal and transaction coordinator",
+      "status": "not_started",
+      "depends_on": ["M2"],
+      "objective": "Ensure that acknowledged experience and atomic semantic revisions survive supported crashes.",
+      "artifacts": [
+        "Versioned envelope and semantic operation schema",
+        "Commit coordinator, idempotency, snapshots, and atomic outbox",
+        "Recovery, verify, basic backup/restore, and reference replay"
+      ],
+      "tests": [
+        "Fault injection at every commit, acknowledgement, outbox, staging, and lease boundary",
+        "Duplicate request, lost response, corrupted tail, and deterministic replay tests"
+      ],
+      "benchmarks": [
+        "Commit latency, batch size, recovery time, write amplification, and fault-matrix duration baseline"
+      ],
+      "demo": "Capture a conversation, terminate the process at injected points, restart, and reproduce the reference logical export.",
+      "exit_criteria": [
+        {
+          "id": "M3-E01",
+          "text": "No acknowledged observation is lost within the declared fault model."
+        },
+        {
+          "id": "M3-E02",
+          "text": "No partial semantic transaction or partial projection task publication becomes visible."
+        },
+        {
+          "id": "M3-E03",
+          "text": "Recovery and replay are deterministic and equivalent to the reference engine."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "test_report",
+          "path": "proof/M3/fault-matrix.json"
+        },
+        {
+          "kind": "conformance_report",
+          "path": "proof/M3/replay-equivalence.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M3/crash-recovery.log"
+        }
+      ]
+    },
+    {
+      "id": "M4",
+      "title": "Persistent temporal graph, subjects and policy",
+      "status": "not_started",
+      "depends_on": ["M3"],
+      "objective": "Persist the universal semantic model with snapshot-consistent temporal graph and authorization indexes.",
+      "artifacts": [
+        "Stable external and dense internal IDs",
+        "Temporal node, claim, edge, conflict, subject, scope, and policy indexes",
+        "Mutable deltas, immutable adjacency generations, compaction, and artifact metadata store"
+      ],
+      "tests": [
+        "Reference-vs-persistent differential suite",
+        "Authorization-before-materialization, bitemporal, compaction, crash, and stable-ID tests"
+      ],
+      "benchmarks": [
+        "Million-scale graph traversal, temporal lookup, subject-local filtering, compaction, and snapshot baseline"
+      ],
+      "demo": "Query a million-scale graph before and after compaction at current, historical-domain, and historical-transaction times.",
+      "exit_criteria": [
+        {
+          "id": "M4-E01",
+          "text": "Persistent results and logical export match the reference engine."
+        },
+        {
+          "id": "M4-E02",
+          "text": "Authorization and current deletion policy are applied before candidate materialization, including through old semantic snapshots."
+        },
+        {
+          "id": "M4-E03",
+          "text": "Snapshots are internally consistent, public IDs remain stable, and graph generations survive crash and compaction."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "conformance_report",
+          "path": "proof/M4/persistent-reference.json"
+        },
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M4/million-graph.json"
+        },
+        {
+          "kind": "security_report",
+          "path": "proof/M4/policy-before-materialization.json"
+        }
+      ]
+    },
+    {
+      "id": "M5",
+      "title": "Deterministic universal recall",
+      "status": "not_started",
+      "depends_on": ["M1"],
+      "objective": "Prove selective recall semantics before model-assisted planning and approximate indexes.",
+      "artifacts": [
+        "CueBundle, SituationFrame, memory gate, retrievers, fusion, activation, sufficiency, evidence expansion, memory-use decision, explain trace, and continuation",
+        "Exact supplied-vector API and deterministic retrieval budgets"
+      ],
+      "tests": [
+        "Current, historical, unknown, wrong-person, perspective, conflict, policy-omission, budget, traceability, and continuation tests",
+        "Reference recall golden scenarios"
+      ],
+      "benchmarks": [
+        "First BENCH-A and BENCH-C slices with exact deterministic routes"
+      ],
+      "demo": "Resolve an implicit Japan-bar question from recent and long-term context while suppressing unrelated sensitive facts.",
+      "exit_criteria": [
+        {
+          "id": "M5-E01",
+          "text": "Current, historical, and unknown answers are correct and wrong-person tests pass."
+        },
+        {
+          "id": "M5-E02",
+          "text": "Unauthorized or mention-prohibited memory does not enter candidates, ranking, or the ContextPack."
+        },
+        {
+          "id": "M5-E03",
+          "text": "All operators obey hard budgets and every factual output block is traceable to evidence."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "test_report",
+          "path": "proof/M5/recall-conformance.json"
+        },
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M5/deterministic-recall.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M5/implicit-reference.log"
+        }
+      ]
+    },
+    {
+      "id": "M6",
+      "title": "Hierarchy engine",
+      "status": "not_started",
+      "depends_on": ["M4", "M5"],
+      "objective": "Add versioned coarse-to-fine views that reduce search without replacing semantic truth.",
+      "artifacts": [
+        "Versioned hierarchy views and deterministic builders",
+        "Autobiographical, relationship, topic, time, goal, and domain views",
+        "Branch summaries, beam traversal, invalidation, side-by-side rebuild, and cycle detection"
+      ],
+      "tests": [
+        "Multi-membership, cycle, invalidation, snapshot, generation-switch, and no-destructive-reparenting tests"
+      ],
+      "benchmarks": [
+        "Flat-graph versus hierarchy-guided ablation for nodes examined, latency, precision, and token cost"
+      ],
+      "demo": "Drill from a coarse subject/topic view to minimal evidence while a prior snapshot retains the old hierarchy generation.",
+      "exit_criteria": [
+        {
+          "id": "M6-E01",
+          "text": "Hierarchy guidance measurably reduces examined graph on a predeclared workload without recall-quality collapse."
+        },
+        {
+          "id": "M6-E02",
+          "text": "Nodes support multiple views and memberships without destructive source reparenting."
+        },
+        {
+          "id": "M6-E03",
+          "text": "A verified generation is published atomically and old snapshots remain consistent until expiry."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M6/hierarchy-ablation.json"
+        },
+        {
+          "kind": "test_report",
+          "path": "proof/M6/hierarchy-conformance.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M6/generation-switch.log"
+        }
+      ]
+    },
+    {
+      "id": "M7",
+      "title": "Lexical, vector and artifact representations",
+      "status": "not_started",
+      "depends_on": ["M3", "M4", "M5"],
+      "objective": "Add rebuildable lexical, exact-vector, persistent-ANN, and artifact-representation routes while preserving exact and policy-safe oracles.",
+      "artifacts": [
+        "Tantivy projection and exact lexical delta",
+        "VectorSpace registry, aligned full-precision store, and exact filtered scan",
+        "Persistent HNSW generations, mutable delta, tombstones, authorization-safe filters, rerank, watermarks, and rebuild",
+        "Artifact selectors, derived transcript/caption records, blob locators, and cross-modal compatibility metadata"
+      ],
+      "tests": [
+        "Exact-vs-ANN differential, mixed-space rejection, policy/no-touch, tombstone, crash/rebuild, watermark, and artifact-lineage tests",
+        "Deterministic or recorded embedding fixtures independent of M9 providers"
+      ],
+      "benchmarks": [
+        "ANN recall and exact overlap under scope, temporal, subject, sparse-filter, delta, tombstone, and compaction workloads"
+      ],
+      "demo": "Restart across HNSW generation publication and return the same authorized evidence after exact reranking.",
+      "exit_criteria": [
+        {
+          "id": "M7-E01",
+          "text": "The exact full-precision vector engine remains a deterministic correctness oracle."
+        },
+        {
+          "id": "M7-E02",
+          "text": "Tantivy and HNSW meet predeclared quality and latency floors in the official server profile."
+        },
+        {
+          "id": "M7-E03",
+          "text": "Unauthorized nodes are never scored or traversed unless separately authorized routing-only metadata satisfies ERRATA-0001 E-005."
+        },
+        {
+          "id": "M7-E04",
+          "text": "Index rebuild is crash-safe, space-safe, watermark-visible, and preserves artifact/evidence lineage."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M7/ann-quality.json"
+        },
+        {
+          "kind": "security_report",
+          "path": "proof/M7/filtered-retrieval.json"
+        },
+        {
+          "kind": "test_report",
+          "path": "proof/M7/rebuild-lineage.json"
+        }
+      ]
+    },
+    {
+      "id": "M8",
+      "title": "ContextPack and memory-use compiler",
+      "status": "not_started",
+      "depends_on": ["M5", "M6", "M7"],
+      "objective": "Compile a model-neutral, minimal, sufficient, evidence-backed, and disclosure-safe context.",
+      "artifacts": [
+        "Canonical ContextPack schema",
+        "Situation, participant, continuity, shared-history, fact, timeline, preference, relationship, goal, conflict, unknown, evidence, and use-directive blocks",
+        "Token estimation, structural compression, progressive packs, no-memory result, renderers, and disclosure guard"
+      ],
+      "tests": [
+        "Deterministic golden packs across supported renderer profiles",
+        "Instruction/data separation, mention policy, stable evidence ID, budget, contradiction, and no-memory tests"
+      ],
+      "benchmarks": [
+        "Supported facts and facets per token, evidence density, contradiction/unknown visibility, and renderer consistency"
+      ],
+      "demo": "Render one canonical pack for small local, large hosted, chat, and coding runtimes without changing selected evidence.",
+      "exit_criteria": [
+        {
+          "id": "M8-E01",
+          "text": "Canonical schema and evidence IDs are stable and all pack variants obey hard token budgets."
+        },
+        {
+          "id": "M8-E02",
+          "text": "Mention/disclosure policy and instruction/data separation pass golden and adversarial tests."
+        },
+        {
+          "id": "M8-E03",
+          "text": "Progressive and no-memory results are deterministic and include a machine-readable compilation report."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "test_report",
+          "path": "proof/M8/golden-packs.json"
+        },
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M8/contextpack-quality.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M8/multi-renderer.log"
+        }
+      ]
+    },
+    {
+      "id": "M9",
+      "title": "Model capability runtime",
+      "status": "not_started",
+      "depends_on": ["M4", "M5", "M8"],
+      "objective": "Use local and hosted models as replaceable, policy-routed compute behind proposal-only contracts.",
+      "artifacts": [
+        "Capability registry, ModelProfile, gateway, provider traits, schema validation, audit, prompt assets, batching, shadow evaluation, and deterministic fallback"
+      ],
+      "tests": [
+        "Malformed output, timeout, retry, circuit breaker, privacy/cost route, provider outage, recorded replay, and no-model tests"
+      ],
+      "benchmarks": [
+        "Per-capability latency, tokens, cost, schema-failure, evidence-violation, cache, and quality shadow comparison"
+      ],
+      "demo": "Run the same capability through recorded/local and hosted-compatible adapters, then disable providers and preserve deterministic operation.",
+      "exit_criteria": [
+        {
+          "id": "M9-E01",
+          "text": "No provider type or provider JSON enters core semantics or durable logical formats."
+        },
+        {
+          "id": "M9-E02",
+          "text": "Malformed, unauthorised, or unsupported model output cannot mutate memory."
+        },
+        {
+          "id": "M9-E03",
+          "text": "Privacy/cost routing and deterministic provider-outage fallback pass conformance tests."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "conformance_report",
+          "path": "proof/M9/capability-runtime.json"
+        },
+        {
+          "kind": "security_report",
+          "path": "proof/M9/provider-routing.json"
+        },
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M9/capability-shadow.json"
+        }
+      ]
+    },
+    {
+      "id": "M10",
+      "title": "AI-assisted write, consolidation and reflection",
+      "status": "not_started",
+      "depends_on": ["M9"],
+      "objective": "Form useful durable memory from evidence without promoting noise, false identity, or self-reinforcing model output.",
+      "artifacts": [
+        "Post-turn extraction, alignment, entity/temporal adjudication, promotion/quarantine, semantic write, dirty regions, summaries, reflection, no-op, and reprocessing pipeline"
+      ],
+      "tests": [
+        "Correction, false preference, false relationship, evidence exactness, hallucinated evidence, source-family, no-op, rollback, and anti-self-reference tests"
+      ],
+      "benchmarks": [
+        "Write-pipeline candidate precision/recall, evidence exactness, entity resolution, false-promotion ceilings, correction detection, and no-op precision"
+      ],
+      "demo": "Process a conversation containing facts, a hypothetical goal, a correction, an injection attempt, and irrelevant chatter; publish only supported revisions.",
+      "exit_criteria": [
+        {
+          "id": "M10-E01",
+          "text": "Predeclared candidate quality, false-preference, false-relationship, correction, and no-op floors are met."
+        },
+        {
+          "id": "M10-E02",
+          "text": "Hallucinated or misaligned evidence is rejected and every accepted proposal retains complete processing lineage."
+        },
+        {
+          "id": "M10-E03",
+          "text": "Reflection remains a hypothesis with support and counterexamples and never becomes independent evidence of itself."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M10/write-pipeline.json"
+        },
+        {
+          "kind": "security_report",
+          "path": "proof/M10/poisoning-and-lineage.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M10/adjudication.log"
+        }
+      ]
+    },
+    {
+      "id": "M11",
+      "title": "Persistent conversational LLM vertical",
+      "status": "not_started",
+      "depends_on": ["M10"],
+      "objective": "Deliver a complete persistent-conversation product slice for ordinary language models.",
+      "artifacts": [
+        "Chat middleware, bootstrap, before/after hooks, active referents, shared history, preference/boundary controls, relationship summaries, social calibration, and two runtime integrations"
+      ],
+      "tests": [
+        "Cross-session implicit/explicit recall, corrections, current state, shared/private isolation, controls, appropriate silence, and provider-independence tests"
+      ],
+      "benchmarks": [
+        "Full BENCH-A Lifetime Conversation Memory with published quality and social-calibration floors"
+      ],
+      "demo": "After hundreds of scripted sessions and a process restart, resolve Fatih, the Japan bar, and a historical pre-graduation belief naturally.",
+      "exit_criteria": [
+        {
+          "id": "M11-E01",
+          "text": "BENCH-A meets published referent, temporal, correction, privacy, continuity, latency, and social-calibration floors."
+        },
+        {
+          "id": "M11-E02",
+          "text": "Unsolicited personal mention stays below its ceiling and labelled sensitive-memory leak is zero."
+        },
+        {
+          "id": "M11-E03",
+          "text": "Hot recall SLO is met and the vertical works with at least two model-runtime paths without provider lock-in."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M11/BENCH-A.json"
+        },
+        {
+          "kind": "conformance_report",
+          "path": "proof/M11/two-runtimes.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M11/lifetime-conversation.log"
+        }
+      ]
+    },
+    {
+      "id": "M12",
+      "title": "Cross-model continuity and lifecycle",
+      "status": "not_started",
+      "depends_on": ["M11"],
+      "objective": "Preserve operational memory-subject continuity across process, model, tokenizer, context, and tool-capability changes.",
+      "artifacts": [
+        "ContinuityProfile, portable checkpoint, compatibility report, renderer adaptation, re-embedding, bootstrap, model lineage, pre/postflight, handoff, and multi-agent scopes"
+      ],
+      "tests": [
+        "Migration, unavailable-capability, smaller-context, re-embedding, checkpoint, open-loop, handoff-recipient, and private-leak tests"
+      ],
+      "benchmarks": [
+        "Full BENCH-D Cross-Model Continuity with stable identity and migration-warning floors"
+      ],
+      "demo": "Model B resumes Model A's shared history and open loop with a different tokenizer and one missing tool.",
+      "exit_criteria": [
+        {
+          "id": "M12-E01",
+          "text": "BENCH-D meets stable-ID, bootstrap, task, preference, correction, private-isolation, and warning-accuracy floors."
+        },
+        {
+          "id": "M12-E02",
+          "text": "Open loops and checkpoints survive supported migrations without claiming identical wording or consciousness."
+        },
+        {
+          "id": "M12-E03",
+          "text": "Handoff summaries are rebuilt from recipient-authorized sources and expose a signed/hashed transfer manifest."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M12/BENCH-D.json"
+        },
+        {
+          "kind": "security_report",
+          "path": "proof/M12/handoff-isolation.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M12/model-migration.log"
+        }
+      ]
+    },
+    {
+      "id": "M13",
+      "title": "Accumulating knowledge vertical",
+      "status": "not_started",
+      "depends_on": ["M10", "M12"],
+      "objective": "Prove that the universal memory model supports accumulating document knowledge with temporal source lineage.",
+      "artifacts": [
+        "Generic document adapter, source hierarchy, claim/evidence extraction, disagreement, retraction, source independence, historical knowledge, and knowledge ContextPack"
+      ],
+      "tests": [
+        "Source update/retraction, duplicate-family, disagreement, current/historical, unknown, and citation-lineage tests"
+      ],
+      "benchmarks": [
+        "Full BENCH-C Accumulating Knowledge with support, attribution, conflict, stale-summary, hallucinated-evidence, and token-efficiency floors"
+      ],
+      "demo": "Ingest a source that says Redis and a later migration source that says PostgreSQL, then answer current and historical questions without inventing rationale.",
+      "exit_criteria": [
+        {
+          "id": "M13-E01",
+          "text": "Answers remain source-backed with correct current and historical state."
+        },
+        {
+          "id": "M13-E02",
+          "text": "Disagreement, retraction, source dependence, and unknowns remain visible."
+        },
+        {
+          "id": "M13-E03",
+          "text": "No hallucinated citation or model-derived circular support passes the labelled suite."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M13/BENCH-C.json"
+        },
+        {
+          "kind": "test_report",
+          "path": "proof/M13/source-lineage.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M13/redis-postgres.log"
+        }
+      ]
+    },
+    {
+      "id": "M14",
+      "title": "Coding vertical",
+      "status": "not_started",
+      "depends_on": ["M10", "M12"],
+      "objective": "Prove strict domain extensibility with repository, compiler, test, Git, and rationale evidence outside the universal core.",
+      "artifacts": [
+        "Code domain pack, Git and Go compiler adapters, stable symbol identity, incremental snapshots, code relations, repository hierarchy, decision links, CI ingestion, preflight, and impact analysis"
+      ],
+      "tests": [
+        "Exact symbol/range, rename/move, current/history, relation, test evidence, unknown rationale, preflight, and core-leakage tests"
+      ],
+      "benchmarks": [
+        "Full BENCH-F Six-Month Repository Memory against no-memory, grep/tool, lexical, vector, and reduced-feature baselines"
+      ],
+      "demo": "Locate password hashing, explain supported rationale and history, list tests, and state unknown evidence in an evolving Go repository.",
+      "exit_criteria": [
+        {
+          "id": "M14-E01",
+          "text": "Exact location, rename/move continuity, and historical implementation meet BENCH-F floors."
+        },
+        {
+          "id": "M14-E02",
+          "text": "Rationale and impact are evidence-backed and unsupported rationale is reported as unknown."
+        },
+        {
+          "id": "M14-E03",
+          "text": "The full coding path uses fewer exploratory tool calls than frozen baselines and introduces no code-specific type into core."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M14/BENCH-F.json"
+        },
+        {
+          "kind": "conformance_report",
+          "path": "proof/M14/domain-boundary.json"
+        },
+        {
+          "kind": "demo_log",
+          "path": "proof/M14/repository-memory.log"
+        }
+      ]
+    },
+    {
+      "id": "M15",
+      "title": "Public interfaces",
+      "status": "not_started",
+      "depends_on": ["M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13", "M14"],
+      "objective": "Expose one canonical application contract consistently through embedded, RPC, HTTP, CLI, MCP, bindings, SDKs, middleware, streaming, and archive interfaces.",
+      "artifacts": [
+        "Stable Rust API, Protobuf/gRPC, HTTP/JSON, CLI, MCP, Python, Go and TypeScript SDKs, chat middleware packages, streaming ingestion, portable archive, and compatibility suite"
+      ],
+      "tests": [
+        "Cross-interface golden requests, idempotency, error, streaming, pagination/continuation, archive, generated-code clean-diff, and example-compilation tests"
+      ],
+      "benchmarks": [
+        "Interface overhead and streaming throughput delta against the embedded canonical service"
+      ],
+      "demo": "Execute the same observe/recall/explain/export scenario through every supported interface and compare canonical results.",
+      "exit_criteria": [
+        {
+          "id": "M15-E01",
+          "text": "All interfaces pass the same semantic, authorization, idempotency, and error-contract conformance suite."
+        },
+        {
+          "id": "M15-E02",
+          "text": "Generated SDKs are reproducible, examples compile, and API compatibility rules are documented."
+        },
+        {
+          "id": "M15-E03",
+          "text": "MCP and provider integrations remain external adapters and do not become core or durable-format dependencies."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "conformance_report",
+          "path": "proof/M15/interface-conformance.json"
+        },
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M15/interface-overhead.json"
+        },
+        {
+          "kind": "documentation",
+          "path": "docs/api/compatibility.md"
+        }
+      ]
+    },
+    {
+      "id": "M16",
+      "title": "Reliability, privacy and security hardening",
+      "status": "not_started",
+      "depends_on": ["M15"],
+      "objective": "Close the complete fault, deletion, isolation, injection, poisoning, secret, supply-chain, and export threat surface required for v1.",
+      "artifacts": [
+        "Deep verify, encrypted backup, deletion receipts, consent migration, isolation, secret scanner, audit chain, quotas/backpressure, SBOM, unsafe review, export security, and threat-model update"
+      ],
+      "tests": [
+        "Full fault matrix, tenant/space isolation, ACL-before-retrieval, prompt injection, poisoning, secret deletion, encrypted backup/restore, provider routing, parser fuzz, dependency audit, and DoS budgets"
+      ],
+      "benchmarks": [
+        "Full BENCH-G plus fault/recovery/deletion propagation and adversarial resource-exhaustion reports"
+      ],
+      "demo": "Delete a sensitive conversation, verify immediate old-snapshot suppression and lineage receipts, restore an encrypted pre-delete backup in isolation, and prove the data remains unavailable.",
+      "exit_criteria": [
+        {
+          "id": "M16-E01",
+          "text": "Zero acknowledged loss and verified recovery across the published supported fault matrix.",
+          "evidence": [
+            "proof/M16/fault-delete-restore.json",
+            "proof/M16/process-kill-redb.json"
+          ]
+        },
+        {
+          "id": "M16-E02",
+          "text": "Deletion completion reports every primary, derived, provider, export, and backup disposition and verification passes.",
+          "evidence": [
+            "proof/M16/fault-delete-restore.json"
+          ]
+        },
+        {
+          "id": "M16-E03",
+          "text": "No cross-space leak or prohibited ranking influence occurs in BENCH-G within the published leakage budget.",
+          "evidence": [
+            "proof/M16/BENCH-G.json"
+          ]
+        },
+        {
+          "id": "M16-E04",
+          "text": "No unresolved critical/high correctness or security finding remains; supply-chain, unsafe, SBOM, and restore evidence is complete.",
+          "evidence": [
+            "proof/M16/security-gates.json",
+            "proof/M16/fuzz-smoke.json",
+            "proof/M16/sbom-index.json"
+          ]
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "security_report",
+          "path": "proof/M16/security-gates.json",
+          "schema_id": "https://contextdb.dev/schemas/m16-security-gates/v1.json"
+        },
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M16/BENCH-G.json",
+          "schema_id": "https://contextdb.dev/schemas/benchmark-result/v1.json"
+        },
+        {
+          "kind": "test_report",
+          "path": "proof/M16/fault-delete-restore.json",
+          "schema_id": "https://contextdb.dev/schemas/m16-fault-delete-restore/v1.json"
+        },
+        {
+          "kind": "test_report",
+          "path": "proof/M16/fuzz-smoke.json",
+          "schema_id": "https://contextdb.dev/schemas/m16-fuzz-smoke/v1.json"
+        },
+        {
+          "kind": "artifact_manifest",
+          "path": "proof/M16/sbom-index.json",
+          "schema_id": "https://contextdb.dev/schemas/m16-sbom-index/v1.json"
+        },
+        {
+          "kind": "test_report",
+          "path": "proof/M16/process-kill-redb.json",
+          "schema_id": "https://contextdb.dev/schemas/m16-process-kill/v1.json"
+        }
+      ]
+    },
+    {
+      "id": "M17",
+      "title": "Performance and scale",
+      "status": "not_started",
+      "depends_on": ["M16"],
+      "objective": "Meet reproducible latency, throughput, freshness, recovery, and memory targets without regressing correctness, privacy, or memory quality.",
+      "artifacts": [
+        "Reference-hardware profile, bottleneck reports, selected optimizations, bounded memory configuration, and compaction scheduling policy"
+      ],
+      "tests": [
+        "Differential correctness and full quality/privacy regression after each optimization",
+        "Memory-pressure, compaction-under-load, restart, backup, and long-snapshot tests"
+      ],
+      "benchmarks": [
+        "Full BENCH-H including small, medium, and v1-certification tiers reaching at least 10 million semantic nodes/claims"
+      ],
+      "demo": "Run mixed hot/cold recall, writes, projection catch-up, and compaction under bounded memory on published reference hardware.",
+      "exit_criteria": [
+        {
+          "id": "M17-E01",
+          "text": "Published p50/p95/p99, throughput, recovery, and index-freshness results meet provisional Beta targets."
+        },
+        {
+          "id": "M17-E02",
+          "text": "Memory remains bounded and pressure produces explicit partial/degraded results instead of correctness loss or uncontrolled OOM."
+        },
+        {
+          "id": "M17-E03",
+          "text": "No accepted optimization regresses frozen semantic, privacy, social-calibration, or ANN-exact-overlap floors."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M17/BENCH-H.json"
+        },
+        {
+          "kind": "test_report",
+          "path": "proof/M17/quality-privacy-regression.json"
+        },
+        {
+          "kind": "documentation",
+          "path": "docs/benchmarks/v1-performance-report.md"
+        }
+      ]
+    },
+    {
+      "id": "M18",
+      "title": "Alpha and Beta",
+      "status": "not_started",
+      "depends_on": ["M17"],
+      "objective": "Freeze the storage/API candidates and prove the complete product with public, reproducible Alpha and Beta evidence.",
+      "artifacts": [
+        "Alpha developer/researcher release",
+        "Beta storage-format candidate, API release candidate, coding plugin, migration, backup/delete, security baseline, operations documentation, and external integrations"
+      ],
+      "tests": [
+        "Alpha database conformance, deterministic recall, privacy, and reproducible trace gates",
+        "Beta backup/restore/delete, migration, security, compatibility, packaging, upgrade, and disaster-recovery gates"
+      ],
+      "benchmarks": [
+        "Public full BENCH-A, BENCH-C, BENCH-D, BENCH-F, BENCH-G, and BENCH-H reports with frozen Beta floors; BENCH-B and BENCH-E logical conformance reports"
+      ],
+      "demo": "Install Alpha and Beta artifacts into clean environments, restore portable examples, run conversational/knowledge/coding scenarios, migrate a model, and verify deletion.",
+      "exit_criteria": [
+        {
+          "id": "M18-E01",
+          "text": "Alpha satisfies the union of RFC §§28.25 and 29 M18 Alpha gates with public reproducible traces and no critical privacy leak."
+        },
+        {
+          "id": "M18-E02",
+          "text": "Beta satisfies the union of RFC §§28.25 and 29 M18 Beta gates and publishes frozen quality, security, performance, API, and format candidates."
+        },
+        {
+          "id": "M18-E03",
+          "text": "All release packages install in clean supported-platform environments and compatibility/upgrade/rollback evidence is attached."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "release_manifest",
+          "path": "proof/M18/alpha-release.json"
+        },
+        {
+          "kind": "release_manifest",
+          "path": "proof/M18/beta-release.json"
+        },
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M18/benchmark-index.json"
+        },
+        {
+          "kind": "security_report",
+          "path": "proof/M18/beta-security.json"
+        }
+      ]
+    },
+    {
+      "id": "M19",
+      "title": "v1.0",
+      "status": "not_started",
+      "depends_on": ["M18"],
+      "objective": "Release the durable, headless, single-node AI-native persistent memory engine promised by RFC-0001 with complete proof and user control.",
+      "artifacts": [
+        "Server, CLI, Rust crates, Python package, Go and TypeScript SDKs, chat middleware, MCP adapter, generic document adapter, coding reference plugin, Docker image, portable example databases, benchmark datasets/suite, full documentation, signed checksums, and SBOM"
+      ],
+      "tests": [
+        "All RFC §31 semantic, durability, privacy, recall, ContextPack, conversation, knowledge, coding, migration, model-runtime, API, performance, quality, security, operations, documentation, and artifact gates",
+        "Clean-install, upgrade, restore, export, deletion, conformance, signature, and SBOM verification"
+      ],
+      "benchmarks": [
+        "Public benchmark index with every frozen quality floor and ceiling passing on declared versions and reference hardware"
+      ],
+      "demo": "From clean official artifacts, run persistent chat, generic knowledge, coding/MCP, model migration, backup/restore, explain, export, and verified hard deletion without a UI dependency.",
+      "exit_criteria": [
+        {
+          "id": "M19-E01",
+          "text": "Every RFC §31 gate and every M0-M18 dependency gate has status passed with attached, schema-valid proof."
+        },
+        {
+          "id": "M19-E02",
+          "text": "All artifacts required by RFC §§29 M19 and 31.17 are published with version manifests, signed checksums, SBOM, provenance, and installation verification."
+        },
+        {
+          "id": "M19-E03",
+          "text": "Frozen quality, social-calibration, privacy, security, and performance gates pass with public datasets/results and documented limitations."
+        },
+        {
+          "id": "M19-E04",
+          "text": "No unresolved critical/high correctness or security finding remains and non-waivable invariants have no waiver."
+        }
+      ],
+      "required_proof": [
+        {
+          "kind": "release_manifest",
+          "path": "proof/M19/v1-release.json"
+        },
+        {
+          "kind": "artifact_manifest",
+          "path": "proof/M19/artifacts.json"
+        },
+        {
+          "kind": "benchmark_result",
+          "path": "proof/M19/benchmark-index.json"
+        },
+        {
+          "kind": "security_report",
+          "path": "proof/M19/security-final.json"
+        },
+        {
+          "kind": "conformance_report",
+          "path": "proof/M19/section-31.json"
+        }
+      ]
+    }
+  ]
+}

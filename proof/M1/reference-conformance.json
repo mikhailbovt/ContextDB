@@ -1,0 +1,31 @@
+{
+  "schema_version": "contextdb.test-report/v1",
+  "milestone": "M1",
+  "generated_at": "2026-08-22T08:34:51.375Z",
+  "status": "package_conformance_passed",
+  "command": "cargo +1.97.1 test -p contextdb-reference --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 21, "failed": 0, "ignored": 0},
+  "deterministic_state_machine_operations": 10240,
+  "invariants_exercised": [
+    "canonical import/export and replay",
+    "bitemporal snapshots, corrections, conflicts, identity and lineage",
+    "authorization-before-candidate influence",
+    "logical multimodal selectors",
+    "stable exact lexical, vector and graph ordering"
+  ],
+  "source_sha256": {
+    "crates/contextdb-reference/src/lib.rs": "11a25729f2be175ee032dfdefcfd06f1560ab6eebce8453242d9ceca61a102cc",
+    "crates/contextdb-reference/tests/reference_semantics.rs": "2a81b3f217a96e9d0629ad51c5e5c6b162df04caa65f8a1273a5dd8293309b6e",
+    "crates/contextdb-reference/tests/core_adapter.rs": "81a4f2d2a998bc90f890577d60eff2c4da2246995195cd3752e31c9e3a026beb"
+  },
+  "toolchain": {
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "profile": "test"
+  },
+  "limitations": [
+    "This is deterministic in-memory package evidence, not persistent storage, ANN, provider, or release-platform evidence.",
+    "The receipt does not independently prove that every future domain pack remains free of core-domain leakage."
+  ]
+}

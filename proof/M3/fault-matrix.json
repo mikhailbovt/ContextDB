@@ -1,0 +1,32 @@
+{
+  "schema_version": "contextdb.test-report/v1",
+  "milestone": "M3",
+  "generated_at": "2026-08-22T08:35:15.606Z",
+  "status": "package_fault_matrix_passed",
+  "command": "cargo +1.97.1 test -p contextdb-journal --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 16, "failed": 0, "ignored": 0},
+  "fault_classes_exercised": [
+    "pre-commit rollback at staged frame boundaries",
+    "lost Sync response with idempotent retry",
+    "corrupted unpublished tail and checksummed prefix corruption",
+    "semantic publication failpoint and atomic outbox",
+    "simulated ENOSPC and durability downgrade",
+    "portable backup tamper and non-empty restore rejection",
+    "redb close/reopen replay"
+  ],
+  "source_sha256": {
+    "crates/contextdb-journal/src/lib.rs": "babc110b74f84a99ec3c579cad246e794ebfa56db68c73bdeae8f3a48184185b",
+    "crates/contextdb-journal/src/tests.rs": "f22e69d6759dae15fc998e9906890cfd7d32a9b249e66520c25bb2a8719dcd02"
+  },
+  "toolchain": {
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "profile": "test"
+  },
+  "limitations": [
+    "Most fault points are deterministic injected adapters; this receipt does not claim physical power-loss, kernel crash, or filesystem fault coverage.",
+    "The redb reopen test is an orderly process-local close/reopen check, not an externally killed process run.",
+    "M16 owns the broader supported fault matrix and security restore certification."
+  ]
+}

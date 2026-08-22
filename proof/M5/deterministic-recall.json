@@ -1,0 +1,30 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "8415208b-3a44-4b02-b121-e787556b57bb",
+  "started_at": "2026-08-12T13:18:39.775Z",
+  "finished_at": "2026-08-12T13:18:40.169Z",
+  "status": "observation_only",
+  "benchmark": {"id": "BENCH-0501", "family": "BENCH-A", "name": "M5 deterministic recall package observation", "version": "1", "dataset_version": "japan-bar-golden-v1", "scenario": "implicit reference, wrong-person, temporal, policy and budget conformance", "tier": "exact-route-package-observation"},
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1", "product_version": "0.1.0-alpha.1", "release_channel": "development",
+      "source": {"git_commit": "0000000000000000000000000000000000000000", "dirty": true, "rfc_revision": "RFC-0001-v0.3", "errata": ["ERRATA-0001"], "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]},
+      "build": {"timestamp": "2026-08-12T13:17:59.693Z", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "target": "x86_64-pc-windows-msvc", "profile": "test", "reproducible": false, "builder": "local-proof-backfill"},
+      "formats": {"logical_record": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": []}}, "feature_profile": "research", "features": ["local-package-conformance"]
+    },
+    "version_manifest_sha256": "12ee5d90a01050a6f12ae9b13e0a5074efad48b10c485491cea30076ee0a25fd"
+  },
+  "environment": {"os": "Microsoft Windows NT", "os_version": "10.0.26200.0", "architecture": "x86_64", "cpu": "Intel(R) Core(TM) Ultra 9 275HX", "logical_cores": 24, "memory_bytes": 68044750848, "storage": "local NVMe SSD", "filesystem": "NTFS", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "storage_backend": "deterministic-provider-fixture", "storage_backend_version": "0.1.0-alpha.1", "build_profile": "test"},
+  "configuration": {"seed": 0, "features": ["local-package-conformance"], "budgets": {}, "parameters": {"command": "cargo +1.97.1 test -p contextdb-recall --no-fail-fast --quiet", "exit_code": 0, "claim_scope": "exact deterministic package suite"}, "index_watermarks": {}},
+  "metrics": [
+    {"name": "recall.tests_passed", "unit": "tests", "direction": "informational", "observed": 22},
+    {"name": "recall.golden_scenarios_passed", "unit": "scenarios", "direction": "informational", "observed": 1},
+    {"name": "recall.command_elapsed", "unit": "milliseconds", "direction": "informational", "observed": 394.837}
+  ],
+  "artifacts": [{"kind": "golden-fixture", "uri": "crates/contextdb-recall/tests/fixtures/japan_bar_golden.json", "sha256": "b5dc239952bed833ce7bf12ec197949984072ece5136275de471c669ab504534"}],
+  "limitations": [
+    "This is not a frozen BENCH-A or BENCH-C dataset run and publishes no quality floor.",
+    "Elapsed time includes Cargo test overhead and is not recall latency.",
+    "Status is observation_only despite package conformance passing."
+  ]
+}

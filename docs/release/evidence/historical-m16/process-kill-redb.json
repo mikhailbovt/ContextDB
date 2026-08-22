@@ -1,0 +1,36 @@
+{
+  "schema": "contextdb.process-kill-fault-matrix.v1",
+  "backend": "contextdb-storage-redb/redb-4.1.0",
+  "durability": "sync",
+  "cases": [
+    {
+      "name": "kill_with_uncommitted_transaction",
+      "child_reached_barrier": true,
+      "child_was_terminated": true,
+      "reopened": true,
+      "expected_value_visible": false,
+      "head_sequence": 0,
+      "deep_verify_records": 0,
+      "passed": true
+    },
+    {
+      "name": "kill_after_sync_ack",
+      "child_reached_barrier": true,
+      "child_was_terminated": true,
+      "reopened": true,
+      "expected_value_visible": true,
+      "head_sequence": 1,
+      "deep_verify_records": 1,
+      "passed": true
+    }
+  ],
+  "acknowledged_commits": 1,
+  "acknowledged_commits_recovered": 1,
+  "acknowledged_loss": 0,
+  "passed": true,
+  "limitations": [
+    "This native process-kill proof covers the Windows host and redb backend.",
+    "Journal stage failpoints, ENOSPC, lost-response replay, weak durability rejection, corruption, and portable restore are covered by contextdb-journal tests.",
+    "Linux/macOS power-loss certification remains target-platform release evidence."
+  ]
+}

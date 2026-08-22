@@ -1,0 +1,178 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "019ff4a7-bd0e-7140-b8ec-fc5c2fdd3072",
+  "started_at": "2026-08-12T09:09:38.851Z",
+  "finished_at": "2026-08-12T09:09:59.251Z",
+  "status": "passed",
+  "benchmark": {
+    "id": "BENCH-0006",
+    "family": "BENCH-H",
+    "name": "M6 deterministic flat-scan versus hierarchy-guided ablation",
+    "version": "1",
+    "dataset_version": "balanced-topic-64x64-v1",
+    "scenario": "authorized-single-partition-target-at-depth-two",
+    "tier": "m6-correctness-ablation"
+  },
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1",
+      "product_version": "0.1.0-alpha.1",
+      "release_channel": "development",
+      "source": {
+        "git_commit": "0000000000000000000000000000000000000000",
+        "dirty": true,
+        "repository": "https://github.com/mikhailbovt/ContextDB",
+        "rfc_revision": "RFC-0001-v0.3",
+        "errata": ["ERRATA-0001"],
+        "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]
+      },
+      "build": {
+        "timestamp": "2026-08-12T09:09:59.251Z",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "target": "x86_64-pc-windows-msvc",
+        "profile": "release",
+        "reproducible": false,
+        "builder": "local-m6-hierarchy-ablation"
+      },
+      "formats": {
+        "logical_record": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": []},
+        "hierarchy_generation": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["versioned-hierarchy"]}
+      },
+      "feature_profile": "research",
+      "features": ["versioned-hierarchy", "immutable-adjacency", "policy-partitioned-beam"],
+      "storage_backend": {
+        "name": "in-memory-hierarchy-fixture",
+        "version": "contextdb-hierarchy-v1"
+      }
+    },
+    "version_manifest_sha256": "9cfff9c587d50f5e82f68e6dcd5d437a0cdc7f7734696c30b9d35284fd14d514"
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Pro",
+    "os_version": "10.0.26200",
+    "kernel": "Windows NT",
+    "architecture": "x86_64",
+    "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+    "logical_cores": 24,
+    "memory_bytes": 68044750848,
+    "storage": "WD_BLACK SN850X 4000GB NVMe SSD",
+    "filesystem": "NTFS",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "storage_backend": "in-memory-hierarchy-fixture",
+    "storage_backend_version": "contextdb-hierarchy-v1",
+    "storage_configuration_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "build_profile": "release"
+  },
+  "configuration": {
+    "seed": 1,
+    "features": ["versioned-hierarchy", "immutable-adjacency", "policy-partitioned-beam"],
+    "budgets": {
+      "beam_width": 1,
+      "max_depth": 2,
+      "max_expansions": 128
+    },
+    "parameters": {
+      "branches": 64,
+      "leaves_per_branch": 64,
+      "semantic_leaves": 4096,
+      "iterations": 201,
+      "target_branch": 17,
+      "target_leaf": 29,
+      "token_measure": "navigation-label-whitespace-tokens"
+    },
+    "index_watermarks": {
+      "semantic": 1,
+      "hierarchy_generation": 1,
+      "hierarchy_epoch": 1
+    }
+  },
+  "metrics": [
+    {
+      "name": "hierarchy.nodes_examined_reduction",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 0.968505859375,
+      "threshold": {"operator": "gte", "value": 0.9},
+      "passed": true
+    },
+    {
+      "name": "hierarchy.recall_at_1",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 1.0,
+      "threshold": {"operator": "gte", "value": 1.0},
+      "passed": true
+    },
+    {
+      "name": "hierarchy.precision_at_1",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 1.0
+    },
+    {
+      "name": "hierarchy.navigation_token_reduction",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 0.9764404296875,
+      "threshold": {"operator": "gte", "value": 0.9},
+      "passed": true
+    },
+    {
+      "name": "flat.nodes_examined",
+      "unit": "nodes",
+      "direction": "informational",
+      "observed": 4096
+    },
+    {
+      "name": "hierarchy.nodes_examined",
+      "unit": "nodes",
+      "direction": "lower_is_better",
+      "observed": 129
+    },
+    {
+      "name": "flat.query_median",
+      "unit": "nanoseconds",
+      "direction": "informational",
+      "observed": 3500
+    },
+    {
+      "name": "hierarchy.query_median",
+      "unit": "nanoseconds",
+      "direction": "informational",
+      "observed": 39100
+    }
+  ],
+  "quality_gates": [
+    {
+      "gate_id": "M6-E01",
+      "metric": "hierarchy.nodes_examined_reduction",
+      "passed": true,
+      "note": "The hierarchy examined 129 versus 4096 candidate nodes (96.85% reduction) while preserving the predeclared exact top hit."
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "raw-result",
+      "uri": "docs/benchmarks/results/m6-hierarchy-ablation-windows-2026-08-12.raw.json",
+      "sha256": "bbd6af40850ce75008d15414ab628696fd7a669d18e65373cd9d1d845ff2167a"
+    },
+    {
+      "kind": "version-manifest",
+      "uri": "docs/benchmarks/results/m6-hierarchy-ablation-windows-2026-08-12.version.json",
+      "sha256": "9cfff9c587d50f5e82f68e6dcd5d437a0cdc7f7734696c30b9d35284fd14d514"
+    },
+    {
+      "kind": "benchmark-source",
+      "uri": "crates/contextdb-hierarchy/examples/hierarchy_ablation.rs",
+      "sha256": "8829ee6a98985e750060f7e9a973c30baf28fecb1edcc6349e1c529fa1e357a7"
+    }
+  ],
+  "limitations": [
+    "This predeclared deterministic workload isolates hierarchy pruning; it does not evaluate model-generated branch quality or natural-language retrieval quality.",
+    "The exact whitespace-token metric covers policy-safe navigation labels and is not a production model tokenizer measurement.",
+    "Hierarchy median latency was 39.1 microseconds versus 3.5 microseconds for the trivial flat integer scan at this small tier; latency improvement is not claimed.",
+    "Million-scale official-server latency, crash publication, and full BENCH-H certification remain M16/M17 work."
+  ]
+}

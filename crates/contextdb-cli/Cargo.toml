@@ -1,0 +1,73 @@
+[package]
+name = "contextdb-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Command-line interface for ContextDB"
+publish = false
+
+[features]
+default = ["current-server", "mcp"]
+# Packaging marker for the listener-free local developer preview. This feature is
+# intentionally only an alias for `mcp`: the release tool must also pass
+# `--no-default-features`, and verifies the resolved graph before packaging.
+local-mcp = ["mcp"]
+current-server = [
+    "contextdb-server/server",
+    "contextdb-server/http",
+    "dep:tokio",
+]
+server-v1 = [
+    "current-server",
+    "dep:contextdb-runtime",
+    "contextdb-runtime/server-v1",
+]
+mcp = ["dep:contextdb-mcp", "dep:contextdb-native-service", "dep:tokio"]
+
+[[bin]]
+name = "contextdb"
+path = "src/main.rs"
+
+[[test]]
+name = "api_mcp_subprocess"
+path = "tests/api_mcp_subprocess.rs"
+required-features = ["mcp"]
+
+[dependencies]
+blake3.workspace = true
+chacha20poly1305.workspace = true
+clap.workspace = true
+contextdb-context.workspace = true
+contextdb-continuity.workspace = true
+contextdb-core.workspace = true
+contextdb-mcp = { workspace = true, optional = true }
+contextdb-native-service = { workspace = true, optional = true }
+contextdb-proto.workspace = true
+contextdb-runtime = { workspace = true, optional = true }
+contextdb-server = { workspace = true, features = ["wire"] }
+contextdb-service.workspace = true
+contextdb-storage.workspace = true
+contextdb-storage-fjall.workspace = true
+getrandom.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, optional = true, features = ["io-util", "time"] }
+zeroize.workspace = true
+
+[dev-dependencies]
+contextdb-model.workspace = true
+contextdb-recall.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.4", features = ["fs", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg.workspace = true
+
+[lints]
+workspace = true

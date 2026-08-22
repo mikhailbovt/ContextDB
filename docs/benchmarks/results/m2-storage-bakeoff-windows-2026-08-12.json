@@ -1,0 +1,120 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "e3eab312-038d-4149-a7ac-d84ac2d55b83",
+  "started_at": "2026-08-12T08:50:33.300Z",
+  "finished_at": "2026-08-12T08:51:12.029Z",
+  "status": "observation_only",
+  "benchmark": {
+    "id": "BENCH-0002",
+    "family": "BENCH-H",
+    "name": "M2 storage substrate bake-off",
+    "version": "1",
+    "dataset_version": "synthetic-contextdb-keyspaces-v1",
+    "scenario": "synced-version-and-graph-ingest-plus-readback",
+    "tier": "local-decision-input"
+  },
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1",
+      "product_version": "0.1.0-alpha.1",
+      "release_channel": "development",
+      "source": {
+        "git_commit": "0000000000000000000000000000000000000000",
+        "dirty": true,
+        "repository": "https://github.com/mikhailbovt/ContextDB",
+        "rfc_revision": "RFC-0001-v0.3",
+        "errata": ["ERRATA-0001"],
+        "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]
+      },
+      "build": {
+        "timestamp": "2026-08-12T08:51:12Z",
+        "rustc": "rustc 1.97.1",
+        "cargo": "cargo 1.97.1",
+        "target": "x86_64-pc-windows-msvc",
+        "profile": "release",
+        "reproducible": false,
+        "builder": "local-m2-bakeoff-rerun-after-evidence-drift"
+      },
+      "formats": {
+        "logical_record": {"writer":1,"read_min":1,"read_max":1,"required_features":[]}
+      },
+      "feature_profile": "research",
+      "features": ["storage-bakeoff"],
+      "storage_backend": {
+        "name": "multi-backend-bakeoff",
+        "version": "memory+fjall-3.1.8+redb-4.1.0+rocksdb-0.24.0"
+      }
+    },
+    "version_manifest_sha256": "63c91c5411e622be7e5396e543a3bc4e3ca1341d8e64146fabb486f72ae868b8"
+  },
+  "environment": {
+    "os": "Windows 11 Pro",
+    "os_version": "10.0.26200",
+    "kernel": "NT 10.0.26200",
+    "architecture": "x86_64-pc-windows-msvc",
+    "cpu": "Intel Core Ultra 9 275HX",
+    "logical_cores": 24,
+    "memory_bytes": 68044750848,
+    "storage": "Samsung SSD 990 PRO 2TB NVMe",
+    "filesystem": "NTFS",
+    "rustc": "rustc 1.97.1",
+    "cargo": "cargo 1.97.1",
+    "storage_backend": "memory+fjall+redb+rocksdb-comparison",
+    "storage_backend_version": "memory+3.1.8+4.1.0+0.24.0/librocksdb-10.4.2",
+    "storage_configuration_digest": "8a63257c2b1f996438cec923d04f377f3c7c077dc8e61657c6a5155f71f4b00c",
+    "build_profile": "release"
+  },
+  "configuration": {
+    "seed": 13870620500457160706,
+    "features": ["sync-durability", "deep-verify"],
+    "budgets": {},
+    "parameters": {
+      "repetitions": 3,
+      "semantic_records": 50000,
+      "graph_records": 50000,
+      "value_bytes": 256,
+      "batch_records": 250,
+      "synced_commits": 200,
+      "point_reads": 50000,
+      "subject_prefix_scans": 64,
+      "graph_prefix_scans": 256
+    },
+    "index_watermarks": {}
+  },
+  "metrics": [
+    {"name":"memory.batch_write","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":2056591600,"max":2227122200,"mean":2166118733.33333,"p50":2214642400}},
+    {"name":"memory.point_reads","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":20612000,"max":22989500,"mean":21586366.6666667,"p50":21157600}},
+    {"name":"memory.subject_prefix_scans","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":23763500,"max":25240200,"mean":24424033.3333333,"p50":24268400}},
+    {"name":"memory.graph_prefix_scans","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":63198200,"max":70462900,"mean":66801433.3333333,"p50":66743200}},
+    {"name":"fjall.batch_write","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":468360400,"max":474921200,"mean":470724566.666667,"p50":468892100}},
+    {"name":"fjall.point_reads","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":49364000,"max":53385800,"mean":51443933.3333333,"p50":51582000}},
+    {"name":"fjall.subject_prefix_scans","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":15223100,"max":22131700,"mean":18810500,"p50":19076700}},
+    {"name":"fjall.graph_prefix_scans","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":16496700,"max":20899400,"mean":18632766.6666667,"p50":18502200}},
+    {"name":"redb.batch_write","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":2364951300,"max":2675925100,"mean":2522210766.66667,"p50":2525755900}},
+    {"name":"redb.point_reads","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":70052500,"max":73109100,"mean":71091400,"p50":70112600}},
+    {"name":"redb.subject_prefix_scans","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":7970100,"max":8368800,"mean":8115166.66666667,"p50":8006600}},
+    {"name":"redb.graph_prefix_scans","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":26078400,"max":27209300,"mean":26681066.6666667,"p50":26755500}},
+    {"name":"rocksdb.batch_write","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":517375000,"max":526426400,"mean":521190466.666667,"p50":519770000}},
+    {"name":"rocksdb.point_reads","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":24851200,"max":25217200,"mean":25062933.3333333,"p50":25120400}},
+    {"name":"rocksdb.subject_prefix_scans","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":39911300,"max":40758300,"mean":40260300,"p50":40111300}},
+    {"name":"rocksdb.graph_prefix_scans","unit":"nanoseconds","direction":"lower_is_better","observed":{"count":3,"min":141238500,"max":145104500,"mean":142556166.666667,"p50":141325500}},
+    {"name":"workload.checksum","unit":"integer","direction":"target","observed":6566008,"threshold":{"operator":"eq","value":6566008},"passed":true}
+  ],
+  "quality_gates": [
+    {"gate_id":"M2-CHECKSUM","metric":"workload.checksum","passed":true,"note":"Every backend and repetition produced the identical deterministic checksum."}
+  ],
+  "artifacts": [
+    {"kind":"raw-observations","uri":"m2-storage-bakeoff-windows-2026-08-12.raw.json","sha256":"52c93902a04cc48947a22b49bf1ebf4421493ca1b0c193dbb4d5d384d5d366ca"},
+    {"kind":"version-manifest","uri":"m2-storage-bakeoff-windows-2026-08-12.version.json","sha256":"63c91c5411e622be7e5396e543a3bc4e3ca1341d8e64146fabb486f72ae868b8"},
+    {"kind":"pure-rust-workload-source","uri":"../../../crates/contextdb-storage-bench/src/main.rs","sha256":"8a63257c2b1f996438cec923d04f377f3c7c077dc8e61657c6a5155f71f4b00c"},
+    {"kind":"rocksdb-adapter-source","uri":"../../../crates/contextdb-storage-rocksdb-bench/src/lib.rs","sha256":"9c1345c005f2628e40e0934c5af9c131447fa056c0d6f1e9aee9c3d7693fca2a"},
+    {"kind":"rocksdb-workload-source","uri":"../../../crates/contextdb-storage-rocksdb-bench/src/main.rs","sha256":"d92634fd812c83647004536367b2028d416fbc9fcc9ca51cd94fc5ff264cf6c1"}
+  ],
+  "limitations": [
+    "Local Windows decision input, not a cross-platform performance claim.",
+    "The working tree is uncommitted and the source identity is therefore intentionally dirty.",
+    "This slice does not test crash-kill recovery, ENOSPC, sustained compaction interference, encryption, or million-scale graph workloads.",
+    "RocksDB is an isolated comparison-only package requiring LLVM/libclang and MSVC; it is excluded from the default pure-Rust workspace and distribution.",
+    "The RocksDB adapter materializes stable read snapshots in memory, so its scan figures measure the adapter baseline rather than an optimized native prefix iterator."
+  ]
+}

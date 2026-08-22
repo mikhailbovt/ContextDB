@@ -1,0 +1,20 @@
+[package]
+name = "contextdb-example-embedded-rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Minimal embedded ContextDB example"
+publish = false
+
+[dependencies]
+contextdb-reference.workspace = true
+
+[[bin]]
+name = "contextdb-embedded-example"
+path = "src/main.rs"
+
+[lints]
+workspace = true

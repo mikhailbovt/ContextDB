@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-operational-plan/v1.json",
+  "title": "ContextDB release operational drill plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "drill_id",
+    "created_at",
+    "host_target",
+    "profile",
+    "old_release",
+    "new_release",
+    "seed_artifact",
+    "scenarios",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-operational-plan/v1"
+    },
+    "drill_id": {"$ref": "#/$defs/identifier"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "host_target": {"$ref": "#/$defs/nativePlatform"},
+    "profile": {"enum": ["contract", "release"]},
+    "old_release": {"$ref": "#/$defs/releaseSubject"},
+    "new_release": {"$ref": "#/$defs/releaseSubject"},
+    "seed_artifact": {"$ref": "#/$defs/seedSubject"},
+    "scenarios": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["side-by-side-upgrade", "explicit-rollback", "disaster-recovery"]
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "nativePlatform": {
+      "enum": [
+        "linux-x86-64",
+        "linux-arm64",
+        "macos-arm64",
+        "windows-x86-64"
+      ]
+    },
+    "releaseSubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_path",
+        "manifest_sha256",
+        "version",
+        "binary_artifact_id"
+      ],
+      "properties": {
+        "manifest_path": {"$ref": "#/$defs/relativePath"},
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "version": {"$ref": "#/$defs/semver"},
+        "binary_artifact_id": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "seedSubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle",
+        "artifact_id",
+        "sha256",
+        "size_bytes",
+        "minimum_commit_seq"
+      ],
+      "properties": {
+        "bundle": {"enum": ["old", "new"]},
+        "artifact_id": {"$ref": "#/$defs/identifier"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "minimum_commit_seq": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

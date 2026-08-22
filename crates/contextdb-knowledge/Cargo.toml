@@ -1,0 +1,27 @@
+[package]
+name = "contextdb-knowledge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Temporal accumulating-knowledge vertical for ContextDB"
+
+[dependencies]
+blake3.workspace = true
+contextdb-cognition.workspace = true
+contextdb-context.workspace = true
+contextdb-core.workspace = true
+contextdb-recall.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,240 @@
+name: Publish local MCP developer preview
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: "local-mcp-preview-${{ github.ref }}"
+  cancel-in-progress: false
+
+jobs:
+  publish-windows-x86-64:
+    name: Build and publish Windows x86-64 preview
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "0"
+      PYO3_PYTHON: python
+      RELEASE_TAG: "${{ github.ref_name }}"
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install pinned Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Require the tag to match version.toml exactly
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -cne "tag") {
+            throw "This workflow may publish only from a tag ref."
+          }
+
+          $Version = python -c "import tomllib; print(tomllib.load(open('version.toml', 'rb'))['version'])"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cannot read the release version from version.toml."
+          }
+          $Version = $Version.Trim()
+          if ($Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$') {
+            throw "version.toml contains an unsafe or unsupported version: $Version"
+          }
+
+          $ExpectedTag = "v$Version"
+          if ($env:RELEASE_TAG -cne $ExpectedTag) {
+            throw "Tag '$env:RELEASE_TAG' does not exactly match '$ExpectedTag'."
+          }
+          "VERSION=$Version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Report the pinned build toolchain
+        shell: pwsh
+        run: |
+          python --version
+          rustup show
+          rustc -vV
+          cargo --version
+          gh --version
+
+      - name: Test and verify the listener-free profile
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tools/local-mcp-preview/tests -v
+          if ($LASTEXITCODE -ne 0) { throw "Local MCP package-contract tests failed." }
+
+          python tools/local-mcp-preview/local_mcp_preview.py verify
+          if ($LASTEXITCODE -ne 0) { throw "Local MCP source/profile verification failed." }
+
+      - name: Build and package the exact preview profile
+        shell: pwsh
+        run: |
+          python tools/local-mcp-preview/local_mcp_preview.py package `
+            --output-dir dist `
+            --target-dir target/local-mcp-release/cargo
+          if ($LASTEXITCODE -ne 0) { throw "Local MCP packaging failed." }
+
+      - name: Verify release assets and materialize the standalone binary
+        shell: pwsh
+        run: |
+          $Archive = "dist/contextdb-local-mcp-$env:VERSION-windows-x86_64.zip"
+          $ArchiveSidecar = "$Archive.sha256"
+          $BuiltBinary = "target/local-mcp-release/cargo/release/contextdb.exe"
+          $Standalone = "dist/contextdb-windows-x86_64.exe"
+          $StandaloneSidecar = "$Standalone.sha256"
+
+          foreach ($Path in @($Archive, $ArchiveSidecar, $BuiltBinary)) {
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "Expected release input is missing: $Path"
+            }
+          }
+
+          python tools/local-mcp-preview/local_mcp_preview.py verify-package `
+            $Archive --hash-sidecar $ArchiveSidecar
+          if ($LASTEXITCODE -ne 0) { throw "Packaged preview verification failed." }
+
+          Copy-Item -LiteralPath $BuiltBinary -Destination $Standalone
+          $StandaloneHash = (Get-FileHash -LiteralPath $Standalone -Algorithm SHA256).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText(
+            $StandaloneSidecar,
+            "$StandaloneHash  contextdb-windows-x86_64.exe`n",
+            [System.Text.Encoding]::ASCII
+          )
+
+          $VersionLines = @(& $Standalone version)
+          if ($LASTEXITCODE -ne 0) { throw "Standalone binary version probe failed." }
+          foreach ($RequiredLine in @(
+            "contextdb $env:VERSION",
+            "build_profile local-mcp",
+            "network_listeners disabled"
+          )) {
+            if ($VersionLines -cnotcontains $RequiredLine) {
+              throw "Standalone binary is missing version marker: $RequiredLine"
+            }
+          }
+
+          $HelpLines = @(& $Standalone --help)
+          if ($LASTEXITCODE -ne 0) { throw "Standalone binary help probe failed." }
+          if (-not ($HelpLines -match '^\s{2}mcp\s')) {
+            throw "Standalone binary does not expose the MCP command."
+          }
+          $ForbiddenCommands = @($HelpLines -match '^\s{2}(serve|probe)\s')
+          if ($ForbiddenCommands.Count -ne 0) {
+            throw "Standalone binary exposes a forbidden network command: $($ForbiddenCommands -join ', ')"
+          }
+
+          $Extracted = Join-Path $env:RUNNER_TEMP "contextdb-local-mcp-package"
+          Expand-Archive -LiteralPath $Archive -DestinationPath $Extracted
+          $PackagedBinaries = @(Get-ChildItem -LiteralPath $Extracted -Recurse -File -Filter contextdb.exe)
+          if ($PackagedBinaries.Count -ne 1) {
+            throw "Expected exactly one contextdb.exe in the package; found $($PackagedBinaries.Count)."
+          }
+          $PackagedHash = (Get-FileHash -LiteralPath $PackagedBinaries[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($PackagedHash -cne $StandaloneHash) {
+            throw "Standalone binary differs from the binary in the verified package."
+          }
+
+          $ExpectedAssets = @(
+            $Standalone,
+            $StandaloneSidecar,
+            $Archive,
+            $ArchiveSidecar
+          )
+          foreach ($Path in $ExpectedAssets) {
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "Expected release asset is missing: $Path"
+            }
+          }
+          if (@(Get-ChildItem -LiteralPath dist -File).Count -ne 4) {
+            throw "The release asset directory must contain exactly four files."
+          }
+
+      - name: Preserve the verified assets as a workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "contextdb-local-mcp-${{ github.ref_name }}-windows-x86_64"
+          path: |
+            dist/contextdb-windows-x86_64.exe
+            dist/contextdb-windows-x86_64.exe.sha256
+            dist/contextdb-local-mcp-*-windows-x86_64.zip
+            dist/contextdb-local-mcp-*-windows-x86_64.zip.sha256
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 14
+          compression-level: 0
+
+      - name: Create or update the GitHub prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          $Archive = "dist/contextdb-local-mcp-$env:VERSION-windows-x86_64.zip"
+          $Assets = @(
+            "dist/contextdb-windows-x86_64.exe",
+            "dist/contextdb-windows-x86_64.exe.sha256",
+            $Archive,
+            "$Archive.sha256"
+          )
+
+          $RemoteCommit = gh api `
+            "repos/$env:GITHUB_REPOSITORY/commits/$env:RELEASE_TAG" `
+            --jq .sha
+          if ($LASTEXITCODE -ne 0 -or $RemoteCommit -ine $env:GITHUB_SHA) {
+            throw "The remote tag no longer resolves to the source commit built by this run."
+          }
+
+          $Notes = Join-Path $env:RUNNER_TEMP "local-mcp-preview-release-notes.md"
+          $NotesContent = @'
+          ContextDB __VERSION__ local MCP developer preview for Windows x86-64.
+
+          This is an unsigned, listener-free local build for trusted single-user workstations. It reports `build_profile local-mcp` and `network_listeners disabled`; the `serve` and `probe` commands are not compiled into its CLI surface.
+
+          Assets:
+          - `contextdb-windows-x86_64.exe` — the standalone binary used by the integration.
+          - `contextdb-windows-x86_64.exe.sha256` — its canonical SHA-256 binding.
+          - `contextdb-local-mcp-__VERSION__-windows-x86_64.zip` — the verified package with notices, SBOM, profile, receipt, and checksums.
+          - `contextdb-local-mcp-__VERSION__-windows-x86_64.zip.sha256` — the package SHA-256 sidecar.
+
+          This developer preview is not the formal ContextDB M18 Alpha release and makes no production hard-delete, hostile-local-user, multi-tenant, remote-service, signing, or automatic-update claim. Pin the exact SHA-256 and use synthetic or non-critical data.
+
+          Source commit: `__SOURCE_SHA__`
+          '@
+          $NotesContent = $NotesContent.Replace("__VERSION__", $env:VERSION).Replace("__SOURCE_SHA__", $env:GITHUB_SHA)
+          $NotesContent | Set-Content -LiteralPath $Notes -Encoding utf8
+
+          $Title = "ContextDB $env:VERSION local MCP developer preview"
+          $ExistingRelease = gh release view $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --json isPrerelease,tagName 2> $null
+          $ReleaseExists = $LASTEXITCODE -eq 0
+          if ($ReleaseExists) {
+            $ReleaseMetadata = $ExistingRelease | ConvertFrom-Json
+            if ($ReleaseMetadata.tagName -cne $env:RELEASE_TAG -or -not $ReleaseMetadata.isPrerelease) {
+              throw "Refusing to replace an existing non-prerelease or mismatched release."
+            }
+            gh release edit $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY `
+              --title $Title `
+              --notes-file $Notes `
+              --prerelease
+          } else {
+            gh release create $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY `
+              --verify-tag `
+              --title $Title `
+              --notes-file $Notes `
+              --prerelease
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Cannot create or update the GitHub prerelease." }
+
+          gh release upload $env:RELEASE_TAG @Assets `
+            --repo $env:GITHUB_REPOSITORY `
+            --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Cannot upload the verified release assets." }

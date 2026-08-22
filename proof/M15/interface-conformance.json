@@ -1,0 +1,44 @@
+{
+  "schema_version": "contextdb.conformance-report/v1",
+  "milestone": "M15",
+  "generated_at": "2026-08-22T09:09:48.865Z",
+  "status": "partial_package_conformance",
+  "command": "CONTEXTDB_CONFORMANCE_CLI=target/debug/contextdb.exe cargo +1.97.1 test -p contextdb-conformance --locked --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 24, "failed": 0, "ignored": 0},
+  "interfaces_exercised": {
+    "embedded": "passed",
+    "http_in_process": "passed",
+    "grpc_in_process_and_network_stream_contract": "passed",
+    "mcp_stateless_adapter": "passed",
+    "cli": "passed-real-subprocess-with-external-state-head",
+    "python_sdk": "not_run_by_this_receipt",
+    "go_sdk": "not_run_by_this_receipt",
+    "typescript_sdk": "not_run_by_this_receipt"
+  },
+  "checks": {
+    "canonical_transcript_embedded_http_grpc_mcp": true,
+    "authenticated_domain_transcript_embedded_http_grpc": true,
+    "stable_error_codes": true,
+    "archive_corruption_atomic_rejection": true,
+    "archive_roundtrip_in_process": true,
+    "cli_clone_only_archive_roundtrip": true,
+    "cli_corrupt_clone_atomic_rejection": true,
+    "cli_external_authority_exact_cleanup": true,
+    "released_proto_additive_compatibility": true,
+    "stream_order_and_typed_errors": true
+  },
+  "source_sha256": {
+    "crates/contextdb-conformance/src/lib.rs": "0c7dbde37551319df9c520ecaf69cff7b9041bf8991147c749964f551d5dd773",
+    "crates/contextdb-conformance/src/tests.rs": "9166f230c5c04a9b5ee737e2bc6d2d6ded3deb940c9063c817ec8227d1d6132a",
+    "crates/contextdb-conformance/src/adapters/cli.rs": "7b40168946b1110fe408939dcdbde731bb2175771170a37489621ef13b31c8e6",
+    "Cargo.lock": "9442dc5069fb03016ca5e73ff05086d2c712363f51211bee2c4385274ee6cba9",
+    "target/debug/contextdb.exe": "2aeb6667562e23d0f0ef1bec0efeaf75992fe146dbed2c47e170c943be0feaf8"
+  },
+  "limitations": [
+    "Windows package tests and the real CLI subprocess passed; the package also passed separately under WSL2 Ubuntu, but this receipt does not run every generated SDK or supported release platform and therefore does not close M15-E01/E02 by itself.",
+    "The CLI adapter proves clone-only import and exact external-authority cleanup; live replacement of an anchored database is intentionally unsupported.",
+    "The interface-overhead benchmark is separately observation-only.",
+    "Strict full-chapter RFC conformance and clean generated-code diff are not claimed."
+  ]
+}

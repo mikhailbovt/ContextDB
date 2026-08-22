@@ -1,0 +1,53 @@
+{
+  "schema_version": "contextdb.conformance-report/v1",
+  "milestone": "M2",
+  "generated_at": "2026-08-12T08:51:12.029Z",
+  "status": "passed",
+  "selected_default": "fjall-3.1.8",
+  "required_alternative": "redb-4.1.0",
+  "comparison_only": "rocksdb-0.24.0/librocksdb-10.4.2",
+  "contract": "contextdb_storage::StorageEngine",
+  "backend_type_leakage": false,
+  "verified_capabilities": [
+    "atomic cross-keyspace batch publication",
+    "synchronized durability receipts",
+    "stable retained read snapshots",
+    "historical reads where the backend contract advertises them",
+    "bytewise deterministic prefix order",
+    "transaction read-your-write",
+    "stale writer rejection without partial visibility",
+    "rollback",
+    "deep verification",
+    "physical compaction without logical sequence drift",
+    "honest Unsupported response for physical checkpoints that cannot meet the contract",
+    "Fjall and redb synchronized close/reopen readback",
+    "fault wrapper distinction between pre-commit ENOSPC, lost response after commit, and weakened durability receipt"
+  ],
+  "workspace_commands": [
+    {
+      "command": "cargo test -p contextdb-storage -p contextdb-storage-memory -p contextdb-storage-fjall -p contextdb-storage-redb -p contextdb-storage-fault -p contextdb-storage-bench --no-fail-fast",
+      "result": "11 passed, 0 failed; all doc-tests passed"
+    },
+    {
+      "command": "cargo clippy -p contextdb-storage -p contextdb-storage-memory -p contextdb-storage-fjall -p contextdb-storage-redb -p contextdb-storage-fault -p contextdb-storage-bench --all-targets -- -D warnings",
+      "result": "passed"
+    }
+  ],
+  "isolated_rocksdb_commands": [
+    {
+      "command": "cargo test --manifest-path crates/contextdb-storage-rocksdb-bench/Cargo.toml --no-fail-fast",
+      "result": "1 passed, 0 failed; all doc-tests passed"
+    },
+    {
+      "command": "cargo clippy --manifest-path crates/contextdb-storage-rocksdb-bench/Cargo.toml --all-targets -- -D warnings",
+      "result": "passed"
+    }
+  ],
+  "benchmark": "docs/benchmarks/results/m2-storage-bakeoff-windows-2026-08-12.json",
+  "decision": "docs/architecture/feature-policy.md",
+  "limitations": [
+    "This is local Windows source/build/runtime evidence; cross-platform CI has not yet executed remotely.",
+    "Portable logical backup/restore and semantic replay are M3 responsibilities, not fabricated physical checkpoint support.",
+    "Crash-kill, ENOSPC, compaction interference, and release-scale certification remain later gates."
+  ]
+}

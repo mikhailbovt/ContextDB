@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-documentation-matrix/v1.json",
+  "title": "ContextDB v1 documentation matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rfc_section", "categories", "summary"],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-documentation-matrix/v1"
+    },
+    "rfc_section": {
+      "const": "31.16"
+    },
+    "categories": {
+      "type": "array",
+      "minItems": 14,
+      "maxItems": 14,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "paths", "gaps"],
+        "properties": {
+          "id": {
+            "enum": [
+              "architecture",
+              "data-model",
+              "memory-concepts",
+              "conversation-integration",
+              "domain-pack-authoring",
+              "security",
+              "privacy",
+              "operations",
+              "formats",
+              "apis",
+              "benchmarks",
+              "limitations",
+              "migration",
+              "examples"
+            ]
+          },
+          "status": {
+            "enum": [
+              "missing",
+              "partial",
+              "source-complete",
+              "runtime-verified",
+              "publication-verified"
+            ]
+          },
+          "paths": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/relativePath"
+            }
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "source_complete", "runtime_verified", "publication_verified"],
+      "properties": {
+        "required": {
+          "const": 14
+        },
+        "source_complete": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 14
+        },
+        "runtime_verified": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 14
+        },
+        "publication_verified": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 14
+        }
+      }
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    }
+  }
+}

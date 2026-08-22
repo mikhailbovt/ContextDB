@@ -1,0 +1,83 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "dbd01a36-ce7a-4fec-997c-8371ccdd74aa",
+  "started_at": "2026-08-22T08:34:44.040Z",
+  "finished_at": "2026-08-22T08:34:51.375Z",
+  "status": "observation_only",
+  "benchmark": {
+    "id": "BENCH-0101",
+    "family": "BENCH-A",
+    "name": "M1 deterministic reference-engine package baseline",
+    "version": "1",
+    "dataset_version": "reference-semantics-v1",
+    "scenario": "canonical semantics and 10240-operation state machine",
+    "tier": "package-conformance-observation"
+  },
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1",
+      "product_version": "0.1.0-alpha.1",
+      "release_channel": "development",
+      "source": {
+        "git_commit": "99d6a6d6a15835ca8c06c0602c9b13982529e3e7",
+        "dirty": true,
+        "rfc_revision": "RFC-0001-v0.3",
+        "errata": ["ERRATA-0001"],
+        "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]
+      },
+      "build": {
+        "timestamp": "2026-08-22T08:34:44.040Z",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "target": "x86_64-pc-windows-msvc",
+        "profile": "test",
+        "reproducible": false,
+        "builder": "local-proof-refresh"
+      },
+      "formats": {"logical_record": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": []}},
+      "feature_profile": "research",
+      "features": ["local-package-conformance"]
+    },
+    "version_manifest_sha256": "82b07f453e050f978b761c835f58a2c6e6b37b074eedd627e7ebb0f2e8952673"
+  },
+  "environment": {
+    "os": "Microsoft Windows NT",
+    "os_version": "10.0.26200.0",
+    "architecture": "x86_64",
+    "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+    "logical_cores": 24,
+    "memory_bytes": 68044750848,
+    "storage": "local NVMe SSD",
+    "filesystem": "NTFS",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "storage_backend": "in-memory-reference",
+    "storage_backend_version": "0.1.0-alpha.1",
+    "build_profile": "test"
+  },
+  "configuration": {
+    "seed": 5573589319906701683,
+    "features": ["local-package-conformance"],
+    "budgets": {},
+    "parameters": {
+      "command": "cargo +1.97.1 test -p contextdb-reference --no-fail-fast --quiet",
+      "exit_code": 0,
+      "state_machine_operations": 10240,
+      "claim_scope": "package tests only"
+    },
+    "index_watermarks": {}
+  },
+  "metrics": [
+    {"name": "reference.tests_passed", "unit": "tests", "direction": "informational", "observed": 21},
+    {"name": "reference.state_machine_operations", "unit": "operations", "direction": "informational", "observed": 10240},
+    {"name": "reference.command_elapsed", "unit": "milliseconds", "direction": "informational", "observed": 7333.265}
+  ],
+  "artifacts": [
+    {"kind": "test-source", "uri": "crates/contextdb-reference/tests/reference_semantics.rs", "sha256": "2a81b3f217a96e9d0629ad51c5e5c6b162df04caa65f8a1273a5dd8293309b6e"}
+  ],
+  "limitations": [
+    "This command ran tests, not a timed BENCH-A/B/C/G benchmark harness; elapsed time includes Cargo process overhead.",
+    "No performance, model-quality, hosted-provider, or cross-platform threshold is claimed.",
+    "Status is observation_only even though all package tests passed."
+  ]
+}

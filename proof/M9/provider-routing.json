@@ -1,0 +1,21 @@
+{
+  "schema_version": "contextdb.security-report/v1",
+  "milestone": "M9",
+  "generated_at": "2026-08-12T13:18:42.164Z",
+  "status": "package_conformance_passed",
+  "subject": "proposal-only model gateway and policy routing",
+  "command": "cargo +1.97.1 test -p contextdb-model --no-fail-fast",
+  "exit_code": 0,
+  "tests": [
+    {"name": "privacy_router_blocks_unredacted_hosted_data_and_sends_only_minimized_payload", "result": "passed"},
+    {"name": "external_call_is_aborted_when_pre_call_audit_fails", "result": "passed"},
+    {"name": "strict_schema_rejects_malformed_unknown_duplicate_and_unbounded_outputs_before_mutation", "result": "passed"},
+    {"name": "shadow_evaluation_is_digest_only_and_cannot_warm_production_cache", "result": "passed"},
+    {"name": "cost_and_currency_budgets_filter_routes_before_provider_execution", "result": "passed"}
+  ],
+  "source_sha256": {"crates/contextdb-model/src/tests.rs": "5f96bd8e7b1d378d7b885f0c36e9fa424b100835d94c397cd9c4ddcc45dd19ca"},
+  "limitations": [
+    "This is package-level adversarial testing, not a repository-wide threat-model validation.",
+    "No live hosted endpoint, network observer, or provider-side retention audit was used."
+  ]
+}

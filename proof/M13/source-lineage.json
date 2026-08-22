@@ -1,0 +1,26 @@
+{
+  "schema_version": "contextdb.test-report/v1",
+  "milestone": "M13",
+  "generated_at": "2026-08-12T13:18:45.404Z",
+  "status": "package_conformance_passed",
+  "command": "cargo +1.97.1 test -p contextdb-knowledge --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 26, "failed": 0, "ignored": 0},
+  "invariants_exercised": [
+    "exact source quote and citation alignment",
+    "source-family independence and mirrored-source suppression",
+    "update, fork, retraction and historical transaction time",
+    "disagreement and explicit unknown preservation",
+    "policy before source materialization",
+    "hallucinated and circular support rejection",
+    "canonical export/import"
+  ],
+  "source_sha256": {
+    "crates/contextdb-knowledge/src/lib.rs": "d169fea52bf9ec12b0332c28b688d01fe4264724469fc1ff3b22c77160577de4",
+    "crates/contextdb-knowledge/src/tests.rs": "dab64781db4de7694d1d26947252225603dce9de6936ad89f77373dfda373a37"
+  },
+  "limitations": [
+    "The generic adapter uses deterministic fixture content; untrusted real-world document parser coverage is outside this receipt.",
+    "The report does not claim model-assisted extraction quality on arbitrary documents."
+  ]
+}

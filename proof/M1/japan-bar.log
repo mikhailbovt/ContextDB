@@ -1,0 +1,10 @@
+schema_version=contextdb.demo-log/v1
+milestone=M1
+generated_at=2026-08-12T13:17:59.693Z
+status=package_demo_passed
+command=cargo +1.97.1 test -p contextdb-reference --test core_adapter canonical_core_mutation_is_validated_published_and_preserved_for_replay -- --exact --nocapture
+exit_code=0
+result=1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+observed=The canonical adapter test publishes the Japan bar semantic object, revises it to "Japan bar, current", and verifies exact replay preservation.
+source_sha256.crates/contextdb-reference/tests/core_adapter.rs=81a4f2d2a998bc90f890577d60eff2c4da2246995195cd3752e31c9e3a026beb
+limitation=This is a deterministic semantic/replay demonstration; natural-language implicit reference resolution is separately exercised at M5.

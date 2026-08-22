@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-package-matrix/v1.json",
+  "title": "ContextDB release package matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "matrix_revision",
+    "platforms",
+    "packages",
+    "release_requirements",
+    "signature_requirements"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-package-matrix/v1"
+    },
+    "matrix_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/platform"
+      }
+    },
+    "packages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/package"
+      }
+    },
+    "release_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alpha", "beta", "stable"],
+      "properties": {
+        "alpha": {
+          "$ref": "#/$defs/packageIdList"
+        },
+        "beta": {
+          "$ref": "#/$defs/packageIdList"
+        },
+        "stable": {
+          "$ref": "#/$defs/packageIdList"
+        }
+      }
+    },
+    "signature_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alpha", "beta", "stable"],
+      "properties": {
+        "alpha": {
+          "$ref": "#/$defs/signatureRequirement"
+        },
+        "beta": {
+          "$ref": "#/$defs/signatureRequirement"
+        },
+        "stable": {
+          "$ref": "#/$defs/signatureRequirement"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "os", "architecture", "rust_target", "tier"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "os": {
+          "enum": ["linux", "macos", "windows"]
+        },
+        "architecture": {
+          "enum": ["x86_64", "aarch64"]
+        },
+        "rust_target": {
+          "type": "string",
+          "minLength": 3
+        },
+        "tier": {
+          "enum": ["required", "best-effort"]
+        }
+      }
+    },
+    "installProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "runtime_required"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "contextdb-binary",
+            "rust-crate",
+            "python-wheel",
+            "go-module",
+            "typescript-package",
+            "source-package",
+            "portable-database",
+            "docker-image",
+            "documentation",
+            "dataset",
+            "checksum-set",
+            "sbom"
+          ]
+        },
+        "runtime_required": {
+          "type": "boolean"
+        },
+        "module": {
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name",
+        "artifact_kind",
+        "roles",
+        "coverage",
+        "platforms",
+        "runtime_platforms",
+        "source_paths",
+        "current_state",
+        "install_probe"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_kind": {
+          "enum": [
+            "executable",
+            "rust-crate",
+            "python-wheel",
+            "go-module",
+            "typescript-package",
+            "source-package",
+            "docker-image",
+            "example-database",
+            "benchmark-suite",
+            "benchmark-dataset",
+            "documentation",
+            "checksum-set",
+            "sbom"
+          ]
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "server",
+              "cli",
+              "rust-crates",
+              "python-package",
+              "go-sdk",
+              "typescript-sdk",
+              "chat-middleware",
+              "mcp-adapter",
+              "document-adapter",
+              "coding-plugin",
+              "docker-image",
+              "example-databases",
+              "benchmark-suite",
+              "benchmark-datasets",
+              "full-docs",
+              "signed-checksums",
+              "sbom"
+            ]
+          }
+        },
+        "coverage": {
+          "enum": ["platform-independent", "per-platform", "declared-platforms"]
+        },
+        "platforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "runtime_platforms": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "source_paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "current_state": {
+          "enum": [
+            "source-present",
+            "packaging-ready-static",
+            "package-built",
+            "runtime-proven",
+            "not-implemented",
+            "external-proof-required"
+          ]
+        },
+        "install_probe": {
+          "$ref": "#/$defs/installProbe"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "packageIdList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "signatureRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roles", "minimum_trust"],
+      "properties": {
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["artifact-manifest", "checksums", "proof-index", "version-manifest"]
+          }
+        },
+        "minimum_trust": {
+          "enum": ["test", "production"]
+        }
+      }
+    }
+  }
+}

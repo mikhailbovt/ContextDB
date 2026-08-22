@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/version-manifest/v1.json",
+  "title": "ContextDB version manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "product_version",
+    "release_channel",
+    "source",
+    "build",
+    "formats",
+    "feature_profile",
+    "features"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.version-manifest/v1"
+    },
+    "product_version": {
+      "$ref": "#/$defs/semver"
+    },
+    "release_channel": {
+      "enum": ["development", "alpha", "beta", "stable"]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "dirty", "rfc_revision", "errata", "adrs"],
+      "properties": {
+        "git_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "rfc_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "errata": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^ERRATA-[0-9]{4}$"
+          }
+        },
+        "adrs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^ADR-[0-9]{4}$"
+          }
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timestamp",
+        "rustc",
+        "cargo",
+        "target",
+        "profile",
+        "reproducible"
+      ],
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "rustc": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cargo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 3
+        },
+        "profile": {
+          "enum": ["dev", "test", "bench", "release", "release-safe"]
+        },
+        "reproducible": {
+          "type": "boolean"
+        },
+        "builder": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "formats": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/formatVersion"
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_-]*$"
+      }
+    },
+    "feature_profile": {
+      "enum": ["embedded-minimal", "server-v1", "conformance", "research", "custom"]
+    },
+    "features": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      }
+    },
+    "storage_backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "configuration_digest": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applied", "rollback_supported"],
+      "properties": {
+        "applied": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]+-[0-9]{4,}$"
+          }
+        },
+        "rollback_supported": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "formatVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["writer", "read_min", "read_max", "required_features"],
+      "properties": {
+        "writer": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "read_min": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "read_max": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "required_features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          }
+        }
+      }
+    }
+  }
+}

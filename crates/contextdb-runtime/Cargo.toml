@@ -1,0 +1,48 @@
+[package]
+name = "contextdb-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Reusable durable runtime composition foundation for ContextDB"
+
+[features]
+default = ["storage-fjall"]
+storage-fjall = []
+transport-http = ["dep:contextdb-server", "contextdb-server/http"]
+transport-grpc = ["dep:contextdb-server", "contextdb-server/server"]
+lexical-tantivy = ["dep:contextdb-index", "contextdb-index/lexical-tantivy"]
+ann-hnsw = ["dep:contextdb-index", "contextdb-index/ann-hnsw"]
+compression-zstd = ["dep:zstd"]
+server-v1 = [
+    "storage-fjall",
+    "transport-http",
+    "transport-grpc",
+    "lexical-tantivy",
+    "ann-hnsw",
+    "compression-zstd",
+]
+
+[dependencies]
+blake3.workspace = true
+contextdb-graph.workspace = true
+contextdb-format.workspace = true
+contextdb-core.workspace = true
+contextdb-index = { workspace = true, optional = true }
+contextdb-journal.workspace = true
+contextdb-server = { workspace = true, optional = true }
+contextdb-storage.workspace = true
+contextdb-storage-fjall.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+zstd = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

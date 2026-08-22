@@ -1,0 +1,27 @@
+[package]
+name = "contextdb-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Persistent bitemporal graph and policy indexes for ContextDB"
+
+[dependencies]
+blake3.workspace = true
+contextdb-core.workspace = true
+contextdb-journal.workspace = true
+contextdb-storage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+contextdb-reference.workspace = true
+contextdb-storage-memory.workspace = true
+contextdb-storage-redb.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

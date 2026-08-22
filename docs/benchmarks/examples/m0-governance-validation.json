@@ -1,0 +1,103 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "00000000-0000-4000-8000-000000000001",
+  "started_at": "2026-08-12T00:00:00Z",
+  "finished_at": "2026-08-12T00:00:01Z",
+  "status": "observation_only",
+  "benchmark": {
+    "id": "BENCH-0001",
+    "family": "BENCH-H",
+    "name": "M0 schema validation example",
+    "version": "0",
+    "dataset_version": "none",
+    "scenario": "governance-format-validation",
+    "tier": "documentation-only"
+  },
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1",
+      "product_version": "0.1.0-alpha.1",
+      "release_channel": "development",
+      "source": {
+        "git_commit": "0000000000000000000000000000000000000000",
+        "dirty": true,
+        "repository": "https://github.com/mikhailbovt/ContextDB",
+        "rfc_revision": "RFC-0001-v0.3",
+        "errata": [
+          "ERRATA-0001"
+        ],
+        "adrs": [
+          "ADR-0001",
+          "ADR-0002",
+          "ADR-0003",
+          "ADR-0004",
+          "ADR-0005"
+        ]
+      },
+      "build": {
+        "timestamp": "2026-08-12T00:00:00Z",
+        "rustc": "rustc 1.97.1",
+        "cargo": "cargo 1.97.1",
+        "target": "x86_64-unknown-linux-gnu",
+        "profile": "bench",
+        "reproducible": false,
+        "builder": "documentation-example"
+      },
+      "formats": {
+        "logical_record": {
+          "writer": 0,
+          "read_min": 0,
+          "read_max": 0,
+          "required_features": []
+        }
+      },
+      "feature_profile": "research",
+      "features": []
+    },
+    "version_manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "environment": {
+    "os": "example",
+    "os_version": "0",
+    "kernel": "not-measured",
+    "architecture": "x86_64",
+    "cpu": "not-measured",
+    "logical_cores": 1,
+    "memory_bytes": 1,
+    "storage": "not-measured",
+    "filesystem": "not-measured",
+    "rustc": "rustc 1.97.1",
+    "cargo": "cargo 1.97.1",
+    "storage_backend": "memory",
+    "storage_backend_version": "0",
+    "storage_configuration_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "build_profile": "bench"
+  },
+  "configuration": {
+    "seed": 0,
+    "features": [],
+    "budgets": {},
+    "parameters": {
+      "documentation_only": true
+    },
+    "index_watermarks": {}
+  },
+  "metrics": [
+    {
+      "name": "schema.valid",
+      "unit": "boolean-as-integer",
+      "direction": "informational",
+      "observed": 1
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "example",
+      "uri": "docs/benchmarks/examples/m0-governance-validation.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "limitations": [
+    "This file validates the result shape only and is not performance or quality evidence."
+  ]
+}

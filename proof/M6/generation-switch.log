@@ -1,0 +1,22 @@
+M6 generation-switch proof
+timestamp_utc=2026-08-12T09:09:59.251Z
+command=cargo test -p contextdb-hierarchy --no-fail-fast
+result=15 passed; 0 failed
+
+Covered assertions:
+- side_by_side_rebuild_is_atomic_and_old_snapshot_remains_isolated
+- deterministic_assignment_preserves_multiple_parents_and_materializes_both_routes
+- persisted generation export/restore preserves route materialization
+- tampered persistent payload and generation manifest fail closed
+- stale/future generations and cached routes are rejected explicitly
+- deletion closure remains live over retained historical snapshots
+
+Publication semantics:
+- validate_proposal produces an opaque validated generation and manifest digest
+- publish performs a CAS-style active-generation check under one repository write lock
+- catalog epoch and active generation change together
+- old Arc-backed catalog snapshots retain the prior immutable generation
+- PersistentHierarchyBundle retains every catalog epoch and revalidates every generation manifest
+
+Scope note: this proves package-local atomic publication and retained snapshot consistency.
+Cross-journal maintenance publication is an integration gate to be exercised by the later runtime.

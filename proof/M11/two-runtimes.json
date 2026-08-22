@@ -1,0 +1,50 @@
+{
+  "schema_version": "contextdb.conformance-report/v1",
+  "milestone": "M11",
+  "generated_at": "2026-08-12T11:09:35.440Z",
+  "status": "passed",
+  "run_id": "45658171-1a33-43dc-b693-af250ccef357",
+  "dataset_digest": "b0a1a29afc68d7242043f26e5831588d05524e1539c4636e7ed1133c370a59df",
+  "runtime_paths": [
+    {
+      "id": "separated-channels-v1",
+      "adapter": "contextdb_chat::SeparatedChannelsAdapter",
+      "renderer": "contextdb_context::RendererKind::Chat",
+      "calls": 2000,
+      "trust_boundary": "trusted control, untrusted memory, and current user input remain separate",
+      "network_calls": 0,
+      "provider_sdk_calls": 0
+    },
+    {
+      "id": "single-prompt-json-v1",
+      "adapter": "contextdb_chat::SinglePromptJsonAdapter",
+      "renderer": "contextdb_context::RendererKind::CanonicalJson",
+      "calls": 1000,
+      "trust_boundary": "one JSON envelope retains distinct trusted-control, untrusted-data, and user-message fields",
+      "network_calls": 0,
+      "provider_sdk_calls": 0
+    }
+  ],
+  "checks": {
+    "canonical_context_pack_validated_before_runtime": true,
+    "runtime_context_digest_binding_verified": true,
+    "normalized_semantic_answer_digest_equal": 1000,
+    "normalized_semantic_answer_digest_total": 1000,
+    "cross_runtime_consistency_basis_points": 10000,
+    "required_cross_runtime_consistency_basis_points": 10000,
+    "provider_credentials_present": false,
+    "provider_specific_mutation_path_present": false,
+    "restart_consistency_basis_points": 10000,
+    "sensitive_policy_probes": 300,
+    "sensitive_records_excluded_before_planner": 36000
+  },
+  "source_sha256": {
+    "crates/contextdb-chat/examples/bench_a_full.rs": "a8750eac5e91a411e166e19cec562a9f9bfa1b75941ba44839cb8863bdf88400",
+    "crates/contextdb-chat/src/benchmark.rs": "a142384513d8aeafd072b845597a2501db195a0dae5b3fe0667934c78e77fc64",
+    "crates/contextdb-chat/Cargo.toml": "a4e0659951c6290863620a5f9a79632b3d0f7091a13afc6cebc77797016deb1c"
+  },
+  "limitations": [
+    "These are deterministic provider-neutral runtime adapters, not external hosted model calls.",
+    "Cross-runtime equality covers normalized selected-memory semantics and canonical pack binding; model prose naturalness requires human review."
+  ]
+}

@@ -1,0 +1,24 @@
+[package]
+name = "contextdb-context"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic model-neutral ContextPack compiler and renderers for ContextDB"
+
+[dependencies]
+blake3.workspace = true
+contextdb-core.workspace = true
+contextdb-recall.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

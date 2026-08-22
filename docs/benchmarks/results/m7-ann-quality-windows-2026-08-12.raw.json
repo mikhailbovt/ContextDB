@@ -1,0 +1,41 @@
+{
+  "schema_version": "contextdb.m7-ann-quality-raw/v1",
+  "command": "cargo test -p contextdb-index --release deterministic_ann_recall_floor_against_exact_oracle -- --nocapture",
+  "started_at": "2026-08-12T08:44:21.017Z",
+  "finished_at": "2026-08-12T08:44:21.196Z",
+  "process_elapsed_ms": 176.11,
+  "test_elapsed_ms_reported": 20.0,
+  "dataset": {
+    "generator": "xorshift64 deterministic_vector",
+    "seed_domain": "ordinal 1 through 256",
+    "documents": 256,
+    "dimensions": 12,
+    "queries": 32,
+    "query_stride": 8,
+    "k": 10
+  },
+  "index": {
+    "metric": "cosine",
+    "neighbours_per_level": 12,
+    "max_visits": 128,
+    "ef_search": 64,
+    "generation": 1,
+    "semantic_watermark": 1
+  },
+  "result": {
+    "overlap": 296,
+    "possible": 320,
+    "recall_at_10": 0.925,
+    "threshold": 0.9,
+    "passed": true
+  },
+  "stdout_evidence": [
+    "M7_ANN_QUALITY documents=256 dimensions=12 queries=32 k=10 max_visits=128 overlap=296 possible=320 recall=0.925000",
+    "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.02s"
+  ],
+  "limitations": [
+    "This is the deterministic M7 correctness/quality fixture, not the million-scale M16 server performance tier.",
+    "Process elapsed time includes Cargo process startup and is informational only.",
+    "Production embedding providers are intentionally outside M7 and arrive through the M9 capability runtime."
+  ]
+}

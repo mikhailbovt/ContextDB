@@ -1,0 +1,50 @@
+{
+  "schema_version": "contextdb.conformance-report/v1",
+  "milestone": "M14",
+  "generated_at": "2026-08-12T09:44:36.073Z",
+  "status": "package_conformance_passed",
+  "boundary": {
+    "domain_crate": "contextdb-domain-code",
+    "universal_core_dependency_on_domain": false,
+    "domain_dependency_on_core": true,
+    "universal_extension": "NodeType::Domain { pack: contextdb-domain-code, name: record_type }",
+    "mutation_authority": false,
+    "provider_or_network_dependency": false
+  },
+  "implemented": [
+    "strict Go compiler-helper JSON backed by go/ast and go/types",
+    "strict Git name-status adapter with rename/copy similarity and content-minimized commit message digest",
+    "stable symbol identity across a unique direct-parent semantic fingerprint; ambiguity fails to a new identity",
+    "immutable incremental snapshots, exact current/history source ranges and digests",
+    "compiler call/import/type/test relations, repository hierarchy, decision evidence, CI ingest and bounded preflight",
+    "canonical external CodeDomainProjection and self-verifying portable archive"
+  ],
+  "commands": [
+    "cargo test -p contextdb-domain-code --no-fail-fast",
+    "cargo clippy -p contextdb-domain-code --all-targets -- -D warnings",
+    "RUSTDOCFLAGS=-D warnings cargo doc -p contextdb-domain-code --no-deps",
+    "go test ./... (workdir tools/contextdb-go-indexer)"
+  ],
+  "results": {
+    "rust_tests": {"passed": 4, "failed": 0},
+    "go_tests": {"passed_packages": 1, "failed_packages": 0},
+    "strict_clippy": "passed",
+    "strict_rustdoc": "passed"
+  },
+  "source_sha256": {
+    "crates/contextdb-domain-code/src/lib.rs": "0d625a725e66513b9007d9eec27272557ab49a9b96ab684a833cd9710a0d9907",
+    "crates/contextdb-domain-code/src/types.rs": "7abf3c8d4784474030d3ffed0f20138d0b705ac023202627e3ee803e829d208c",
+    "crates/contextdb-domain-code/src/store.rs": "e09f6d3dabdbc6abcd227ede1dea7316719d0385c3014a3a822032e43f767050",
+    "crates/contextdb-domain-code/src/query.rs": "8581f8f0e49b5903b12518cc5ded50829e962fb42c36f3968b713066fe2a0a8b",
+    "crates/contextdb-domain-code/src/go.rs": "929be8c983b4553b974ef7143a2b57b90db70c2b3ace2016efa6a100842144a9",
+    "crates/contextdb-domain-code/src/git.rs": "7eb1a6df75c5b51a10d5fd5b10181ecc89c5313c91f352a4fc3f6d47a48742c8",
+    "crates/contextdb-domain-code/src/projection.rs": "35b605a451f10f6c5578efbc90c084fd3500dc6b7fd32fe065830247dbf9f736",
+    "crates/contextdb-domain-code/src/tests.rs": "457de479dabbad7fed690dd38be71f4ee427db77df38c7893e9869f9dce057b0",
+    "tools/contextdb-go-indexer/main.go": "aa067a06d5febb82b160599ae53713a8f01d20d90ecfb96b0914485e31fbefdf",
+    "tools/contextdb-go-indexer/main_test.go": "03c37c6eba9273a32007bc83047d5e4bf06064b445cedfc7c2aea2dfef6af7cf"
+  },
+  "remaining_release_evidence": [
+    "M15 host authorization must wrap source-byte materialization before public interfaces expose this domain pack.",
+    "M17 owns scaled multi-package repository performance and concurrency evidence."
+  ]
+}

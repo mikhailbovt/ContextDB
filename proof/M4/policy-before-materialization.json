@@ -1,0 +1,19 @@
+{
+  "schema_version": "contextdb.security-report/v1",
+  "milestone": "M4",
+  "generated_at": "2026-08-22T08:39:37.618Z",
+  "status": "package_conformance_passed",
+  "subject": "persistent graph authorization before materialization",
+  "command": "cargo +1.97.1 test -p contextdb-graph --no-fail-fast",
+  "exit_code": 0,
+  "tests": [
+    {"name": "authorization_indexes_precede_materialization_and_cross_space_data_has_no_influence", "result": "passed"},
+    {"name": "compaction_merges_base_and_delta_tombstones_without_breaking_old_snapshots", "result": "passed"},
+    {"name": "cross_type_external_id_collision_rolls_back_without_policy_aliasing", "result": "passed"}
+  ],
+  "source_sha256": {"crates/contextdb-graph/tests/persistent_graph.rs": "09ccb1f76589837f566c20adb69fbc936b9ec780486d1aaa18a2b0ec9f7e54f6"},
+  "limitations": [
+    "This package suite is not a repository-wide security scan and does not establish constant-time behavior.",
+    "Concurrent multi-principal transport probes and BENCH-G belong to later milestones."
+  ]
+}

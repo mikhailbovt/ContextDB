@@ -1,0 +1,608 @@
+syntax = "proto3";
+
+package contextdb.v1;
+
+// All enum zero values are explicitly unknown. Numeric values and field
+// numbers are permanent once released; removed values must be reserved.
+enum Sensitivity {
+  SENSITIVITY_UNSPECIFIED = 0;
+  SENSITIVITY_PUBLIC = 1;
+  SENSITIVITY_INTERNAL = 2;
+  SENSITIVITY_PRIVATE = 3;
+  SENSITIVITY_RESTRICTED = 4;
+}
+
+enum Consent {
+  CONSENT_UNSPECIFIED = 0;
+  CONSENT_GRANTED = 1;
+  CONSENT_UNKNOWN = 2;
+  CONSENT_DENIED = 3;
+}
+
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_OBSERVE = 1;
+  CAPABILITY_STREAM_INGEST = 2;
+  CAPABILITY_RECALL = 3;
+  CAPABILITY_CORRECT = 4;
+  CAPABILITY_FORGET = 5;
+  CAPABILITY_HARD_DELETE = 6;
+  CAPABILITY_READ_MEMORY = 7;
+  CAPABILITY_TRAVERSE = 8;
+  CAPABILITY_READ_EVIDENCE = 9;
+  CAPABILITY_READ_CONFLICT = 10;
+  CAPABILITY_SUBSCRIBE = 11;
+  CAPABILITY_RUNTIME = 12;
+  CAPABILITY_MAINTENANCE = 13;
+  CAPABILITY_ADMIN = 14;
+  CAPABILITY_RAW_EVIDENCE = 15;
+  CAPABILITY_MODEL_PROCESSING = 16;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INVALID_SCOPE = 1;
+  ERROR_CODE_UNAUTHORIZED = 2;
+  ERROR_CODE_AMBIGUOUS_IDENTITY = 3;
+  ERROR_CODE_SNAPSHOT_EXPIRED = 4;
+  ERROR_CODE_INDEX_TOO_STALE = 5;
+  ERROR_CODE_EVIDENCE_REQUIRED = 6;
+  ERROR_CODE_CONFLICT_UNRESOLVED = 7;
+  ERROR_CODE_BUDGET_EXHAUSTED = 8;
+  ERROR_CODE_CONTINUATION_EXPIRED = 9;
+  ERROR_CODE_FORMAT_INCOMPATIBLE = 10;
+  ERROR_CODE_PROVIDER_UNAVAILABLE = 11;
+  ERROR_CODE_DEGRADED_MODE = 12;
+  ERROR_CODE_INVALID_ARGUMENT = 13;
+  ERROR_CODE_PERMISSION_DENIED = 14;
+  ERROR_CODE_NOT_FOUND = 15;
+  ERROR_CODE_IDEMPOTENCY_CONFLICT = 16;
+  ERROR_CODE_INVALID_CONTINUATION = 17;
+  ERROR_CODE_INTEGRITY_FAILURE = 18;
+  ERROR_CODE_UNAVAILABLE = 19;
+  ERROR_CODE_RESOURCE_EXHAUSTED = 20;
+  ERROR_CODE_UNSUPPORTED = 21;
+}
+
+message ErrorStatus {
+  ErrorCode code = 1;
+  string message = 2;
+  bool retryable = 3;
+  repeated string partial_result_refs = 4;
+  optional string violated_policy = 5;
+  optional string safe_next_action = 6;
+  optional string trace_id = 7;
+}
+
+message RequestContext {
+  string request_id = 1;
+  string workspace_id = 2;
+  string subject_id = 3;
+  repeated string audiences = 4;
+  repeated string scopes = 5;
+  string purpose = 6;
+  Sensitivity clearance = 7;
+  // Fields 8+ form the authenticated v1 boundary. Legacy Observe/Recall may
+  // omit them only through the explicitly documented compatibility profile.
+  optional string actor_id = 8;
+  optional string agent_id = 9;
+  optional string session_id = 10;
+  repeated Capability capability_grants = 11;
+  AuthenticationEvidence authentication = 12;
+}
+
+message AuthenticatedChannelEvidence {
+  string channel_id = 1;
+  string peer_identity = 2;
+  string binding_digest = 3;
+}
+
+message RequestSignatureEvidence {
+  string algorithm = 1;
+  string key_id = 2;
+  string signature = 3;
+  string signed_context_digest = 4;
+}
+
+message AuthenticationEvidence {
+  oneof evidence {
+    AuthenticatedChannelEvidence authenticated_channel = 1;
+    RequestSignatureEvidence request_signature = 2;
+  }
+}
+
+message AudiencePurposeGrant {
+  string audience = 1;
+  repeated string purposes = 2;
+}
+
+message AccessPolicy {
+  string workspace_id = 1;
+  repeated string scopes = 2;
+  repeated string owners = 3;
+  repeated string audience = 4;
+  repeated AudiencePurposeGrant audience_purpose_grants = 5;
+  repeated string purposes = 6;
+  Sensitivity sensitivity = 7;
+  Consent consent = 8;
+  bool retrievable = 9;
+}
+
+message JsonEntry {
+  string key = 1;
+  // Canonical UTF-8 JSON bytes. This is structured content, not an opaque
+  // command channel; adapters validate it before entering the service.
+  bytes canonical_json = 2;
+}
+
+message Watermarks {
+  uint64 journal = 1;
+  uint64 semantic = 2;
+  uint64 lexical = 3;
+  uint64 vector = 4;
+  uint64 graph = 5;
+}
+
+message ObserveRequest {
+  RequestContext context = 1;
+  string idempotency_key = 2;
+  string observation_id = 3;
+  repeated JsonEntry metadata = 4;
+  bytes content_json = 5;
+  AccessPolicy access = 6;
+}
+
+message ObserveResponse {
+  uint64 commit_seq = 1;
+  bool replayed = 2;
+  string request_digest = 3;
+  Watermarks watermarks = 4;
+}
+
+message ObserveAck {
+  uint64 stream_position = 1;
+  oneof outcome {
+    ObserveResponse response = 2;
+    ErrorStatus error = 3;
+  }
+}
+
+enum Compression {
+  COMPRESSION_UNSPECIFIED = 0;
+  COMPRESSION_IDENTITY = 1;
+  COMPRESSION_GZIP = 2;
+  COMPRESSION_ZSTD = 3;
+}
+
+message SourceAttribute {
+  string key = 1;
+  string value = 2;
+}
+
+message SourceRevisionManifest {
+  string source_id = 1;
+  string revision_id = 2;
+  string snapshot_id = 3;
+  uint64 expected_items = 4;
+  string ordered_items_digest = 5;
+  Compression compression = 6;
+  repeated SourceAttribute attributes = 7;
+}
+
+message StreamObservation {
+  string idempotency_key = 1;
+  string observation_id = 2;
+  repeated JsonEntry metadata = 3;
+  bytes content_json = 4;
+  AccessPolicy access = 5;
+}
+
+message SnapshotComplete {
+  string snapshot_id = 1;
+  uint64 item_count = 2;
+  string ordered_items_digest = 3;
+}
+
+message IngestFrame {
+  RequestContext context = 1;
+  string stream_id = 2;
+  uint64 position = 3;
+  optional string resume_cursor = 4;
+  oneof value {
+    SourceRevisionManifest manifest = 5;
+    StreamObservation observation = 6;
+    SnapshotComplete snapshot_complete = 7;
+  }
+}
+
+enum IngestDisposition {
+  INGEST_DISPOSITION_UNSPECIFIED = 0;
+  INGEST_DISPOSITION_ACCEPTED = 1;
+  INGEST_DISPOSITION_REPLAYED = 2;
+  INGEST_DISPOSITION_SNAPSHOT_COMMITTED = 3;
+}
+
+message IngestAck {
+  string stream_id = 1;
+  uint64 position = 2;
+  IngestDisposition disposition = 3;
+  string frame_digest = 4;
+  string resume_cursor = 5;
+  optional uint64 commit_seq = 6;
+  repeated string partial_result_refs = 7;
+}
+
+enum MemoryEventKind {
+  MEMORY_EVENT_KIND_UNSPECIFIED = 0;
+  MEMORY_EVENT_KIND_NODE_CHANGED = 1;
+  MEMORY_EVENT_KIND_CLAIM_CHANGED = 2;
+  MEMORY_EVENT_KIND_OPEN_LOOP_TRIGGERED = 3;
+  MEMORY_EVENT_KIND_INDEX_WATERMARK_ADVANCED = 4;
+  MEMORY_EVENT_KIND_CONFLICT_RESOLVED = 5;
+  MEMORY_EVENT_KIND_SOURCE_INVALIDATED = 6;
+  MEMORY_EVENT_KIND_OPERATION_PROGRESS = 7;
+  MEMORY_EVENT_KIND_SECURITY_EVENT = 8;
+  MEMORY_EVENT_KIND_OBSERVATION_ACCEPTED = 9;
+  MEMORY_EVENT_KIND_RECORD_CHANGED = 10;
+}
+
+message SubscribeRequest {
+  RequestContext context = 1;
+  repeated MemoryEventKind filters = 2;
+  optional string resume_cursor = 3;
+  uint32 max_events = 4;
+}
+
+message StringEntry {
+  string key = 1;
+  string value = 2;
+}
+
+message MemoryEvent {
+  string event_id = 1;
+  uint64 commit_seq = 2;
+  uint32 ordinal = 3;
+  MemoryEventKind kind = 4;
+  repeated string object_refs = 5;
+  repeated StringEntry attributes = 6;
+}
+
+message SubscriptionCheckpoint {
+  string resume_cursor = 1;
+  bool caught_up = 2;
+}
+
+message SubscriptionDelivery {
+  oneof value {
+    MemoryEvent event = 1;
+    SubscriptionCheckpoint checkpoint = 2;
+  }
+}
+
+enum MemoryRecordKind {
+  MEMORY_RECORD_KIND_UNSPECIFIED = 0;
+  MEMORY_RECORD_KIND_NODE = 1;
+  MEMORY_RECORD_KIND_CLAIM = 2;
+  MEMORY_RECORD_KIND_EDGE = 3;
+  MEMORY_RECORD_KIND_CONFLICT = 4;
+  MEMORY_RECORD_KIND_EVIDENCE = 5;
+  MEMORY_RECORD_KIND_CANDIDATE = 6;
+  MEMORY_RECORD_KIND_SEMANTIC_OBJECT = 7;
+  MEMORY_RECORD_KIND_RUNTIME_STATE = 8;
+  MEMORY_RECORD_KIND_DOMAIN_EXTENSION = 9;
+}
+
+enum MemoryLifecycle {
+  MEMORY_LIFECYCLE_UNSPECIFIED = 0;
+  MEMORY_LIFECYCLE_ACTIVE = 1;
+  MEMORY_LIFECYCLE_SUPERSEDED = 2;
+  MEMORY_LIFECYCLE_RETRACTED = 3;
+  MEMORY_LIFECYCLE_SUPPRESSED = 4;
+}
+
+message DomainTimeRange {
+  optional string from_unix_nanos = 1;
+  optional string to_unix_nanos = 2;
+}
+
+message MemoryLinks {
+  optional string subject = 1;
+  optional string source = 2;
+  optional string target = 3;
+  optional string predicate = 4;
+  optional string conflict_set = 5;
+  repeated string supersedes = 6;
+  repeated string evidence = 7;
+  repeated string conflict_members = 8;
+  bool single_valued = 9;
+}
+
+message MemoryDocument {
+  string id = 1;
+  MemoryRecordKind kind = 2;
+  AccessPolicy access = 3;
+  DomainTimeRange valid_time = 4;
+  MemoryLifecycle lifecycle = 5;
+  MemoryLinks links = 6;
+  bytes value_json = 7;
+  optional string search_text = 8;
+  repeated float vector = 9;
+  repeated JsonEntry attributes = 10;
+}
+
+message MemoryRecord {
+  MemoryDocument document = 1;
+  uint32 revision = 2;
+  uint64 transaction_from = 3;
+  optional uint64 transaction_to = 4;
+}
+
+message MutationResponse {
+  uint64 commit_seq = 1;
+  bool replayed = 2;
+  string request_digest = 3;
+  Watermarks watermarks = 4;
+}
+
+message CorrectRequest {
+  RequestContext context = 1;
+  string idempotency_key = 2;
+  string target_id = 3;
+  MemoryDocument replacement = 4;
+}
+
+enum ForgetMode {
+  FORGET_MODE_UNSPECIFIED = 0;
+  FORGET_MODE_RETRACT = 1;
+  FORGET_MODE_HARD_DELETE = 2;
+}
+
+message ForgetRequest {
+  RequestContext context = 1;
+  string idempotency_key = 2;
+  string target_id = 3;
+  ForgetMode mode = 4;
+  string reason = 5;
+}
+
+message GetMemoryRequest {
+  RequestContext context = 1;
+  string record_id = 2;
+  optional uint64 at_commit = 3;
+}
+
+message GetTimelineRequest {
+  RequestContext context = 1;
+  string record_id = 2;
+  MemoryRecordKind expected_kind = 3;
+  optional uint64 at_commit = 4;
+  uint32 max_revisions = 5;
+}
+
+message TimelineResponse {
+  repeated MemoryRecord revisions = 1;
+  uint64 snapshot_seq = 2;
+  Watermarks watermarks = 3;
+}
+
+enum TraverseDirection {
+  TRAVERSE_DIRECTION_UNSPECIFIED = 0;
+  TRAVERSE_DIRECTION_OUTGOING = 1;
+  TRAVERSE_DIRECTION_INCOMING = 2;
+  TRAVERSE_DIRECTION_BOTH = 3;
+}
+
+message TraverseRequest {
+  RequestContext context = 1;
+  repeated string start_ids = 2;
+  TraverseDirection direction = 3;
+  repeated string predicate_ids = 4;
+  uint32 max_hops = 5;
+  uint32 max_nodes = 6;
+  optional uint64 at_commit = 7;
+}
+
+message TraverseResponse {
+  repeated string node_ids = 1;
+  uint64 snapshot_seq = 2;
+  uint64 authorized_candidates = 3;
+  Watermarks watermarks = 4;
+}
+
+message RuntimeRequest {
+  RequestContext context = 1;
+  string operation_id = 2;
+  bytes payload_json = 3;
+}
+
+message RuntimeResponse {
+  string operation_id = 1;
+  bytes payload_json = 2;
+}
+
+message MaintenanceRequest {
+  RequestContext context = 1;
+  string operation_id = 2;
+  bytes payload_json = 3;
+}
+
+message MaintenanceResponse {
+  string operation_id = 1;
+  bytes payload_json = 2;
+}
+
+message GetStatusRequest {
+  RequestContext context = 1;
+}
+
+message StatusResponse {
+  uint32 schema_version = 1;
+  string profile = 2;
+  uint64 commit_seq = 3;
+  Watermarks watermarks = 4;
+}
+
+message CreateBackupRequest {
+  RequestContext context = 1;
+}
+
+message BackupResponse {
+  string format = 1;
+  bytes archive = 2;
+  string digest = 3;
+  uint64 commit_seq = 4;
+}
+
+message RestoreBackupRequest {
+  RequestContext context = 1;
+  string format = 2;
+  bytes archive = 3;
+  string digest = 4;
+}
+
+message RestoreBackupResponse {
+  uint64 commit_seq = 1;
+  Watermarks watermarks = 2;
+}
+
+message MigrateFormatRequest {
+  RequestContext context = 1;
+  string target_format = 2;
+  string operation_id = 3;
+}
+
+message RecallRequest {
+  RequestContext context = 1;
+  string query = 2;
+  uint32 page_size = 3;
+  optional uint64 at_commit = 4;
+  optional string continuation = 5;
+}
+
+message RecallHit {
+  string id = 1;
+  float score = 2;
+}
+
+message RecallTrace {
+  string trace_id = 1;
+  uint64 snapshot_seq = 2;
+  string operation = 3;
+  uint64 authorized_candidates = 4;
+  repeated string selected_ids = 5;
+  Watermarks watermarks = 6;
+}
+
+message RecallResponse {
+  repeated RecallHit hits = 1;
+  RecallTrace trace = 2;
+  optional string continuation = 3;
+}
+
+enum RecallEventKind {
+  RECALL_EVENT_KIND_UNSPECIFIED = 0;
+  RECALL_EVENT_KIND_STARTED = 1;
+  RECALL_EVENT_KIND_PAGE = 2;
+  RECALL_EVENT_KIND_COMPLETED = 3;
+}
+
+message RecallEvent {
+  RecallEventKind kind = 1;
+  optional RecallResponse page = 2;
+  optional string trace_id = 3;
+}
+
+message ExplainRecallRequest {
+  RequestContext context = 1;
+  RecallTrace trace = 2;
+}
+
+message ExportRequest {
+  RequestContext context = 1;
+}
+
+message ExportResponse {
+  string format = 1;
+  bytes archive = 2;
+  string digest = 3;
+  uint64 commit_seq = 4;
+}
+
+message ImportRequest {
+  RequestContext context = 1;
+  string format = 2;
+  bytes archive = 3;
+  string digest = 4;
+}
+
+message ImportResponse {
+  uint64 commit_seq = 1;
+  Watermarks watermarks = 2;
+}
+
+message VerifyRequest {
+  RequestContext context = 1;
+  bool deep = 2;
+}
+
+message VerifyResponse {
+  bool valid = 1;
+  uint64 commit_seq = 2;
+  optional string archive_digest = 3;
+}
+
+service ObservationService {
+  rpc Observe(ObserveRequest) returns (ObserveResponse);
+  rpc ObserveStream(stream ObserveRequest) returns (stream ObserveAck);
+  rpc IngestSnapshot(stream IngestFrame) returns (stream IngestAck);
+  rpc Correct(CorrectRequest) returns (MutationResponse);
+  rpc Forget(ForgetRequest) returns (MutationResponse);
+}
+
+service RecallService {
+  rpc Recall(RecallRequest) returns (RecallResponse);
+  rpc RecallStream(RecallRequest) returns (stream RecallEvent);
+  rpc ContinueRecall(RecallRequest) returns (RecallResponse);
+  rpc ExplainRecall(ExplainRecallRequest) returns (RecallTrace);
+}
+
+service ArchiveService {
+  rpc Export(ExportRequest) returns (ExportResponse);
+  rpc Import(ImportRequest) returns (ImportResponse);
+}
+
+service SubscriptionService {
+  rpc Subscribe(SubscribeRequest) returns (stream SubscriptionDelivery);
+}
+
+service AgentRuntimeService {
+  rpc Bootstrap(RuntimeRequest) returns (RuntimeResponse);
+  rpc Preflight(RuntimeRequest) returns (RuntimeResponse);
+  rpc Postflight(RuntimeRequest) returns (RuntimeResponse);
+  rpc Checkpoint(RuntimeRequest) returns (RuntimeResponse);
+  rpc Resume(RuntimeRequest) returns (RuntimeResponse);
+  rpc Handoff(RuntimeRequest) returns (RuntimeResponse);
+}
+
+service MemoryService {
+  rpc GetNode(GetMemoryRequest) returns (MemoryRecord);
+  rpc Traverse(TraverseRequest) returns (TraverseResponse);
+  rpc GetTimeline(GetTimelineRequest) returns (TimelineResponse);
+  rpc GetEvidence(GetMemoryRequest) returns (MemoryRecord);
+  rpc GetConflict(GetMemoryRequest) returns (MemoryRecord);
+}
+
+service MaintenanceService {
+  rpc Consolidate(MaintenanceRequest) returns (MaintenanceResponse);
+  rpc Reflect(MaintenanceRequest) returns (MaintenanceResponse);
+  rpc Reindex(MaintenanceRequest) returns (MaintenanceResponse);
+  rpc Compact(MaintenanceRequest) returns (MaintenanceResponse);
+  rpc Verify(VerifyRequest) returns (VerifyResponse);
+}
+
+service AdminService {
+  rpc GetStatus(GetStatusRequest) returns (StatusResponse);
+  rpc CreateBackup(CreateBackupRequest) returns (BackupResponse);
+  rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse);
+  rpc MigrateFormat(MigrateFormatRequest) returns (StatusResponse);
+}

@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/portable-example/v1.json",
+  "title": "ContextDB portable example descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_id",
+    "contains_synthetic_data_only",
+    "logical_archive",
+    "expected_doctor",
+    "security",
+    "evidence_boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.portable-example/v1"
+    },
+    "fixture_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "contains_synthetic_data_only": {
+      "const": true
+    },
+    "logical_archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "format", "size_bytes", "sha256", "blake3", "commit_seq"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^[^/\\\\]+\\.ctxb$"
+        },
+        "format": {
+          "const": "contextdb.logical.v1"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "blake3": {
+          "$ref": "#/$defs/digest"
+        },
+        "commit_seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "expected_doctor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valid", "commit_seq", "archive_digest"],
+      "properties": {
+        "valid": {
+          "const": true
+        },
+        "commit_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "archive_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contains_private_key",
+        "contains_real_personal_data",
+        "contains_provider_credentials",
+        "external_token_key_required",
+        "automatic_key_persistence"
+      ],
+      "properties": {
+        "contains_private_key": {
+          "const": false
+        },
+        "contains_real_personal_data": {
+          "const": false
+        },
+        "contains_provider_credentials": {
+          "const": false
+        },
+        "external_token_key_required": {
+          "const": true
+        },
+        "automatic_key_persistence": {
+          "const": false
+        }
+      }
+    },
+    "evidence_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "windows_import_doctor_observed",
+        "required_platform_receipts_complete",
+        "release_ready"
+      ],
+      "properties": {
+        "windows_import_doctor_observed": {
+          "type": "boolean"
+        },
+        "required_platform_receipts_complete": {
+          "type": "boolean"
+        },
+        "release_ready": {
+          "const": false
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

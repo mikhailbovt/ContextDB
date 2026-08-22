@@ -1,0 +1,701 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "019ff5e4-00aa-7292-b240-b8f5648da14e",
+  "started_at": "2026-08-12T11:58:49Z",
+  "finished_at": "2026-08-12T12:13:07Z",
+  "status": "observation_only",
+  "benchmark": {
+    "id": "BENCH-0017",
+    "family": "BENCH-H",
+    "name": "M17 performance scale and operations",
+    "version": "contextdb-bench-h-v1",
+    "dataset_version": "contextdb-bench-h-v1",
+    "scenario": "native-redb-storage-operations",
+    "tier": "development-10m-storage-records"
+  },
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1",
+      "product_version": "0.1.0-alpha.1",
+      "release_channel": "development",
+      "source": {
+        "git_commit": "745bdb5a2e3580f8ca8f44d8a765d6210b1c9057",
+        "dirty": true,
+        "repository": "https://github.com/mikhailbovt/ContextDB",
+        "rfc_revision": "RFC-0001-v0.3+ERRATA-0001",
+        "errata": [
+          "ERRATA-0001"
+        ],
+        "adrs": [
+          "ADR-0001",
+          "ADR-0002",
+          "ADR-0003",
+          "ADR-0004",
+          "ADR-0005",
+          "ADR-0006"
+        ]
+      },
+      "build": {
+        "timestamp": "2026-08-12T11:58:49Z",
+        "rustc": "rustc unavailable",
+        "cargo": "cargo unavailable",
+        "target": "x86_64",
+        "profile": "release",
+        "reproducible": false,
+        "builder": "contextdb-bench-native-runner"
+      },
+      "formats": {
+        "benchmark_result": {
+          "writer": 1,
+          "read_min": 1,
+          "read_max": 1,
+          "required_features": []
+        },
+        "journal_backup": {
+          "writer": 1,
+          "read_min": 1,
+          "read_max": 1,
+          "required_features": []
+        }
+      },
+      "feature_profile": "research",
+      "features": [
+        "m17-benchmark-harness",
+        "portable-journal-backup",
+        "redb"
+      ],
+      "storage_backend": {
+        "name": "redb",
+        "version": "4.1.0",
+        "configuration_digest": "e12eb38768ad48aad2d93880bef19d504e40d2ba34ae9bb1de28e4dcb9623078"
+      },
+      "migration": {
+        "applied": [],
+        "rollback_supported": true
+      }
+    },
+    "version_manifest_sha256": "d58250c8e49090509d7d7e9aa233f62fcbe83673475ae564052c02ffa7708f07"
+  },
+  "environment": {
+    "os": "windows",
+    "os_version": "Microsoft Windows NT 10.0.26200.0",
+    "architecture": "x86_64",
+    "cpu": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+    "logical_cores": 24,
+    "memory_bytes": 68044750848,
+    "storage": "local temporary redb file",
+    "filesystem": "not-measured",
+    "rustc": "rustc unavailable",
+    "cargo": "cargo unavailable",
+    "storage_backend": "redb",
+    "storage_backend_version": "4.1.0",
+    "storage_configuration_digest": "e12eb38768ad48aad2d93880bef19d504e40d2ba34ae9bb1de28e4dcb9623078",
+    "build_profile": "release"
+  },
+  "configuration": {
+    "seed": 13870620500458668034,
+    "features": [
+      "exact-recall",
+      "portable-backup",
+      "snapshot-isolation"
+    ],
+    "budgets": {
+      "estimated_peak_harness_buffer_bytes": 65000000,
+      "process_rss_budget_bytes": 2147483648,
+      "telemetry_max_samples_per_series": 20000,
+      "telemetry_max_series": 128,
+      "telemetry_max_values_per_dimension": 16,
+      "working_buffer_budget_bytes": 67108864
+    },
+    "parameters": {
+      "batch_records": 250,
+      "bench_h_certification_tier_completed": false,
+      "bench_h_coverage_manifest_version": "contextdb.bench-h-coverage/v1",
+      "bench_h_e01_index_freshness_passed": false,
+      "bench_h_e01_latency_percentiles_passed": false,
+      "bench_h_e01_recovery_passed": false,
+      "bench_h_e01_throughput_passed": false,
+      "bench_h_e02_bounded_memory_passed": false,
+      "bench_h_e02_no_correctness_loss_or_uncontrolled_oom_passed": false,
+      "bench_h_e02_pressure_degradation_passed": false,
+      "bench_h_e03_ann_exact_overlap_passed": false,
+      "bench_h_e03_privacy_regression_passed": false,
+      "bench_h_e03_semantic_regression_passed": false,
+      "bench_h_e03_social_calibration_passed": false,
+      "bench_h_graph_edge_count": 0,
+      "bench_h_medium_tier_completed": false,
+      "bench_h_scenario_artifact_metadata_completed": false,
+      "bench_h_scenario_backup_completed": false,
+      "bench_h_scenario_cold_autobiographical_completed": false,
+      "bench_h_scenario_compaction_under_load_completed": false,
+      "bench_h_scenario_current_fact_completed": false,
+      "bench_h_scenario_filtered_ann_completed": false,
+      "bench_h_scenario_hierarchy_drill_down_completed": false,
+      "bench_h_scenario_historical_fact_completed": false,
+      "bench_h_scenario_hot_conversation_completed": false,
+      "bench_h_scenario_restart_completed": false,
+      "bench_h_semantic_node_count": 0,
+      "bench_h_small_tier_completed": false,
+      "bench_h_vector_count": 0,
+      "bounded_mvcc_actual_digest": "e75520240cc487421b861076ba57b70377d39c0531038cfdae53e582c0e4967d",
+      "bounded_mvcc_differential_verified": true,
+      "bounded_mvcc_expected_digest": "e75520240cc487421b861076ba57b70377d39c0531038cfdae53e582c0e4967d",
+      "certification_node_count": 0,
+      "cold_cache_evicted": false,
+      "evidence_kind": "native_measured_development",
+      "full_mvcc_differential_records": 4096,
+      "full_mvcc_oracle_estimated_bytes": 102402560000000,
+      "m16_deep_scan_passed": false,
+      "oracle_mode": "streaming_with_bounded_mvcc_probe",
+      "provisional_bootstrap_p95_target_ns": 200000000,
+      "provisional_exact_graph_p95_target_ns": 150000000,
+      "provisional_hot_conversation_p95_target_ns": 120000000,
+      "provisional_hybrid_p95_target_ns": 400000000,
+      "real_modality_models_executed": false,
+      "records": 10000000,
+      "sampled_recall_queries": 2000,
+      "value_bytes": 256,
+      "workload_manifest_sha256": "4803f4d37ab08d06b1f8ec5ab3514a735a70770de67ade330ca7fcbbaf3e9c25"
+    },
+    "index_watermarks": {
+      "consolidation": 80407,
+      "journal": 100,
+      "lexical": 80407,
+      "semantic": 80407
+    }
+  },
+  "metrics": [
+    {
+      "name": "ingest.commit_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 40000,
+        "min": 583400.0,
+        "max": 460190700.0,
+        "mean": 4121341.7725,
+        "p50": 3929500.0,
+        "p95": 5571500.0,
+        "p99": 6823700.0
+      }
+    },
+    {
+      "name": "recall.cold_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 2000,
+        "min": 2400.0,
+        "max": 131100.0,
+        "mean": 17715.7,
+        "p50": 13900.0,
+        "p95": 40800.0,
+        "p99": 83700.0
+      }
+    },
+    {
+      "name": "recall.warm_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 2000,
+        "min": 1200.0,
+        "max": 8600.0,
+        "mean": 1872.3,
+        "p50": 1900.0,
+        "p95": 2300.0,
+        "p99": 2400.0
+      }
+    },
+    {
+      "name": "recall.filtered_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 64,
+        "min": 122838900.0,
+        "max": 157182700.0,
+        "mean": 141519506.25,
+        "p50": 140813000.0,
+        "p95": 152194200.0,
+        "p99": 157182700.0
+      }
+    },
+    {
+      "name": "mixed.read_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 1594,
+        "min": 2700.0,
+        "max": 68000.0,
+        "mean": 14827.28983688833,
+        "p50": 14200.0,
+        "p95": 25100.0,
+        "p99": 34100.0
+      }
+    },
+    {
+      "name": "mixed.write_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 406,
+        "min": 345200.0,
+        "max": 257937500.0,
+        "mean": 1155766.2561576355,
+        "p50": 516900.0,
+        "p95": 676800.0,
+        "p99": 803300.0
+      }
+    },
+    {
+      "name": "journal.ingest_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 100,
+        "min": 324200.0,
+        "max": 984500.0,
+        "mean": 520037.0,
+        "p50": 496200.0,
+        "p95": 748600.0,
+        "p99": 829200.0
+      }
+    },
+    {
+      "name": "ingest.operations_per_second",
+      "unit": "operations_per_second",
+      "direction": "higher_is_better",
+      "observed": 51412.189163645904
+    },
+    {
+      "name": "ingest.bytes_per_second",
+      "unit": "bytes_per_second",
+      "direction": "higher_is_better",
+      "observed": 13161520.425893351
+    },
+    {
+      "name": "compaction.foreground_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 205170658800.0
+    },
+    {
+      "name": "compaction.background_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 162484478200.0
+    },
+    {
+      "name": "rebuild.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 188313743100.0
+    },
+    {
+      "name": "backup.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 5439800.0
+    },
+    {
+      "name": "restore.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 17462600.0
+    },
+    {
+      "name": "recovery.reopen_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 11246400.0
+    },
+    {
+      "name": "run.total_elapsed_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 857797942900.0
+    },
+    {
+      "name": "correctness.oracle_digest_equal",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "correctness.snapshot_consistent",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "correctness.primary_count_equal",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "correctness.bounded_mvcc_differential_equal",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "correctness.rebuild_equal",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "correctness.compaction_preserved",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "correctness.reopen_preserved",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "correctness.restore_equal",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "correctness.journal_reopen_equal",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "correctness.final_record_count_equal",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "working_set.budget_enforced",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 1.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 1.0
+      },
+      "passed": true
+    },
+    {
+      "name": "working_set.estimated_harness_buffer_bytes",
+      "unit": "bytes",
+      "direction": "lower_is_better",
+      "observed": 65000000.0,
+      "threshold": {
+        "operator": "lte",
+        "value": 67108864.0
+      },
+      "passed": true
+    },
+    {
+      "name": "durability.synchronized_acknowledgement_bps",
+      "unit": "basis_points",
+      "direction": "target",
+      "observed": 10000.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 10000.0
+      },
+      "passed": true
+    },
+    {
+      "name": "telemetry.payloads_included",
+      "unit": "boolean_as_integer",
+      "direction": "target",
+      "observed": 0.0,
+      "threshold": {
+        "operator": "eq",
+        "value": 0.0
+      },
+      "passed": true
+    },
+    {
+      "name": "telemetry.series_count",
+      "unit": "series",
+      "direction": "lower_is_better",
+      "observed": 15.0,
+      "threshold": {
+        "operator": "lte",
+        "value": 128.0
+      },
+      "passed": true
+    },
+    {
+      "name": "memory.phase_boundary_rss_bytes",
+      "unit": "bytes",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 10,
+        "min": 5181440.0,
+        "max": 1592954880.0,
+        "mean": 421955174.4,
+        "p50": 27856896.0,
+        "p95": 1592954880.0,
+        "p99": 1592954880.0
+      }
+    },
+    {
+      "name": "memory.phase_boundary_rss_max_bytes",
+      "unit": "bytes",
+      "direction": "lower_is_better",
+      "observed": 1592954880.0,
+      "threshold": {
+        "operator": "lte",
+        "value": 2147483648.0
+      },
+      "passed": true
+    },
+    {
+      "name": "phase.cold_warm_recall.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 51040500.0
+    },
+    {
+      "name": "phase.derived_rebuild.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 202585538500.0
+    },
+    {
+      "name": "phase.foreground_compaction.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 242990648800.0
+    },
+    {
+      "name": "phase.journal_backup_restore.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 105236900.0
+    },
+    {
+      "name": "phase.mixed_under_compaction.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 162988520400.0
+    },
+    {
+      "name": "phase.native_digest.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 20348390200.0
+    },
+    {
+      "name": "phase.native_ingest.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 194510520600.0
+    },
+    {
+      "name": "phase.oracle.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 4856257700.0
+    },
+    {
+      "name": "phase.reopen_and_verify.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 17304060200.0
+    },
+    {
+      "name": "phase.scaling_curve.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 18396800.0
+    },
+    {
+      "name": "phase.snapshot_and_filtered_recall.latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": 9719386400.0
+    },
+    {
+      "name": "scaling.records_100000.recall_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 512,
+        "min": 900.0,
+        "max": 101200.0,
+        "mean": 10807.8125,
+        "p50": 8900.0,
+        "p95": 19900.0,
+        "p99": 69000.0
+      }
+    },
+    {
+      "name": "scaling.records_2500000.recall_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 512,
+        "min": 900.0,
+        "max": 305200.0,
+        "mean": 12260.15625,
+        "p50": 9800.0,
+        "p95": 24300.0,
+        "p99": 69400.0
+      }
+    },
+    {
+      "name": "scaling.records_5000000.recall_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 512,
+        "min": 1100.0,
+        "max": 75400.0,
+        "mean": 5639.84375,
+        "p50": 2200.0,
+        "p95": 18900.0,
+        "p99": 63500.0
+      }
+    },
+    {
+      "name": "scaling.records_10000000.recall_latency_ns",
+      "unit": "nanoseconds",
+      "direction": "lower_is_better",
+      "observed": {
+        "count": 512,
+        "min": 900.0,
+        "max": 7400.0,
+        "mean": 1801.953125,
+        "p50": 1900.0,
+        "p95": 2400.0,
+        "p99": 2500.0
+      }
+    }
+  ],
+  "quality_gates": [
+    {
+      "gate_id": "M17-DIFFERENTIAL",
+      "metric": "correctness.oracle_digest_equal",
+      "passed": true
+    },
+    {
+      "gate_id": "M17-SNAPSHOT",
+      "metric": "correctness.snapshot_consistent",
+      "passed": true
+    },
+    {
+      "gate_id": "M17-PRIMARY-COUNT",
+      "metric": "correctness.primary_count_equal",
+      "passed": true
+    },
+    {
+      "gate_id": "M17-COMPACTION",
+      "metric": "correctness.compaction_preserved",
+      "passed": true
+    },
+    {
+      "gate_id": "M17-REBUILD",
+      "metric": "correctness.rebuild_equal",
+      "passed": true
+    },
+    {
+      "gate_id": "M17-RESTORE",
+      "metric": "correctness.restore_equal",
+      "passed": true
+    },
+    {
+      "gate_id": "M17-FINAL-COUNT",
+      "metric": "correctness.final_record_count_equal",
+      "passed": true
+    },
+    {
+      "gate_id": "M17-WORKING-SET",
+      "metric": "working_set.budget_enforced",
+      "passed": true
+    },
+    {
+      "gate_id": "M17-TELEMETRY-PRIVACY",
+      "metric": "telemetry.payloads_included",
+      "passed": true
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "raw-native-outcome",
+      "uri": "BENCH-H-10M-windows-development.raw.json",
+      "sha256": "4f94c45382fe3986e969d8c1209bd3012f7b0e7a1a20efd0832a140b2fa769d3"
+    }
+  ],
+  "limitations": [
+    "Cold recall means the first read series after closing and reopening redb; the harness does not evict operating-system page cache.",
+    "This bounded native adapter measures exact persistent storage recall, not M9 hybrid ANN/model orchestration.",
+    "RSS is sampled at phase boundaries and is not a continuous allocator or kernel peak trace.",
+    "The portable backup scenario exercises the production journal backup/restore boundary; the primary synthetic scale dataset is verified independently by reopen and digest.",
+    "BENCH-E coverage in this package is a logical fixture/evaluator and does not measure real media decoders or modality models.",
+    "M17 release certification remains blocked until the M16 deep security scan passes.",
+    "The 10000000-record scale dataset uses a streaming expected digest/count and 2000 deterministic point recalls; full clone-on-write MVCC differential coverage is separately executed on 4096 records.",
+    "This run exercises 10000000 storage records only; the ERRATA E-009 10M semantic-node floor and required graph-edge/vector coverage remain unmeasured.",
+    "The bounded MVCC expected/actual digest fields were reconstructed by rerunning only the deterministic 4096-record probe configuration; the 10M measured phases were not rerun.",
+    "Evidence kind is not release_certification; the result must remain observation_only unless an exact correctness gate fails.",
+    "Full BENCH-H coverage is incomplete: semantic_nodes=0, graph_edges=0, vectors=0; every required scenario and M17-E01/E02/E03 class must also pass.",
+    "M16 deep security scan is not passed for this evidence; M17 release status remains open."
+  ]
+}

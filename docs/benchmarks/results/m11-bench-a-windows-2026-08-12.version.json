@@ -1,0 +1,42 @@
+{
+  "schema_version": "contextdb.version-manifest/v1",
+  "product_version": "0.1.0-alpha.1",
+  "release_channel": "development",
+  "source": {
+    "git_commit": "745bdb5a2e3580f8ca8f44d8a765d6210b1c9057",
+    "dirty": true,
+    "repository": "https://github.com/mikhailbovt/ContextDB",
+    "rfc_revision": "RFC-0001-v0.3",
+    "errata": ["ERRATA-0001"],
+    "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]
+  },
+  "build": {
+    "timestamp": "2026-08-12T11:02:51.000Z",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "target": "x86_64-pc-windows-msvc",
+    "profile": "release",
+    "reproducible": false,
+    "builder": "local-m11-bench-a"
+  },
+  "formats": {
+    "chat": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["persistent-chat"]},
+    "journal": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["sync-durability"]},
+    "context_pack": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["context-compiler"]},
+    "recall_plan": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["deterministic-recall"]}
+  },
+  "feature_profile": "research",
+  "features": [
+    "context-compiler",
+    "deterministic-recall",
+    "persistent-chat",
+    "reference-semantic-projection",
+    "sync-durability",
+    "two-runtime-adapters"
+  ],
+  "storage_backend": {
+    "name": "contextdb-storage-redb",
+    "version": "redb-4.1.0",
+    "configuration_digest": "56d7c070f6f96ff69240eb4dbd824927cf5f470319ee773ceae0d3919ab43697"
+  }
+}

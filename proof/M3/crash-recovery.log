@@ -1,0 +1,10 @@
+schema_version=contextdb.demo-log/v1
+milestone=M3
+generated_at=2026-08-12T13:17:59.693Z
+status=package_demo_passed
+command=cargo +1.97.1 test -p contextdb-journal redb_sync_commit_reopens_and_replays_exact_bytes_without_docker -- --nocapture
+exit_code=0
+result=1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out
+observed=The Sync commit was closed, reopened from redb, and replayed as exact bytes without Docker.
+source_sha256.crates/contextdb-journal/src/tests.rs=13209b1cb337af667fe48f50caf80ccfe6f3c94e928b334115f4b405fe1f9700
+limitation=The demo is a deterministic close/reopen recovery test and is not evidence of abrupt OS-level process termination or power loss.

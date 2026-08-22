@@ -1,0 +1,31 @@
+{
+  "schema_version": "contextdb.test-report/v1",
+  "milestone": "M6",
+  "generated_at": "2026-08-12T09:09:59.251Z",
+  "status": "package_conformance_passed",
+  "command": "cargo test -p contextdb-hierarchy --no-fail-fast",
+  "result": {"passed": 15, "failed": 0, "ignored": 0},
+  "strict_checks": [
+    "cargo fmt -p contextdb-hierarchy -- --check",
+    "cargo clippy -p contextdb-hierarchy --all-targets -- -D warnings",
+    "RUSTDOCFLAGS=-D warnings cargo doc -p contextdb-hierarchy --no-deps"
+  ],
+  "invariants": [
+    "multiple hierarchy views and parent memberships never rewrite semantic source identity",
+    "cycles, cross-partition edges, duplicate identities, stale generations, and tampered manifests fail closed",
+    "authorization and current deletion overlays apply before navigation metadata is returned",
+    "generation publication is immutable, CAS-checked, and snapshot isolated",
+    "portable persistence retains and revalidates all historical catalog epochs",
+    "beam traversal uses a generation-owned immutable parent-to-child adjacency index instead of scanning every membership"
+  ],
+  "source_sha256": {
+    "crates/contextdb-hierarchy/src/engine.rs": "94c915fbfbb73626dd6b418b4a4243e29018013965254272f2d0577f21e6bbe9",
+    "crates/contextdb-hierarchy/src/tests.rs": "733b251f88e2fb32a7fd878352b880bc770f776128abe261e789290f8e083630",
+    "crates/contextdb-hierarchy/examples/hierarchy_ablation.rs": "8829ee6a98985e750060f7e9a973c30baf28fecb1edcc6349e1c529fa1e357a7"
+  },
+  "limitations": [
+    "The reference repository is in-memory; PersistentHierarchyBundle provides the validated storage seam for the integrated runtime.",
+    "The M6 ablation isolates deterministic pruning and is not a claim about model-generated hierarchy quality.",
+    "Million-scale latency and cross-process crash publication belong to M16/M17 certification."
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "workload": "bench-f-six-month-go-repository-v1",
+  "parameters": {
+    "monthly_snapshots": 6,
+    "labelled_tasks": 10,
+    "latency_iterations": 501,
+    "quality_floor": 0.9,
+    "baseline_margin_floor": 0.2,
+    "full_tool_call_ceiling": 5
+  },
+  "full_contextdb": {
+    "correct": 10,
+    "total": 10,
+    "quality": 1.0,
+    "exploratory_tool_calls": 5
+  },
+  "baselines": {
+    "no_memory": {"correct": 0, "total": 10, "quality": 0.0, "exploratory_tool_calls": 0},
+    "grep_tool": {"correct": 4, "total": 10, "quality": 0.4, "exploratory_tool_calls": 12},
+    "lexical": {"correct": 4, "total": 10, "quality": 0.4, "exploratory_tool_calls": 10},
+    "bag_of_words_vector": {"correct": 4, "total": 10, "quality": 0.4, "exploratory_tool_calls": 9},
+    "reduced_no_relations_decisions_ci": {"correct": 7, "total": 10, "quality": 0.7, "exploratory_tool_calls": 8}
+  },
+  "metrics": {
+    "quality_margin_over_best_baseline": 0.30000000000000004,
+    "query_median_latency_ns": 5600,
+    "exact_symbol_accuracy": 1.0,
+    "evidence_location_accuracy": 1.0,
+    "temporal_correctness": 1.0,
+    "regression_preflight_recall": 1.0,
+    "unknown_rationale_accuracy": 1.0,
+    "stable_identity_across_rename_move": 1.0
+  },
+  "notes": [
+    "The fixture contains six immutable monthly Go snapshots with a move, rename, algorithm transition, decision evidence, compiler call/test relations, and CI evidence.",
+    "Grep, lexical, bag-of-words vector, no-memory, and reduced-feature routes execute the same labelled task checks; they are deterministic reference baselines, not claims about external products.",
+    "Latency measures the in-process reference store at the correctness tier and is not the M17 server SLO."
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "context": {
+    "request_id": "example:portable-database:observe:1",
+    "workspace_id": "workspace:portable-example",
+    "subject_id": "subject:alice",
+    "audiences": [
+      "subject:alice"
+    ],
+    "scopes": [
+      "conversation:japan-trip"
+    ],
+    "purpose": "assist",
+    "clearance": "private"
+  },
+  "idempotency_key": "example:portable-database:idempotency:1",
+  "observation_id": "observation:portable-example:japan-bar",
+  "metadata": {
+    "fixture": "portable-example-v1",
+    "language": "en"
+  },
+  "content": {
+    "text": "During the Japan trip Alice discussed opening a small listening bar after graduation; it remained an idea, not a current commitment."
+  },
+  "access": {
+    "workspace_id": "workspace:portable-example",
+    "scopes": [
+      "conversation:japan-trip"
+    ],
+    "owners": [
+      "subject:alice"
+    ],
+    "audience": [
+      "subject:alice"
+    ],
+    "audience_purpose_grants": {
+      "subject:alice": [
+        "assist"
+      ]
+    },
+    "purposes": [],
+    "sensitivity": "private",
+    "consent": "granted",
+    "retrievable": true
+  }
+}

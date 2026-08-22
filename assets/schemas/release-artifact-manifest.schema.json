@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/release-artifact-manifest/v1.json",
+  "title": "ContextDB release artifact manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release",
+    "source",
+    "version_manifest",
+    "package_matrix",
+    "proof_index",
+    "checksum_file",
+    "signature_set",
+    "artifacts",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.release-artifact-manifest/v1"
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "channel", "created_at"],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/semver"
+        },
+        "channel": {
+          "enum": ["development", "alpha", "beta", "stable"]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "candidate": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "git_commit", "dirty"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "git_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "dirty": {
+          "type": "boolean"
+        }
+      }
+    },
+    "version_manifest": {
+      "$ref": "#/$defs/fileReference"
+    },
+    "package_matrix": {
+      "$ref": "#/$defs/fileReference"
+    },
+    "proof_index": {
+      "$ref": "#/$defs/fileReference"
+    },
+    "checksum_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "algorithm", "format"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "algorithm": {
+          "const": "sha256"
+        },
+        "format": {
+          "const": "sha256sum-v1"
+        }
+      }
+    },
+    "signature_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "fileReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "relatedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256", "size_bytes"],
+      "properties": {
+        "kind": {
+          "enum": ["sbom", "install-receipt", "provenance-attestation", "publication-receipt", "license", "notice"]
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "platform": {
+          "$ref": "#/$defs/identifier"
+        },
+        "evidence_level": {
+          "enum": ["static", "runtime", "publication"]
+        },
+        "status": {
+          "enum": ["passed", "failed", "not-run"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {"const": "install-receipt"}
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["platform", "evidence_level", "status"],
+            "properties": {
+              "evidence_level": {"const": "runtime"},
+              "status": {"const": "passed"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {"const": "publication-receipt"}
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["evidence_level", "status"],
+            "properties": {
+              "evidence_level": {"const": "publication"},
+              "status": {"const": "passed"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": ["sbom", "provenance-attestation"]
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["evidence_level", "status"],
+            "properties": {
+              "evidence_level": {
+                "enum": ["static", "publication"]
+              },
+              "status": {"const": "passed"}
+            }
+          }
+        }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_commit", "builder", "build_recipe", "reproducible"],
+      "properties": {
+        "source_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "builder": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_recipe": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "reproducible": {
+          "type": "boolean"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "package_id",
+        "roles",
+        "kind",
+        "path",
+        "media_type",
+        "size_bytes",
+        "sha256",
+        "targets",
+        "version",
+        "version_manifest_sha256",
+        "provenance",
+        "related_files"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "package_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/[^/\\s]+$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "version": {
+          "$ref": "#/$defs/semver"
+        },
+        "version_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        },
+        "related_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relatedFile"
+          }
+        }
+      }
+    }
+  }
+}

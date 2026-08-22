@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="620" viewBox="0 0 1440 620" role="img" aria-labelledby="title desc">
+  <title id="title">ContextDB — memory is infrastructure</title>
+  <desc id="desc">ContextDB wordmark beside a luminous temporal memory graph, with local-first, evidence-bound, and policy-first principles.</desc>
+  <defs>
+    <linearGradient id="background" x1="70" y1="16" x2="1370" y2="610" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#050912"/>
+      <stop offset=".48" stop-color="#091427"/>
+      <stop offset="1" stop-color="#160D2D"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="760" y1="90" x2="1340" y2="510" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#41E8FF"/>
+      <stop offset=".46" stop-color="#7694FF"/>
+      <stop offset="1" stop-color="#D377FF"/>
+    </linearGradient>
+    <linearGradient id="wordmark" x1="82" y1="134" x2="595" y2="216" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7FBFF"/>
+      <stop offset=".64" stop-color="#DFF7FF"/>
+      <stop offset="1" stop-color="#B7D2FF"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="82" y1="0" x2="620" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#41E8FF"/>
+      <stop offset=".52" stop-color="#6E91FF"/>
+      <stop offset="1" stop-color="#C16FFF"/>
+    </linearGradient>
+    <radialGradient id="graphAura" cx="0" cy="0" r="1" gradientTransform="translate(1081 294) rotate(90) scale(290 310)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4FDFFF" stop-opacity=".17"/>
+      <stop offset=".55" stop-color="#6D7CFF" stop-opacity=".08"/>
+      <stop offset="1" stop-color="#A652FF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="0" cy="0" r="1" gradientTransform="translate(1069 282) rotate(128) scale(72)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset=".22" stop-color="#BDF7FF"/>
+      <stop offset=".61" stop-color="#6FC8FF"/>
+      <stop offset="1" stop-color="#7B68FF"/>
+    </radialGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#B7CCEF" stroke-opacity=".045"/>
+    </pattern>
+    <pattern id="microDots" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r=".8" fill="#CDE8FF" fill-opacity=".08"/>
+    </pattern>
+    <filter id="aura" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+    <filter id="nodeGlow" x="-140%" y="-140%" width="380%" height="380%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softShadow" x="-30%" y="-60%" width="160%" height="220%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#02040A" flood-opacity=".65"/>
+    </filter>
+    <clipPath id="frame"><rect x="1" y="1" width="1438" height="618" rx="31"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1440" height="620" fill="url(#background)"/>
+    <rect width="1440" height="620" fill="url(#grid)"/>
+    <rect x="700" width="740" height="620" fill="url(#microDots)" opacity=".72"/>
+    <circle cx="1081" cy="294" r="325" fill="url(#graphAura)"/>
+    <circle cx="1081" cy="294" r="170" fill="#3B9EFF" fill-opacity=".055" filter="url(#aura)"/>
+    <path d="M0 0H1440V4H0Z" fill="url(#accent)"/>
+
+    <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Arial, sans-serif">
+      <g transform="translate(82 68)">
+        <rect width="172" height="34" rx="17" fill="#0D2233" stroke="#56DDF2" stroke-opacity=".38"/>
+        <circle cx="18" cy="17" r="4" fill="#56E6F8" filter="url(#nodeGlow)"/>
+        <text x="31" y="22" fill="#AEEEF7" font-size="13" font-weight="650" letter-spacing="1.3">LOCAL-FIRST CORE</text>
+      </g>
+
+      <text x="78" y="202" fill="url(#wordmark)" font-size="88" font-weight="760" letter-spacing="-4.5">Context<tspan fill="url(#accent)">DB</tspan></text>
+      <text x="82" y="264" fill="#EAF4FF" font-size="31" font-weight="560" letter-spacing="-.65">Memory is infrastructure.</text>
+      <text x="82" y="307" fill="#8FA8C7" font-size="20" font-weight="440">A temporal memory engine for AI systems that need</text>
+      <text x="82" y="337" fill="#8FA8C7" font-size="20" font-weight="440">continuity, provenance, and permission—not a bigger transcript.</text>
+
+      <g transform="translate(82 383)" font-size="12" font-weight="700" letter-spacing="1.15">
+        <rect width="128" height="35" rx="17.5" fill="#0C2634" stroke="#3FD9EF" stroke-opacity=".34"/>
+        <text x="22" y="23" fill="#A6F2FA">TEMPORAL</text>
+        <rect x="140" width="164" height="35" rx="17.5" fill="#111F3C" stroke="#7997FF" stroke-opacity=".36"/>
+        <text x="164" y="23" fill="#C0CFFF">EVIDENCE-BOUND</text>
+        <rect x="316" width="154" height="35" rx="17.5" fill="#21183C" stroke="#C178FF" stroke-opacity=".36"/>
+        <text x="342" y="23" fill="#E3C4FF">POLICY-FIRST</text>
+      </g>
+
+      <g transform="translate(82 477)" fill="none" stroke-linecap="round">
+        <path d="M0 0H474" stroke="#9DB2D0" stroke-opacity=".15"/>
+        <path d="M0 0H153" stroke="url(#accent)" stroke-width="2"/>
+      </g>
+      <text x="82" y="513" fill="#607999" font-size="12" font-weight="700" letter-spacing="1.45">OBSERVE</text>
+      <text x="184" y="513" fill="#516A8A" font-size="12">→</text>
+      <text x="213" y="513" fill="#7186A5" font-size="12" font-weight="700" letter-spacing="1.45">VALIDATE</text>
+      <text x="322" y="513" fill="#516A8A" font-size="12">→</text>
+      <text x="350" y="513" fill="#7186A5" font-size="12" font-weight="700" letter-spacing="1.45">LINK</text>
+      <text x="420" y="513" fill="#516A8A" font-size="12">→</text>
+      <text x="449" y="513" fill="#A993EC" font-size="12" font-weight="700" letter-spacing="1.45">RECALL</text>
+
+      <g opacity=".88">
+        <ellipse cx="1071" cy="286" rx="286" ry="178" fill="none" stroke="#89B9FF" stroke-opacity=".16"/>
+        <ellipse cx="1071" cy="286" rx="205" ry="270" fill="none" stroke="#A999FF" stroke-opacity=".13" transform="rotate(54 1071 286)"/>
+        <ellipse cx="1071" cy="286" rx="205" ry="270" fill="none" stroke="#64E2F6" stroke-opacity=".12" transform="rotate(-54 1071 286)"/>
+      </g>
+
+      <g fill="none" stroke="url(#edge)" stroke-linecap="round">
+        <path d="M822 210L919 140L1009 202L1115 116L1224 184L1312 118" stroke-width="1.6" stroke-opacity=".46"/>
+        <path d="M822 210L902 307L1009 202L1069 282L1224 184L1300 275" stroke-width="1.7" stroke-opacity=".54"/>
+        <path d="M902 307L977 410L1069 282L1164 386L1300 275" stroke-width="1.7" stroke-opacity=".45"/>
+        <path d="M977 410L1080 487L1164 386L1262 456" stroke-width="1.4" stroke-opacity=".34"/>
+        <path d="M919 140L902 307M1009 202L977 410M1115 116L1069 282M1224 184L1164 386M1312 118L1300 275" stroke-width="1.1" stroke-opacity=".25"/>
+        <path d="M1009 202L1164 386M1069 282L919 140M1069 282L1262 456" stroke-width="1.1" stroke-opacity=".25" stroke-dasharray="4 7"/>
+      </g>
+
+      <g fill="#A5EFFF" font-size="11" font-weight="620" letter-spacing=".5">
+        <text x="785" y="191">OBSERVATION</text>
+        <text x="877" y="122">EVIDENCE</text>
+        <text x="1084" y="92">IDENTITY</text>
+        <text x="1201" y="165">POLICY</text>
+        <text x="1273" y="99">PURPOSE</text>
+        <text x="863" y="333">EPISODE</text>
+        <text x="942" y="438">REVISION</text>
+        <text x="1126" y="417">CONFLICT</text>
+        <text x="1269" y="304">CONTEXT</text>
+        <text x="1037" y="517">LINEAGE</text>
+      </g>
+
+      <g filter="url(#nodeGlow)">
+        <circle cx="822" cy="210" r="5.5" fill="#7DEFFF"/>
+        <circle cx="919" cy="140" r="7.5" fill="#B6F7FF"/>
+        <circle cx="1009" cy="202" r="8.5" fill="#8DDFFF"/>
+        <circle cx="1115" cy="116" r="6.5" fill="#AFC7FF"/>
+        <circle cx="1224" cy="184" r="9" fill="#BBA9FF"/>
+        <circle cx="1312" cy="118" r="5.5" fill="#DEB6FF"/>
+        <circle cx="902" cy="307" r="7" fill="#68DFF2"/>
+        <circle cx="977" cy="410" r="6" fill="#88B6FF"/>
+        <circle cx="1069" cy="282" r="17" fill="url(#core)"/>
+        <circle cx="1069" cy="282" r="28" fill="none" stroke="#C5F8FF" stroke-opacity=".28"/>
+        <circle cx="1164" cy="386" r="8" fill="#9E9BFF"/>
+        <circle cx="1300" cy="275" r="7" fill="#D28FFF"/>
+        <circle cx="1080" cy="487" r="5.5" fill="#9B8DFF"/>
+        <circle cx="1262" cy="456" r="5.5" fill="#D798FF"/>
+      </g>
+
+      <g transform="translate(873 539)" filter="url(#softShadow)">
+        <rect width="390" height="47" rx="14" fill="#0B1426" fill-opacity=".9" stroke="#91A9D2" stroke-opacity=".16"/>
+        <circle cx="23" cy="23.5" r="4" fill="#53E2F3"/>
+        <text x="36" y="29" fill="#B8CBE1" font-size="13" font-weight="560">history stays immutable</text>
+        <path d="M160 13V34" stroke="#96AACE" stroke-opacity=".18"/>
+        <circle cx="182" cy="23.5" r="4" fill="#829DFF"/>
+        <text x="195" y="29" fill="#B8CBE1" font-size="13" font-weight="560">meaning can evolve</text>
+      </g>
+    </g>
+  </g>
+  <rect x="1" y="1" width="1438" height="618" rx="31" fill="none" stroke="#B5D6FF" stroke-opacity=".13" stroke-width="2"/>
+</svg>

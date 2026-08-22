@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextdb.dev/schemas/issue-labels/v1.json",
+  "title": "ContextDB issue label manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "labels"],
+  "properties": {
+    "schema_version": {
+      "const": "contextdb.issue-labels/v1"
+    },
+    "labels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "color", "description"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{6}$"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      }
+    }
+  }
+}

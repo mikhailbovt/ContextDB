@@ -1,0 +1,10 @@
+schema_version=contextdb.demo-log/v1
+milestone=M12
+generated_at=2026-08-12T13:17:59.693Z
+status=package_demo_passed
+command=cargo +1.97.1 test -p contextdb-continuity model_a_to_b_migration_matches_deterministic_golden -- --nocapture
+exit_code=0
+result=1 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out
+observed=Model profile B resumed the stable subject and open loop from profile A, emitted compatibility findings, and matched the deterministic migration golden.
+source_sha256.crates/contextdb-continuity/tests/fixtures/model_a_to_b_golden.json=1a3f09cac2b0d6abfd515fd6a529930441d7e0649dca62f176dc760a724af022
+limitation=The runtimes are deterministic profiles, not external model processes; wording identity is not claimed.

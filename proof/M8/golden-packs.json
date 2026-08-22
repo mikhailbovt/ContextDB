@@ -1,0 +1,28 @@
+{
+  "schema_version": "contextdb.test-report/v1",
+  "milestone": "M8",
+  "generated_at": "2026-08-12T13:18:41.838Z",
+  "status": "package_conformance_passed",
+  "command": "cargo +1.97.1 test -p contextdb-context --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 19, "failed": 0, "ignored": 0},
+  "checks": {
+    "deterministic_japan_bar_golden": true,
+    "canonical_pack_cross_renderer_semantics": true,
+    "hard_token_budget": true,
+    "instruction_data_separation": true,
+    "mention_and_disclosure_policy": true,
+    "stable_evidence_adjacency": true,
+    "canonical_json_protobuf_roundtrip": true,
+    "progressive_and_no_memory_paths": true
+  },
+  "source_sha256": {
+    "crates/contextdb-context/src/lib.rs": "5a7c064516868122dffc5863a0386448382e8c45f7f78d77da07f57903956be6",
+    "crates/contextdb-context/src/tests.rs": "9cd63b2cb91e6d650ca25c1a911b2202086983327027b572ed7a04de518a532e",
+    "crates/contextdb-context/tests/fixtures/model_renderers_golden.json": "172aded5e3ae895064aa4bf2605ceda35ce9189304c8d7292f04b016b3630452"
+  },
+  "limitations": [
+    "Token accounting is exercised against the package's deterministic profiles, not every production tokenizer revision.",
+    "Golden equality proves deterministic rendering and policy behavior; it does not establish downstream model answer quality."
+  ]
+}

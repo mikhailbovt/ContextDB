@@ -1,0 +1,10 @@
+schema_version=contextdb.demo-log/v1
+milestone=M5
+generated_at=2026-08-12T13:17:59.693Z
+status=package_demo_passed
+command=cargo +1.97.1 test -p contextdb-recall implicit_japan_bar_recall_matches_deterministic_golden -- --nocapture
+exit_code=0
+result=1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out
+observed=The implicit Japan-bar cue resolved to the deterministic authorized golden document and evidence IDs.
+source_sha256.crates/contextdb-recall/tests/fixtures/japan_bar_golden.json=b5dc239952bed833ce7bf12ec197949984072ece5136275de471c669ab504534
+limitation=The demo uses deterministic fixtures and does not evaluate model prose or ANN quality.

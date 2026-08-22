@@ -1,0 +1,30 @@
+[package]
+name = "contextdb-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Embedded Python bindings for the canonical ContextDB service"
+publish = false
+
+[lib]
+name = "_contextdb"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+contextdb-service.workspace = true
+pyo3 = { workspace = true, features = ["abi3-py39"] }
+serde = { workspace = true }
+serde_json.workspace = true
+
+[dev-dependencies]
+# Rust unit tests call the PyO3 facade outside an importing Python process.
+# Keep interpreter auto-initialization test-only; extension-module builds run
+# inside an interpreter that is already initialized.
+pyo3 = { workspace = true, features = ["auto-initialize"] }
+
+[lints]
+workspace = true

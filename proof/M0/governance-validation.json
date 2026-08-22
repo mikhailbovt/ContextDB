@@ -1,0 +1,18 @@
+{
+  "schema_version": "contextdb.test-report/v1",
+  "milestone": "M0",
+  "generated_at": "2026-08-12T13:26:44.321Z",
+  "status": "passed",
+  "command": "python .github/scripts/validate_governance.py .",
+  "exit_code": 0,
+  "result": {"schemas": 17, "milestones": 20, "accepted_adrs": 6, "workflows": "passed", "labels": "passed"},
+  "stdout": "governance validation passed: 17 schemas, 20 milestones, 6 accepted ADRs, workflows and labels",
+  "source_sha256": {
+    ".github/scripts/validate_governance.py": "59ceff136dfb084513ea1f798373836fa98728c9aa22ad68f422ff4959c8b1d4",
+    "docs/roadmap/gates.json": "d5274f6ff575f04eff853348dde33975cf12d9e789b777c145e1f2db6c5571e0"
+  },
+  "limitations": [
+    "This is a local source-tree governance pass, not remote target-platform CI evidence.",
+    "The validator confirms structural proof-path presence, schema/YAML validity, the milestone DAG, ADR registry, workflows and labels; it does not convert observation-only empirical receipts into passed milestone gates."
+  ]
+}

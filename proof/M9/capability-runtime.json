@@ -1,0 +1,27 @@
+{
+  "schema_version": "contextdb.conformance-report/v1",
+  "milestone": "M9",
+  "generated_at": "2026-08-12T13:18:42.164Z",
+  "status": "package_conformance_passed",
+  "command": "cargo +1.97.1 test -p contextdb-model --no-fail-fast",
+  "exit_code": 0,
+  "result": {"passed": 18, "failed": 0, "ignored": 0},
+  "checks": {
+    "strict_schema_before_proposal_escape": true,
+    "semantic_validation_after_structure": true,
+    "provider_output_has_no_commit_capability": true,
+    "bounded_retry_timeout_and_circuit_breaker": true,
+    "privacy_and_cost_routing_before_provider": true,
+    "recorded_local_second_runtime": true,
+    "provider_outage_fallback_or_explicit_degraded": true,
+    "audit_excludes_sensitive_payload": true
+  },
+  "source_sha256": {
+    "crates/contextdb-model/src/lib.rs": "7e3381e6bc4ffe3b6e5caf2c4584561b416a46df619484b0860b5f6c5b097adb",
+    "crates/contextdb-model/src/tests.rs": "5f96bd8e7b1d378d7b885f0c36e9fa424b100835d94c397cd9c4ddcc45dd19ca"
+  },
+  "limitations": [
+    "The executed adapters are deterministic/recorded and network-free; no hosted provider SLA or credential path was exercised.",
+    "Provider SDK compatibility and live cost accounting remain external evidence."
+  ]
+}

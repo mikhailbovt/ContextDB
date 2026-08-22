@@ -1,0 +1,8 @@
+product = "ContextDB"
+version = "0.1.0-alpha.1"
+rfc = "RFC-0001 revision 0.3"
+semantic_schema = 1
+wire_protocol = 1
+storage_format = 1
+context_pack_schema = 1
+benchmark_schema = 1

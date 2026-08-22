@@ -1,0 +1,31 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "5da97d29-5f99-40cd-9e8f-6df27e94806b",
+  "started_at": "2026-08-12T13:18:41.839Z",
+  "finished_at": "2026-08-12T13:18:42.164Z",
+  "status": "observation_only",
+  "benchmark": {"id": "BENCH-0901", "family": "BENCH-E", "name": "M9 capability runtime package observation", "version": "1", "dataset_version": "recorded-provider-tests-v1", "scenario": "schema, routing, outage, retry, cache, batching and shadow conformance", "tier": "network-free-package-observation"},
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1", "product_version": "0.1.0-alpha.1", "release_channel": "development",
+      "source": {"git_commit": "0000000000000000000000000000000000000000", "dirty": true, "rfc_revision": "RFC-0001-v0.3", "errata": ["ERRATA-0001"], "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]},
+      "build": {"timestamp": "2026-08-12T13:17:59.693Z", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "target": "x86_64-pc-windows-msvc", "profile": "test", "reproducible": false, "builder": "local-proof-backfill"},
+      "formats": {"logical_record": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": []}}, "feature_profile": "research", "features": ["local-package-conformance"]
+    },
+    "version_manifest_sha256": "12ee5d90a01050a6f12ae9b13e0a5074efad48b10c485491cea30076ee0a25fd"
+  },
+  "environment": {"os": "Microsoft Windows NT", "os_version": "10.0.26200.0", "architecture": "x86_64", "cpu": "Intel(R) Core(TM) Ultra 9 275HX", "logical_cores": 24, "memory_bytes": 68044750848, "storage": "local NVMe SSD", "filesystem": "NTFS", "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)", "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)", "storage_backend": "recorded-model-fixture", "storage_backend_version": "0.1.0-alpha.1", "build_profile": "test"},
+  "configuration": {"seed": 0, "features": ["local-package-conformance"], "budgets": {}, "parameters": {"command": "cargo +1.97.1 test -p contextdb-model --no-fail-fast --quiet", "exit_code": 0, "network_calls": 0, "claim_scope": "recorded/local package tests only"}, "index_watermarks": {}},
+  "model": {"provider": "recorded-local", "model": "deterministic-fixture", "revision": "v1", "prompt_versions": {}, "schema_versions": {"proposal": "v1"}, "embedding_spaces": []},
+  "metrics": [
+    {"name": "capability.tests_passed", "unit": "tests", "direction": "informational", "observed": 18},
+    {"name": "capability.network_calls", "unit": "calls", "direction": "informational", "observed": 0},
+    {"name": "capability.command_elapsed", "unit": "milliseconds", "direction": "informational", "observed": 325.076}
+  ],
+  "artifacts": [{"kind": "test-source", "uri": "crates/contextdb-model/src/tests.rs", "sha256": "5f96bd8e7b1d378d7b885f0c36e9fa424b100835d94c397cd9c4ddcc45dd19ca"}],
+  "limitations": [
+    "No live local model or hosted provider was benchmarked, so latency, tokens, cost and model-quality comparisons are absent.",
+    "Elapsed time is Cargo suite time and not per-capability latency.",
+    "The shadow benchmark requirement remains empirical work."
+  ]
+}

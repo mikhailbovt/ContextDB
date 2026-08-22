@@ -1,0 +1,143 @@
+{
+  "schema_version": "contextdb.benchmark-result/v1",
+  "run_id": "019ff4a7-bd0e-7140-b8ec-fc5c2fdd3071",
+  "started_at": "2026-08-12T08:44:21.017Z",
+  "finished_at": "2026-08-12T08:44:21.196Z",
+  "status": "passed",
+  "benchmark": {
+    "id": "BENCH-0007",
+    "family": "BENCH-H",
+    "name": "M7 deterministic HNSW overlap against exact full-precision oracle",
+    "version": "1",
+    "dataset_version": "xorshift64-256x12-v1",
+    "scenario": "authorized-single-partition-recall-at-10",
+    "tier": "m7-correctness-fixture"
+  },
+  "contextdb": {
+    "version_manifest": {
+      "schema_version": "contextdb.version-manifest/v1",
+      "product_version": "0.1.0-alpha.1",
+      "release_channel": "development",
+      "source": {
+        "git_commit": "0000000000000000000000000000000000000000",
+        "dirty": true,
+        "repository": "https://github.com/mikhailbovt/ContextDB",
+        "rfc_revision": "RFC-0001-v0.3",
+        "errata": ["ERRATA-0001"],
+        "adrs": ["ADR-0001", "ADR-0002", "ADR-0003", "ADR-0004", "ADR-0005", "ADR-0006"]
+      },
+      "build": {
+        "timestamp": "2026-08-12T08:44:11Z",
+        "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+        "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+        "target": "x86_64-pc-windows-msvc",
+        "profile": "release",
+        "reproducible": false,
+        "builder": "local-m7-quality-fixture"
+      },
+      "formats": {
+        "logical_record": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": []},
+        "ann_generation": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["persistent-hnsw"]},
+        "vector_store": {"writer": 1, "read_min": 1, "read_max": 1, "required_features": ["full-precision-vectors"]}
+      },
+      "feature_profile": "research",
+      "features": ["tantivy-lexical", "full-precision-vectors", "persistent-hnsw", "artifact-representations"],
+      "storage_backend": {
+        "name": "in-memory-quality-fixture",
+        "version": "contextdb-index-v1"
+      }
+    },
+    "version_manifest_sha256": "df7c7337ce1dc4012c21cf270b518ec2ec6b51e18d47e831bf21cb2def5563c5"
+  },
+  "environment": {
+    "os": "Microsoft Windows 11 Pro",
+    "os_version": "10.0.26200",
+    "kernel": "Windows NT",
+    "architecture": "x86_64",
+    "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+    "logical_cores": 24,
+    "memory_bytes": 68044750848,
+    "storage": "WD_BLACK SN850X 4000GB NVMe SSD",
+    "filesystem": "NTFS",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "storage_backend": "in-memory-quality-fixture",
+    "storage_backend_version": "contextdb-index-v1",
+    "storage_configuration_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "build_profile": "release"
+  },
+  "configuration": {
+    "seed": 1,
+    "features": ["full-precision-oracle", "persistent-hnsw", "exact-rerank", "strict-no-touch"],
+    "budgets": {
+      "max_visits": 128,
+      "ef_search": 64,
+      "k": 10
+    },
+    "parameters": {
+      "documents": 256,
+      "dimensions": 12,
+      "queries": 32,
+      "neighbours_per_level": 12,
+      "metric": "cosine"
+    },
+    "index_watermarks": {
+      "semantic": 1,
+      "vector": 1,
+      "hnsw_generation": 1
+    }
+  },
+  "metrics": [
+    {
+      "name": "ann.recall_at_10",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "observed": 0.925,
+      "threshold": {"operator": "gte", "value": 0.9},
+      "passed": true
+    },
+    {
+      "name": "ann.exact_overlap",
+      "unit": "hits",
+      "direction": "higher_is_better",
+      "observed": 296
+    },
+    {
+      "name": "ann.max_visit_fraction",
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "observed": 0.5
+    },
+    {
+      "name": "harness.process_elapsed",
+      "unit": "milliseconds",
+      "direction": "informational",
+      "observed": 176.11
+    }
+  ],
+  "quality_gates": [
+    {
+      "gate_id": "M7-E02-quality-fixture",
+      "metric": "ann.recall_at_10",
+      "passed": true,
+      "note": "The 0.90 fixture floor was asserted in code; observed recall was 0.925 at a 0.50 visit fraction."
+    }
+  ],
+  "artifacts": [
+    {
+      "kind": "raw-result",
+      "uri": "docs/benchmarks/results/m7-ann-quality-windows-2026-08-12.raw.json",
+      "sha256": "3c33233549d579592639e67764106f8737b6821813310b878d35b317c50dd038"
+    },
+    {
+      "kind": "version-manifest",
+      "uri": "docs/benchmarks/results/m7-ann-quality-windows-2026-08-12.version.json",
+      "sha256": "df7c7337ce1dc4012c21cf270b518ec2ec6b51e18d47e831bf21cb2def5563c5"
+    }
+  ],
+  "limitations": [
+    "This passes the M7 deterministic ANN quality fixture only; official-server latency and million-scale BENCH-H certification remain M16/M17 work.",
+    "The fixture uses deterministic synthetic full-precision vectors rather than a production model provider, as required by the M7 dependency boundary.",
+    "Process elapsed time includes Cargo startup and is not a query-latency SLO measurement."
+  ]
+}

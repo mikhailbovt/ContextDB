@@ -1,0 +1,104 @@
+{
+  "schema_version": "contextdb.release-documentation-matrix/v1",
+  "rfc_section": "31.16",
+  "categories": [
+    {
+      "id": "architecture",
+      "status": "source-complete",
+      "paths": ["docs/architecture/v1-overview.md", "docs/architecture", "docs/security/threat-model.md"],
+      "gaps": []
+    },
+    {
+      "id": "data-model",
+      "status": "source-complete",
+      "paths": ["docs/data-model.md", "docs/architecture/v1-overview.md", "crates/contextdb-core"],
+      "gaps": []
+    },
+    {
+      "id": "memory-concepts",
+      "status": "source-complete",
+      "paths": ["docs/memory-concepts.md", "docs/data-model.md"],
+      "gaps": []
+    },
+    {
+      "id": "conversation-integration",
+      "status": "source-complete",
+      "paths": ["docs/integrations/conversation.md", "crates/contextdb-chat/README.md", "sdk/README.md"],
+      "gaps": []
+    },
+    {
+      "id": "domain-pack-authoring",
+      "status": "source-complete",
+      "paths": ["docs/domains/authoring.md", "crates/contextdb-domain-code/README.md"],
+      "gaps": []
+    },
+    {
+      "id": "security",
+      "status": "source-complete",
+      "paths": ["SECURITY.md", "docs/security/threat-model.md", "docs/release/signing-and-provenance.md"],
+      "gaps": []
+    },
+    {
+      "id": "privacy",
+      "status": "source-complete",
+      "paths": ["docs/privacy.md", "docs/security/threat-model.md", "SECURITY.md"],
+      "gaps": []
+    },
+    {
+      "id": "operations",
+      "status": "partial",
+      "paths": ["docs/operations"],
+      "gaps": ["Runbooks are source-only and lack supported-platform runtime receipts, frozen RTO/RPO and full quota/health surfaces"]
+    },
+    {
+      "id": "formats",
+      "status": "source-complete",
+      "paths": ["docs/formats.md", "docs/architecture/version-manifest.md", "docs/release/artifact-contract.md"],
+      "gaps": []
+    },
+    {
+      "id": "apis",
+      "status": "source-complete",
+      "paths": [
+        "docs/api/compatibility.md",
+        "crates/contextdb-conformance/docs/API.md",
+        "crates/contextdb-conformance/README.md",
+        "crates/contextdb-conformance/tests/fixtures/high_level_v1_surface.json",
+        "crates/contextdb-proto/proto/contextdb/v1/contextdb.proto",
+        "sdk/CONTRACT.md",
+        "sdk/README.md"
+      ],
+      "gaps": []
+    },
+    {
+      "id": "benchmarks",
+      "status": "partial",
+      "paths": ["docs/benchmarks", "proof"],
+      "gaps": ["No complete public immutable A-H benchmark index with frozen Beta/v1 floors"]
+    },
+    {
+      "id": "limitations",
+      "status": "source-complete",
+      "paths": ["docs/limitations.md", "docs/release/README.md", "docs/release/package-support.md"],
+      "gaps": []
+    },
+    {
+      "id": "migration",
+      "status": "partial",
+      "paths": ["docs/operations/upgrade-migration.md"],
+      "gaps": ["Source runbook exists; no cross-version/package rollback receipts"]
+    },
+    {
+      "id": "examples",
+      "status": "partial",
+      "paths": ["examples/embedded-rust", "examples/portable-database", "sdk"],
+      "gaps": ["Required persistent chat, knowledge, coding/MCP and cross-model release examples are not all packaged and clean-installed"]
+    }
+  ],
+  "summary": {
+    "required": 14,
+    "source_complete": 10,
+    "runtime_verified": 0,
+    "publication_verified": 0
+  }
+}
