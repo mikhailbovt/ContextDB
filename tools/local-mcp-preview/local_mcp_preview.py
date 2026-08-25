@@ -39,7 +39,27 @@ SUPPLY_CHAIN_ARTIFACTS = {
 EXPECTED_FEATURES = ["local-mcp"]
 EXPECTED_PACKAGE = "contextdb-cli"
 EXPECTED_BINARY = "contextdb"
-WINDOWS_ARCHITECTURES = {"amd64", "x86_64"}
+SUPPORTED_ARCHITECTURES = {"amd64", "x86_64"}
+PLATFORMS: dict[str, dict[str, Any]] = {
+    "windows-x86_64": {
+        "operating_system": "windows",
+        "architecture": "x86_64",
+        "target": "x86_64-pc-windows-msvc",
+        "profile_id": "contextdb-local-mcp-windows-x86_64",
+        "binary_name": "contextdb.exe",
+        "profile_path": PROFILE_PATH,
+        "transports": ["mcp-stdio", "windows-local-named-pipe"],
+    },
+    "linux-x86_64": {
+        "operating_system": "linux",
+        "architecture": "x86_64",
+        "target": "x86_64-unknown-linux-gnu",
+        "profile_id": "contextdb-local-mcp-linux-x86_64",
+        "binary_name": "contextdb",
+        "profile_path": Path("release/platforms/linux-x86_64/local-mcp-profile.json"),
+        "transports": ["mcp-stdio", "unix-domain-socket"],
+    },
+}
 FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 
 
@@ -49,6 +69,39 @@ class ContractError(RuntimeError):
 
 def _fail(message: str) -> NoReturn:
     raise ContractError(message)
+
+
+def _host_platform() -> str:
+    operating_system = platform.system().lower()
+    architecture = platform.machine().lower()
+    if architecture not in SUPPORTED_ARCHITECTURES:
+        _fail(f"unsupported local-MCP preview architecture: {architecture}")
+    selected = f"{operating_system}-x86_64"
+    if selected not in PLATFORMS:
+        _fail(f"unsupported local-MCP preview operating system: {operating_system}")
+    return selected
+
+
+def _platform_configuration(name: str | None = None) -> tuple[str, dict[str, Any]]:
+    selected = name or _host_platform()
+    configuration = PLATFORMS.get(selected)
+    if configuration is None:
+        _fail(f"unsupported local-MCP preview platform: {selected}")
+    return selected, configuration
+
+
+def _profile_configuration(profile_id: Any) -> tuple[str, dict[str, Any]]:
+    for name, configuration in PLATFORMS.items():
+        if profile_id == configuration["profile_id"]:
+            return name, configuration
+    _fail("package receipt names an unsupported local-MCP profile")
+
+
+def _platform_source_file(root: Path, relative: str, platform_name: str) -> Path:
+    if platform_name == "windows-x86_64" or not relative.startswith("release/"):
+        return _safe_repo_file(root, relative)
+    platform_relative = f"release/platforms/{platform_name}/{relative.removeprefix('release/')}"
+    return _safe_repo_file(root, platform_relative)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -126,13 +179,14 @@ def _mcp_protocols(root: Path) -> list[str]:
     return [*standard, stateless_match.group(1)]
 
 
-def validate_profile(root: Path) -> dict[str, Any]:
+def validate_profile(root: Path, platform_name: str | None = None) -> dict[str, Any]:
     """Validate the checked-in profile against source-owned version boundaries."""
 
-    profile = _read_json(root / PROFILE_PATH)
+    selected, configuration = _platform_configuration(platform_name)
+    profile = _read_json(root / configuration["profile_path"])
     if profile.get("schema_version") != PROFILE_SCHEMA:
         _fail("unsupported local MCP profile schema")
-    if profile.get("profile_id") != "contextdb-local-mcp-windows-x86_64":
+    if profile.get("profile_id") != configuration["profile_id"]:
         _fail("unexpected local MCP profile identifier")
     if profile.get("profile_revision") != 1:
         _fail("unexpected local MCP profile revision")
@@ -173,18 +227,18 @@ def validate_profile(root: Path) -> dict[str, Any]:
     if runtime.get("excluded_cli_commands") != ["probe", "serve"]:
         _fail("local MCP profile must exclude probe and serve")
     transports = _require_string_list(runtime.get("transports"), "runtime.transports")
-    if transports != ["mcp-stdio", "windows-local-named-pipe"]:
+    if transports != configuration["transports"]:
         _fail("unexpected local MCP transport surface")
     platforms = runtime.get("supported_platforms")
     expected_platforms = [
         {
-            "operating_system": "windows",
-            "architecture": "x86_64",
+            "operating_system": configuration["operating_system"],
+            "architecture": configuration["architecture"],
             "support": "developer-preview",
         }
     ]
     if platforms != expected_platforms:
-        _fail("developer-preview package support must remain Windows x86_64 only")
+        _fail(f"developer-preview package support must match {selected} exactly")
 
     compatibility = _require_object(profile.get("compatibility"), "compatibility")
     if compatibility.get("mcp_protocols") != _mcp_protocols(root):
@@ -207,7 +261,7 @@ def validate_profile(root: Path) -> dict[str, Any]:
     if package_files != sorted(package_files):
         _fail("package_files must be sorted")
     for relative in package_files:
-        _safe_repo_file(root, relative)
+        _platform_source_file(root, relative, selected)
     _require_string_list(profile.get("limitations"), "limitations")
     return profile
 
@@ -259,7 +313,9 @@ def _validate_feature_tree(tree: str) -> None:
             _fail(f"resolved local MCP graph includes forbidden {label}")
 
 
-def verify_feature_surface(root: Path, cargo: str) -> tuple[str, list[str]]:
+def verify_feature_surface(
+    root: Path, cargo: str, target: str | None = None
+) -> tuple[str, list[str]]:
     command = [
         cargo,
         "tree",
@@ -269,6 +325,8 @@ def verify_feature_surface(root: Path, cargo: str) -> tuple[str, list[str]]:
         "--no-default-features",
         "--features",
         ",".join(EXPECTED_FEATURES),
+        "--target",
+        target or _platform_configuration()[1]["target"],
         "-e",
         "normal,features",
         "-f",
@@ -279,9 +337,12 @@ def verify_feature_surface(root: Path, cargo: str) -> tuple[str, list[str]]:
     return hashlib.sha256(tree.encode("utf-8")).hexdigest(), command
 
 
-def verify_supply_chain_source(root: Path, cargo: str) -> dict[str, Any]:
+def verify_supply_chain_source(
+    root: Path, cargo: str, platform_name: str | None = None
+) -> dict[str, Any]:
     """Verify notices, SBOM, Rust runtime notices, and exact graph coverage."""
 
+    selected, configuration = _platform_configuration(platform_name)
     command = [
         sys.executable,
         str(root / SUPPLY_CHAIN_TOOL_PATH),
@@ -290,6 +351,8 @@ def verify_supply_chain_source(root: Path, cargo: str) -> dict[str, Any]:
         str(root),
         "--cargo",
         cargo,
+        "--platform",
+        selected,
     ]
     result = _run(command, root)
     try:
@@ -298,8 +361,10 @@ def verify_supply_chain_source(root: Path, cargo: str) -> dict[str, Any]:
         _fail(f"supply-chain verifier returned invalid JSON: {error}")
     if not isinstance(value, dict) or value.get("status") != "passed":
         _fail("supply-chain verifier did not return a passing result")
-    if value.get("profile_id") != "contextdb-local-mcp-windows-x86_64":
+    if value.get("profile_id") != configuration["profile_id"]:
         _fail("supply-chain verifier returned an unexpected profile")
+    if value.get("target") != configuration["target"]:
+        _fail("supply-chain verifier returned an unexpected Rust target")
     return value
 
 
@@ -410,7 +475,7 @@ def _write_deterministic_zip(bundle_root: Path, archive: Path) -> None:
             info = zipfile.ZipInfo(relative, FIXED_ZIP_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3
-            mode = 0o755 if source.name == "contextdb.exe" else 0o644
+            mode = 0o755 if source.name in {"contextdb", "contextdb.exe"} else 0o644
             info.external_attr = mode << 16
             output.writestr(
                 info,
@@ -421,7 +486,10 @@ def _write_deterministic_zip(bundle_root: Path, archive: Path) -> None:
 
 
 def _verify_packaged_supply_chain(
-    payloads: dict[str, bytes], receipt: dict[str, Any], core_version: str
+    payloads: dict[str, bytes],
+    receipt: dict[str, Any],
+    core_version: str,
+    configuration: dict[str, Any],
 ) -> dict[str, Any]:
     manifest_bytes = payloads.get(SUPPLY_CHAIN_MANIFEST_PATH.as_posix())
     if manifest_bytes is None:
@@ -432,8 +500,10 @@ def _verify_packaged_supply_chain(
         _fail(f"invalid packaged supply-chain manifest: {error}")
     if not isinstance(manifest, dict) or manifest.get("schema_version") != SUPPLY_CHAIN_SCHEMA:
         _fail("unsupported packaged supply-chain manifest")
-    if manifest.get("profile_id") != "contextdb-local-mcp-windows-x86_64":
+    if manifest.get("profile_id") != configuration["profile_id"]:
         _fail("packaged supply-chain profile differs from the binary profile")
+    if manifest.get("target") != configuration["target"]:
+        _fail("packaged supply-chain target differs from the binary profile")
     if manifest.get("core_version") != core_version:
         _fail("packaged supply-chain manifest targets a different core version")
     if manifest.get("canonical_repository") != "https://github.com/mikhailbovt/ContextDB":
@@ -532,7 +602,8 @@ def _verify_packaged_supply_chain(
     if (
         rust.get("release") != "1.97.1"
         or rust.get("commit_hash") != "8bab26f4f68e0e26f0bb7960be334d5b520ea452"
-        or rust.get("host") != "x86_64-pc-windows-msvc"
+        or rust.get("host")
+        not in {platform_config["target"] for platform_config in PLATFORMS.values()}
     ):
         _fail("packaged Rust runtime notices target a different toolchain")
     rust_files = rust.get("files")
@@ -637,7 +708,14 @@ def verify_archive(archive: Path, hash_sidecar: Path | None = None) -> dict[str,
                 receipt = json.loads(package.read(receipt_name).decode("utf-8"))
             except (UnicodeError, json.JSONDecodeError) as error:
                 _fail(f"invalid package receipt JSON: {error}")
-            binary_payload = package.read(f"{bundle_name}/contextdb.exe")
+            if not isinstance(receipt, dict):
+                _fail("package receipt JSON must be an object")
+            _, configuration = _profile_configuration(receipt.get("profile_id"))
+            binary_name = configuration["binary_name"]
+            binary_entry = package.getinfo(f"{bundle_name}/{binary_name}")
+            if ((binary_entry.external_attr >> 16) & 0o111) == 0:
+                _fail("packaged binary does not preserve executable permissions")
+            binary_payload = package.read(binary_entry)
             packaged_payloads = {
                 str(PurePosixPath(name).relative_to(bundle_name)): package.read(name)
                 for name in names
@@ -661,8 +739,8 @@ def verify_archive(archive: Path, hash_sidecar: Path | None = None) -> dict[str,
         _fail("package distributable claim differs from source dirty state")
 
     binary = _require_object(receipt.get("binary"), "receipt.binary")
-    if binary.get("path") != "contextdb.exe":
-        _fail("package receipt binary path is not contextdb.exe")
+    if binary.get("path") != configuration["binary_name"]:
+        _fail("package receipt binary path differs from its target platform")
     if binary.get("sha256") != hashlib.sha256(binary_payload).hexdigest():
         _fail("package receipt does not bind the binary digest")
     if binary.get("size_bytes") != len(binary_payload):
@@ -674,8 +752,29 @@ def verify_archive(archive: Path, hash_sidecar: Path | None = None) -> dict[str,
         binary.get("version_output"), "receipt.binary.version_output"
     )
     core_version = _require_string(receipt.get("core_version"), "receipt.core_version")
+    receipt_platform = _require_object(receipt.get("platform"), "receipt.platform")
+    if receipt_platform != {
+        "operating_system": configuration["operating_system"],
+        "architecture": configuration["architecture"],
+        "rust_target": configuration["target"],
+    }:
+        _fail("package receipt platform does not match its native profile")
+    packaged_profile = packaged_payloads.get(PROFILE_PATH.as_posix())
+    if packaged_profile is None:
+        _fail("package is missing its target-specific local-MCP profile")
+    try:
+        profile_document = json.loads(packaged_profile.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        _fail(f"invalid packaged local-MCP profile: {error}")
+    if (
+        not isinstance(profile_document, dict)
+        or profile_document.get("schema_version") != PROFILE_SCHEMA
+        or profile_document.get("profile_id") != configuration["profile_id"]
+        or profile_document.get("core_version") != core_version
+    ):
+        _fail("packaged local-MCP profile does not match the package receipt")
     supply_chain = _verify_packaged_supply_chain(
-        packaged_payloads, receipt, core_version
+        packaged_payloads, receipt, core_version, configuration
     )
     _validate_binary_surface(
         "Usage:\n\nCommands:\n" + "".join(f"  {name}  command\n" for name in commands),
@@ -687,6 +786,7 @@ def verify_archive(archive: Path, hash_sidecar: Path | None = None) -> dict[str,
         "archive": str(archive.resolve()),
         "archive_sha256": archive_sha256,
         "profile_id": receipt.get("profile_id"),
+        "target": configuration["target"],
         "source_dirty": dirty,
         "distributable": claims.get("distributable"),
         "formal_release_ready": False,
@@ -697,11 +797,9 @@ def verify_archive(archive: Path, hash_sidecar: Path | None = None) -> dict[str,
 
 
 def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    if (
-        platform.system().lower() != "windows"
-        or platform.machine().lower() not in WINDOWS_ARCHITECTURES
-    ):
-        _fail("package is supported only on a Windows x86_64 host")
+    selected, configuration = _platform_configuration(args.platform)
+    if selected != _host_platform():
+        _fail("local-MCP packages must be built and smoke-tested on their native target host")
 
     revision, dirty = _git_state(root)
     if dirty and not args.allow_dirty:
@@ -710,9 +808,13 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
             "--allow-dirty is for local tool development only"
         )
 
-    feature_tree_sha256, tree_command = verify_feature_surface(root, args.cargo)
-    supply_chain_check = verify_supply_chain_source(root, args.cargo)
-    supply_chain_manifest = _read_json(root / SUPPLY_CHAIN_MANIFEST_PATH)
+    feature_tree_sha256, tree_command = verify_feature_surface(
+        root, args.cargo, configuration["target"]
+    )
+    supply_chain_check = verify_supply_chain_source(root, args.cargo, selected)
+    supply_chain_manifest = _read_json(
+        _platform_source_file(root, SUPPLY_CHAIN_MANIFEST_PATH.as_posix(), selected)
+    )
     supply_chain_graph = _require_object(
         supply_chain_manifest.get("graph"), "supply-chain.graph"
     )
@@ -734,12 +836,12 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
         str(target_dir),
     ]
     _run(build_command, root)
-    binary = target_dir / "release/contextdb.exe"
+    binary = target_dir / "release" / configuration["binary_name"]
     binary_receipt = inspect_binary(binary, root, version)
 
     output_dir = (args.output_dir or root / "target/local-mcp-preview/packages").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    bundle_name = f"contextdb-local-mcp-{version}-windows-x86_64"
+    bundle_name = f"contextdb-local-mcp-{version}-{selected}"
     archive = output_dir / f"{bundle_name}.zip"
     hash_sidecar = output_dir / f"{bundle_name}.zip.sha256"
     if archive.exists() or hash_sidecar.exists():
@@ -748,10 +850,10 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
     with tempfile.TemporaryDirectory(prefix="contextdb-local-mcp-", dir=output_dir) as temporary:
         bundle_root = Path(temporary) / bundle_name
         bundle_root.mkdir()
-        shutil.copy2(binary, bundle_root / "contextdb.exe")
+        shutil.copy2(binary, bundle_root / configuration["binary_name"])
         copied_files: list[dict[str, Any]] = []
         for relative in profile["package_files"]:
-            source = _safe_repo_file(root, relative)
+            source = _platform_source_file(root, relative, selected)
             destination = bundle_root / Path(*PurePosixPath(relative).parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
@@ -774,6 +876,11 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
             "profile_id": profile["profile_id"],
             "profile_revision": profile["profile_revision"],
             "core_version": version,
+            "platform": {
+                "operating_system": configuration["operating_system"],
+                "architecture": configuration["architecture"],
+                "rust_target": configuration["target"],
+            },
             "source": {"git_revision": revision, "dirty": dirty},
             "build": {
                 "command": recorded_build_command,
@@ -783,7 +890,7 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
                 "features": EXPECTED_FEATURES,
             },
             "binary": {
-                "path": "contextdb.exe",
+                "path": configuration["binary_name"],
                 "sha256": binary_receipt["sha256"],
                 "size_bytes": binary_receipt["size_bytes"],
                 "commands": binary_receipt["commands"],
@@ -840,6 +947,7 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
     return {
         "status": "passed",
         "profile_id": profile["profile_id"],
+        "target": configuration["target"],
         "archive": str(archive),
         "archive_sha256": archive_sha256,
         "hash_sidecar": str(hash_sidecar),
@@ -865,6 +973,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, help="ContextDB repository root")
     parser.add_argument("--cargo", default="cargo", help="Cargo executable")
+    parser.add_argument(
+        "--platform",
+        choices=sorted(PLATFORMS),
+        help="target profile; defaults to the current supported x86_64 host",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("verify", help="validate contract and resolved Cargo feature surface")
     package = subparsers.add_parser("package", help="build, smoke-test, and package the profile")
@@ -891,13 +1004,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "verify-package":
             result = verify_archive(args.archive.resolve(), args.hash_sidecar)
         else:
-            profile = validate_profile(root)
+            profile = validate_profile(root, args.platform)
         if args.command == "verify":
-            feature_tree_sha256, command = verify_feature_surface(root, args.cargo)
+            selected, configuration = _platform_configuration(args.platform)
+            feature_tree_sha256, command = verify_feature_surface(
+                root, args.cargo, configuration["target"]
+            )
             result = {
                 "status": "passed",
                 "profile_id": profile["profile_id"],
                 "core_version": profile["core_version"],
+                "platform": selected,
+                "target": configuration["target"],
                 "feature_tree_command": command,
                 "feature_tree_sha256": feature_tree_sha256,
                 "network_listeners": False,

@@ -17,8 +17,8 @@ it, and how to operate the current alpha safely.
 - [API compatibility](api/compatibility.md) — versioning and compatibility rules.
 - [Conversation integration](integrations/conversation.md) — durable conversation semantics.
 - [Domain pack authoring](domains/authoring.md) — extend ContextDB without weakening the core.
-- [Local MCP broker](operations/local-mcp-broker.md) — Windows single-owner concurrency and
-  local IPC.
+- [Local MCP broker](operations/local-mcp-broker.md) — Linux and Windows single-owner
+  concurrency, authenticated local IPC, and safe operator shutdown.
 - [SDK overview](../sdk/README.md) — Go, TypeScript, and Python surfaces.
 
 ## Operate it

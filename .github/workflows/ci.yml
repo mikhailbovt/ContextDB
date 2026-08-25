@@ -77,9 +77,13 @@ jobs:
           cargo --version
       - name: Check formatting
         run: cargo fmt --all -- --check
-      - name: Verify the listener-free local MCP feature boundary
+      - name: Verify the native supported local MCP preview profile
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-pc-windows-msvc'
         run: |
           python tools/local-mcp-preview/local_mcp_preview.py verify
+          python tools/local-mcp-preview/generate_supply_chain.py verify
+      - name: Verify the listener-free local MCP source boundary
+        run: |
           cargo check --locked -p contextdb-cli --bin contextdb --no-default-features --features local-mcp
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

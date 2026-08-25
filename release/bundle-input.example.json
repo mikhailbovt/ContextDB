@@ -1,7 +1,7 @@
 {
   "schema_version": "contextdb.release-bundle-input/v1",
   "release": {
-    "version": "0.1.0-alpha.1",
+    "version": "0.2.0-alpha.1",
     "channel": "development",
     "created_at": "2026-08-12T00:00:00Z",
     "candidate": 1
@@ -41,7 +41,7 @@
       "targets": [
         "platform-independent"
       ],
-      "version": "0.1.0-alpha.1",
+      "version": "0.2.0-alpha.1",
       "provenance": {
         "source_commit": "0000000000000000000000000000000000000000",
         "builder": "placeholder-not-built",

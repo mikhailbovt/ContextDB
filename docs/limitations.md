@@ -24,8 +24,9 @@ and release verifier—not the presence of an API name—determine completion.
 - Logical export is not automatically an encrypted, signed physical backup.
 - M17's 10M run measured storage records, not the RFC semantic graph/vector
   certification shape; E01/E02/E03 remain open.
-- Linux arm64 and macOS arm64 release installation have not been proven in this
-  Windows development environment. WSL x86-64 checks are development evidence.
+- Native Linux x86_64 and Windows x86_64 local-MCP developer previews have distinct
+  target-bound packages; this does not imply signed production release certification.
+- Linux arm64 and macOS arm64 package installation remain unproven and unsupported.
 - Docker files have static checks only; no Docker build/run is claimed without
   explicit authorization.
 - Human social-calibration/naturalness review and real-model BENCH-D/E evidence

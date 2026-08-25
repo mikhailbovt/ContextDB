@@ -1,5 +1,7 @@
 /target/
 /target-review/
+/output/
+/tmp/
 **/target/
 fuzz/artifacts/
 /.cargo-cache/
@@ -20,6 +22,7 @@ __pycache__/
 *.profdata
 *.cdx.json
 !/release/contextdb-local-mcp.cdx.json
+!/release/platforms/linux-x86_64/contextdb-local-mcp.cdx.json
 *.log
 !proof/**/*.log
 !examples/portable-database/payload/*.ctxb

@@ -4,7 +4,8 @@
   <br />
 
   [![CI](https://github.com/mikhailbovt/ContextDB/actions/workflows/ci.yml/badge.svg)](https://github.com/mikhailbovt/ContextDB/actions/workflows/ci.yml)
-  [![Release](https://img.shields.io/badge/release-0.1.0--alpha.1-8b79ff?style=flat-square)](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.1.0-alpha.1)
+  [![Release](https://img.shields.io/badge/release-0.2.0--alpha.1-8b79ff?style=flat-square)](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.2.0-alpha.1)
+  [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows-23bca8?style=flat-square)](docs/release/local-mcp-developer-preview.md)
   [![Rust 1.97+](https://img.shields.io/badge/Rust-1.97%2B-45d9e8?style=flat-square&logo=rust&logoColor=white)](rust-toolchain.toml)
   [![License](https://img.shields.io/badge/license-Apache--2.0-4f81ff?style=flat-square)](LICENSE)
   [![Local first](https://img.shields.io/badge/data-local--first-23bca8?style=flat-square)](docs/privacy.md)
@@ -12,13 +13,14 @@
   **Durable, explainable memory for AI systems.**<br />
   Immutable experience. Versioned meaning. Policy-first recall.
 
-  [Download preview](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.1.0-alpha.1) · [Get started](#try-the-alpha) · [Architecture](#from-observation-to-context) · [Docs](#documentation) · [Use it with Codex](#give-codex-a-memory)
+  [Download preview](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.2.0-alpha.1) · [Get started](#try-the-alpha) · [Architecture](#from-observation-to-context) · [Docs](#documentation) · [Use it with Codex](#give-codex-a-memory)
 </div>
 
 > [!IMPORTANT]
-> **Current release: `0.1.0-alpha.1`.** The engine and local interfaces are implemented, but
-> the supported distributable is presently a listener-free **Windows x86-64 local-MCP developer
-> preview**. Signed cross-platform installers and stable production operation are not claimed.
+> **Current release: `0.2.0-alpha.1`.** Native listener-free local-MCP developer previews are
+> available for **Linux x86-64 and Windows x86-64**, each with its own authenticated local
+> broker, independently resolved dependency graph, CycloneDX SBOM, and verified package.
+> Signed installers, Linux arm64, macOS, and stable production operation are not claimed.
 > The exact boundary lives in [Current limitations](docs/limitations.md).
 
 ## Context windows end. Context should not.
@@ -114,20 +116,28 @@ Read the full [architecture overview](docs/architecture/v1-overview.md) or the
 
 ## Try the alpha
 
-The [versioned GitHub prerelease](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.1.0-alpha.1)
-contains the verified listener-free Windows x86-64 package, standalone executable, SHA-256
-sidecars, notices, and CycloneDX SBOM. For a one-command end-user installation with automatic
+The [versioned GitHub prerelease](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.2.0-alpha.1)
+contains independently verified listener-free packages for **Linux x86-64** and **Windows x86-64**.
+Each target includes a native standalone executable, SHA-256 sidecars, target-specific dependency
+notices, a CycloneDX SBOM, and an exact package receipt. For a one-command installation with automatic
 project memory, use [ContextDB Memory for Codex](https://github.com/mikhailbovt/ContextDB-Codex);
 the standalone core package is the lower-level integration surface.
+
+| Platform | Standalone executable | Verified package |
+| --- | --- | --- |
+| Linux x86-64 | `contextdb-linux-x86_64` | `contextdb-local-mcp-0.2.0-alpha.1-linux-x86_64.zip` |
+| Windows x86-64 | `contextdb-windows-x86_64.exe` | `contextdb-local-mcp-0.2.0-alpha.1-windows-x86_64.zip` |
+
+Both packages are unsigned developer previews: verify the matching `.sha256` sidecar before use.
 
 ### Build the engine from source
 
 Prerequisites: Git and the Rust toolchain pinned in
 [`rust-toolchain.toml`](rust-toolchain.toml) (`1.97.1` for this alpha).
 
-```powershell
+```console
 git clone https://github.com/mikhailbovt/ContextDB.git
-Set-Location ContextDB
+cd ContextDB
 
 cargo run -p contextdb-cli -- version
 cargo run -p contextdb-cli -- init --in-memory
@@ -138,12 +148,13 @@ Core semantics and tests require no hosted model provider, API key, or network s
 
 ### Verify the local-MCP preview
 
-```powershell
-python .\tools\local-mcp-preview\local_mcp_preview.py verify
+```console
+python tools/local-mcp-preview/local_mcp_preview.py verify
 ```
 
-The verifier checks the resolved Cargo feature graph, binary identity, MCP protocol surface,
-disabled network listeners, dependency notices, and package contract. Packaging and custody
+The verifier automatically selects the current Linux or Windows x86-64 profile. It checks the
+target-specific Cargo feature graph, binary identity, MCP protocol surface, disabled network
+listeners, dependency notices, and package contract. Packaging and platform-specific custody
 details are documented in the [local-MCP preview profile](docs/release/local-mcp-developer-preview.md).
 
 > [!NOTE]
@@ -181,7 +192,9 @@ into canonical truth.
 | Persistent native storage and recovery primitives | **Implemented** for current local profiles |
 | CLI, MCP, HTTP/JSON, gRPC, Python, Go, and TypeScript surfaces | **Present**; support depth varies |
 | Conversation, knowledge, and coding reference domains | **Implemented** reference verticals |
-| Windows x86-64 listener-free local-MCP package | **Package-verifiable developer preview** |
+| Linux x86-64 listener-free local-MCP package | **Native, package-verifiable developer preview** |
+| Windows x86-64 listener-free local-MCP package | **Native, package-verifiable developer preview** |
+| Authenticated single-owner MCP broker and operator shutdown | **Implemented** on Linux and Windows |
 | Signed multi-platform installers and stable update channel | **Not published** |
 | Hosted multi-tenant service or cloud synchronization | **Outside the local-first product** |
 

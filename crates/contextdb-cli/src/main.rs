@@ -4,7 +4,7 @@
 
 #[cfg(feature = "mcp")]
 mod codex_service;
-#[cfg(all(feature = "mcp", windows))]
+#[cfg(feature = "mcp")]
 mod mcp_broker;
 mod production;
 mod state_head;
@@ -23,8 +23,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use clap::{Parser, Subcommand, ValueEnum};
-#[cfg(all(feature = "mcp", not(windows)))]
-use contextdb_mcp::{McpServer, serve_stdio};
 #[cfg(feature = "current-server")]
 use contextdb_server::{
     Blake3GatewayAuthenticator, ExecutionAdmission, ExecutionAdmissionConfig, FixedHealthProvider,
@@ -264,7 +262,7 @@ enum Command {
         #[arg(long, value_enum)]
         clearance: McpClearanceArg,
     },
-    #[cfg(all(feature = "mcp", windows))]
+    #[cfg(feature = "mcp")]
     #[command(hide = true)]
     /// Own the local durable authorities and multiplex authenticated MCP sessions.
     McpBroker {
@@ -274,7 +272,7 @@ enum Command {
         #[arg(long)]
         reference: bool,
     },
-    #[cfg(all(feature = "mcp", windows))]
+    #[cfg(feature = "mcp")]
     #[command(hide = true)]
     /// Quiesce and stop the authenticated local MCP broker for operator work.
     McpBrokerStop {
@@ -960,29 +958,13 @@ fn run(cli: Cli) -> CliResult<()> {
                 capabilities,
                 clearance,
             };
-            #[cfg(windows)]
             mcp_broker::run_proxy(&path, reference, config)?;
-            #[cfg(not(windows))]
-            {
-                let state = load_state(&path)?;
-                let authority = mcp_session_authority(&state.key, config)?;
-                let service_for_mcp: Arc<dyn CognitiveMemoryService> = if reference {
-                    Arc::new(DurableService::new(state))
-                } else {
-                    Arc::new(CodexService::open(&path, state)?)
-                };
-                let mut server =
-                    McpServer::with_fixed_session_authority(service_for_mcp, authority)?;
-                let stdin = std::io::stdin();
-                let stdout = std::io::stdout();
-                serve_stdio(&mut server, stdin.lock(), stdout.lock())?;
-            }
         }
-        #[cfg(all(feature = "mcp", windows))]
+        #[cfg(feature = "mcp")]
         Command::McpBroker { path, reference } => {
             mcp_broker::run_broker(&path, reference)?;
         }
-        #[cfg(all(feature = "mcp", windows))]
+        #[cfg(feature = "mcp")]
         Command::McpBrokerStop { path } => {
             mcp_broker::stop_broker(&path)?;
         }

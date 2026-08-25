@@ -2,14 +2,16 @@
 
 This directory is release-policy input, not proof that Alpha, Beta, or v1 has shipped.
 
-`local-mcp-profile.json` defines a separate Windows x86_64 developer-preview package. It is
-verified by `tools/local-mcp-preview`, remains outside the formal package matrix, and always
-records `release_ready=false` and `m18_alpha=false`.
+`local-mcp-profile.json` defines the Windows x86_64 developer-preview package;
+`platforms/linux-x86_64/local-mcp-profile.json` independently defines Linux x86_64. Both are
+verified by `tools/local-mcp-preview`, remain outside the formal package matrix, and always
+record `release_ready=false` and `m18_alpha=false`.
 
 The local profile's generated dependency evidence is
 `contextdb-local-mcp-supply-chain.json`, `contextdb-local-mcp.cdx.json`,
-`THIRD_PARTY_NOTICES.txt`, and `rust-runtime/`. The manifest binds the exact locked
-listener-free graph and every artifact hash. Regenerate and review it using
+`THIRD_PARTY_NOTICES.txt`, and `rust-runtime/`. The equivalent Linux-only evidence lives under
+`platforms/linux-x86_64/`; each manifest binds its own native target's exact locked
+listener-free graph and every artifact hash. Regenerate and review either set using
 `tools/local-mcp-preview/generate_supply_chain.py`; see
 `docs/release/third-party-dependencies.md`.
 

@@ -1,6 +1,6 @@
 {
   "schema_version": "contextdb.local-mcp-profile/v1",
-  "profile_id": "contextdb-local-mcp-windows-x86_64",
+  "profile_id": "contextdb-local-mcp-linux-x86_64",
   "profile_revision": 1,
   "release_class": "developer-preview",
   "core_version": "0.2.0-alpha.1",
@@ -23,14 +23,14 @@
   "runtime": {
     "supported_platforms": [
       {
-        "operating_system": "windows",
+        "operating_system": "linux",
         "architecture": "x86_64",
         "support": "developer-preview"
       }
     ],
     "transports": [
       "mcp-stdio",
-      "windows-local-named-pipe"
+      "unix-domain-socket"
     ],
     "network_listeners": false,
     "excluded_cli_commands": [
@@ -74,8 +74,8 @@
   ],
   "limitations": [
     "This profile is not the formal ContextDB M18 Alpha release.",
-    "This target-specific package supports Windows x86_64 only; Linux x86_64 has its own independently verified profile.",
-    "The package is unsigned and unpublished; consumers must pin its SHA-256.",
+    "This target-specific package supports Linux x86_64 only; Windows x86_64 has its own independently verified profile.",
+    "The package is unsigned; consumers must pin its SHA-256.",
     "No production hard-delete, KMS, multi-tenant, remote gateway, or network service claim is made.",
     "Use synthetic or non-critical data until the remaining security and recovery gates close."
   ]

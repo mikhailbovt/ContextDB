@@ -425,7 +425,7 @@ checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "contextdb-bench"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-chat"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-cognition",
@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-cli"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "chacha20poly1305",
@@ -499,7 +499,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-cognition"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-conformance"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axum",
  "blake3",
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-context"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-continuity"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-context",
@@ -565,7 +565,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-core"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "proptest",
  "serde",
@@ -576,7 +576,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-domain-code"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -589,14 +589,14 @@ dependencies = [
 
 [[package]]
 name = "contextdb-example-embedded-rust"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "contextdb-reference",
 ]
 
 [[package]]
 name = "contextdb-format"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "serde",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-graph"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-hierarchy"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-index"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -653,7 +653,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-journal"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -670,7 +670,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-knowledge"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-cognition",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-mcp"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-native-service",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-model"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-native-service"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-context",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-proto"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "prost",
  "prost-types",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-python"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "contextdb-service",
  "pyo3",
@@ -751,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-recall"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-reference"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-runtime"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-core",
@@ -796,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-secure-store"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "chacha20poly1305",
@@ -812,7 +812,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-security"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "chacha20poly1305",
@@ -827,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-server"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "axum",
  "blake3",
@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-service"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "blake3",
  "contextdb-context",
@@ -864,7 +864,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-storage"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "serde",
  "thiserror",
@@ -872,7 +872,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-storage-bench"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "contextdb-storage",
  "contextdb-storage-fjall",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-storage-fault"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "contextdb-storage",
  "contextdb-storage-memory",
@@ -897,7 +897,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-storage-fjall"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "contextdb-storage",
  "fjall",
@@ -906,7 +906,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-storage-memory"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "contextdb-storage",
  "tempfile",
@@ -914,7 +914,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-storage-redb"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "contextdb-storage",
  "redb",

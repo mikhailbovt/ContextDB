@@ -7,6 +7,36 @@ the public API reaches v1.0.
 
 No changes yet.
 
+## [0.2.0-alpha.1] - 2026-08-25
+
+### Added
+
+- A native Linux x86_64 listener-free local MCP developer-preview profile with an
+  independently resolved Linux Cargo graph, exact CycloneDX SBOM, third-party notices,
+  Rust runtime custody evidence, deterministic ZIP staging, and executable-bit preservation.
+- An authenticated Unix-domain-socket single-owner MCP broker, mutual handshake, bounded
+  request serialization, automatic proxy startup, persistence, restart, and operator shutdown.
+- Native Linux and Windows release jobs that independently build, smoke-test, and verify four
+  target-bound assets before one atomic GitHub prerelease publication.
+- Cross-platform profile, host-selection, executable-permission, package-verification, and
+  concurrent-broker regression coverage.
+
+### Changed
+
+- All workspace crates, Python bindings/SDK, and TypeScript SDK advance together to
+  `0.2.0-alpha.1` (`0.2.0a1` for Python package metadata).
+- Local MCP packaging now binds an exact platform, Rust target, executable identity, profile,
+  dependency graph, archive digest, and unsigned developer-preview support boundary.
+- Existing Windows x86_64 named-pipe broker, custody, package identity, and release assets
+  remain independently supported rather than being weakened by the Linux integration.
+
+### Security
+
+- Linux token-key and state-head authorities remain external to the database archive and
+  require owner-only Unix custody; no remote listener or public MCP endpoint is introduced.
+- Cross-target package/SBOM substitution and archives without executable permissions fail
+  closed during package verification.
+
 ## [0.1.0-alpha.1] - 2026-08-22
 
 ### Added

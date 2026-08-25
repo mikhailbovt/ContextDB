@@ -1,12 +1,15 @@
-//! Windows-local single-owner broker for concurrent Codex MCP processes.
+//! Platform-local single-owner broker for concurrent Codex MCP processes.
 //!
 //! The broker is the only process that opens the state-head and Fjall
 //! authorities. Every `contextdb mcp` invocation remains a short-lived stdio
-//! adapter and connects to the broker through a local-only named pipe. This
-//! preserves the exclusive durable-custody locks while allowing independent
-//! Codex tasks to share one archive safely.
+//! adapter and connects to the broker through a local-only Windows named pipe
+//! or an owner-only Unix-domain socket. This preserves the exclusive
+//! durable-custody locks while allowing independent Codex tasks to share one
+//! archive safely.
 
 use std::collections::{BTreeSet, VecDeque};
+#[cfg(unix)]
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -18,11 +21,15 @@ use contextdb_mcp::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, MAX_MCP_LINE_
 use contextdb_service::{CognitiveMemoryService, ErrorCode, ServiceError};
 use serde::{Deserialize, Serialize};
 use tokio::io::{
-    AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader as AsyncBufReader,
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt,
+    BufReader as AsyncBufReader,
 };
+#[cfg(windows)]
 use tokio::net::windows::named_pipe::{
     ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
 };
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, watch};
 
 use crate::codex_service::CodexService;
@@ -32,6 +39,7 @@ use crate::{
 };
 
 const BROKER_SCHEMA_VERSION: u16 = 1;
+#[cfg(windows)]
 const BROKER_PIPE_PREFIX: &str = r"\\.\pipe\contextdb-mcp-broker-v1-";
 const BROKER_HANDSHAKE_CONTEXT: &str = "contextdb/cli/mcp-broker-handshake/v1";
 const BROKER_ACK_CONTEXT: &str = "contextdb/cli/mcp-broker-ack/v1";
@@ -41,7 +49,19 @@ const MAX_BROKER_NONCES: usize = 4_096;
 const BROKER_START_TIMEOUT: Duration = Duration::from_secs(15);
 const BROKER_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const BROKER_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(unix)]
+const MAX_UNIX_SOCKET_PATH_BYTES: usize = 103;
+
+#[cfg(windows)]
+type BrokerListener = NamedPipeServer;
+#[cfg(unix)]
+type BrokerListener = UnixListener;
+#[cfg(windows)]
+type BrokerClient = NamedPipeClient;
+#[cfg(unix)]
+type BrokerClient = UnixStream;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -127,7 +147,7 @@ struct BrokerShared {
 pub(crate) fn run_broker(path: &Path, reference: bool) -> CliResult<()> {
     let canonical_path = state_head::canonical_archive_path(path).map_err(CliError::from)?;
     let pipe_id = state_head::path_digest(&canonical_path);
-    let pipe_name = pipe_name(&pipe_id);
+    let pipe_name = endpoint_name(&canonical_path, &pipe_id)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -140,6 +160,8 @@ pub(crate) fn run_broker(path: &Path, reference: bool) -> CliResult<()> {
         let _runtime = runtime.enter();
         create_server(&pipe_name, true).map_err(CliError::from)?
     };
+    #[cfg(unix)]
+    let _socket_cleanup = UnixSocketGuard::new(&pipe_name).map_err(CliError::from)?;
     let state = load_state(&canonical_path)?;
     let handshake_key = Arc::new(TokenKey::new(state.key.expose_copy())?);
     let service: Arc<dyn CognitiveMemoryService> = if reference {
@@ -170,7 +192,7 @@ pub(crate) fn run_proxy(
 ) -> CliResult<()> {
     let canonical_path = state_head::canonical_archive_path(path).map_err(CliError::from)?;
     let pipe_id = state_head::path_digest(&canonical_path);
-    let pipe_name = pipe_name(&pipe_id);
+    let pipe_name = endpoint_name(&canonical_path, &pipe_id)?;
     let key = read_external_key(&canonical_path)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -200,7 +222,7 @@ pub(crate) fn run_proxy(
 pub(crate) fn stop_broker(path: &Path) -> CliResult<()> {
     let canonical_path = state_head::canonical_archive_path(path).map_err(CliError::from)?;
     let pipe_id = state_head::path_digest(&canonical_path);
-    let pipe_name = pipe_name(&pipe_id);
+    let pipe_name = endpoint_name(&canonical_path, &pipe_id)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -224,28 +246,16 @@ pub(crate) fn stop_broker(path: &Path) -> CliResult<()> {
     Ok(())
 }
 
+#[cfg(windows)]
 async fn serve_broker(
-    mut listener: NamedPipeServer,
+    mut listener: BrokerListener,
     pipe_name: String,
     pipe_id: String,
     reference: bool,
     key: Arc<TokenKey>,
     service: Arc<dyn CognitiveMemoryService>,
 ) -> io::Result<()> {
-    let request_gate = Arc::new(Mutex::new(()));
-    let nonce_cache = Arc::new(Mutex::new(NonceCache::default()));
-    let shutting_down = Arc::new(AtomicBool::new(false));
-    let (shutdown_sender, mut shutdown_receiver) = watch::channel(false);
-    let shared = Arc::new(BrokerShared {
-        pipe_id,
-        reference,
-        key,
-        service,
-        request_gate,
-        nonce_cache,
-        shutting_down,
-        shutdown_sender,
-    });
+    let (shared, mut shutdown_receiver) = broker_shared(pipe_id, reference, key, service);
     loop {
         tokio::select! {
             changed = shutdown_receiver.changed() => {
@@ -267,7 +277,61 @@ async fn serve_broker(
     }
 }
 
-async fn serve_connection(pipe: NamedPipeServer, shared: Arc<BrokerShared>) -> io::Result<()> {
+#[cfg(unix)]
+async fn serve_broker(
+    listener: BrokerListener,
+    _pipe_name: String,
+    pipe_id: String,
+    reference: bool,
+    key: Arc<TokenKey>,
+    service: Arc<dyn CognitiveMemoryService>,
+) -> io::Result<()> {
+    let (shared, mut shutdown_receiver) = broker_shared(pipe_id, reference, key, service);
+    loop {
+        tokio::select! {
+            changed = shutdown_receiver.changed() => {
+                if changed.is_err() || *shutdown_receiver.borrow() {
+                    return Ok(());
+                }
+            }
+            accepted = listener.accept() => {
+                let (connection, _) = accepted?;
+                let connection_shared = shared.clone();
+                tokio::spawn(async move {
+                    let _ = serve_connection(connection, connection_shared).await;
+                });
+            }
+        }
+    }
+}
+
+fn broker_shared(
+    pipe_id: String,
+    reference: bool,
+    key: Arc<TokenKey>,
+    service: Arc<dyn CognitiveMemoryService>,
+) -> (Arc<BrokerShared>, watch::Receiver<bool>) {
+    let request_gate = Arc::new(Mutex::new(()));
+    let nonce_cache = Arc::new(Mutex::new(NonceCache::default()));
+    let shutting_down = Arc::new(AtomicBool::new(false));
+    let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+    let shared = Arc::new(BrokerShared {
+        pipe_id,
+        reference,
+        key,
+        service,
+        request_gate,
+        nonce_cache,
+        shutting_down,
+        shutdown_sender,
+    });
+    (shared, shutdown_receiver)
+}
+
+async fn serve_connection<S>(pipe: S, shared: Arc<BrokerShared>) -> io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let (reader, mut writer) = tokio::io::split(pipe);
     let mut reader = AsyncBufReader::new(reader);
     let Some(frame) = read_broker_control_frame(&mut reader, MAX_BROKER_HANDSHAKE_BYTES).await?
@@ -346,7 +410,7 @@ async fn serve_connection(pipe: NamedPipeServer, shared: Arc<BrokerShared>) -> i
 }
 
 async fn stop_session(
-    client: NamedPipeClient,
+    client: BrokerClient,
     handshake: BrokerHandshake,
     key: &TokenKey,
 ) -> CliResult<()> {
@@ -379,7 +443,7 @@ async fn stop_session(
 }
 
 async fn proxy_session(
-    client: NamedPipeClient,
+    client: BrokerClient,
     handshake: BrokerHandshake,
     key: &TokenKey,
 ) -> CliResult<()> {
@@ -610,7 +674,8 @@ fn protocol_error(code: i32, message: &str) -> JsonRpcResponse {
     }
 }
 
-fn create_server(pipe_name: &str, first: bool) -> io::Result<NamedPipeServer> {
+#[cfg(windows)]
+fn create_server(pipe_name: &str, first: bool) -> io::Result<BrokerListener> {
     let mut options = ServerOptions::new();
     options
         .first_pipe_instance(first)
@@ -618,11 +683,73 @@ fn create_server(pipe_name: &str, first: bool) -> io::Result<NamedPipeServer> {
     options.create(pipe_name)
 }
 
-async fn open_client(pipe_name: &str) -> io::Result<NamedPipeClient> {
+#[cfg(unix)]
+fn create_server(socket_name: &str, _first: bool) -> io::Result<BrokerListener> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+
+    match fs::symlink_metadata(socket_name) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_socket()
+                || metadata.uid() != rustix::process::geteuid().as_raw()
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "MCP broker socket path is occupied by an untrusted entry",
+                ));
+            }
+            match std::os::unix::net::UnixStream::connect(socket_name) {
+                Ok(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::AddrInUse,
+                        "an MCP broker already owns the Unix-domain socket",
+                    ));
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+                    ) =>
+                {
+                    fs::remove_file(socket_name)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    let listener = UnixListener::bind(socket_name)?;
+    if let Err(error) = fs::set_permissions(socket_name, fs::Permissions::from_mode(0o600)) {
+        let _ = fs::remove_file(socket_name);
+        return Err(error);
+    }
+    Ok(listener)
+}
+
+#[cfg(windows)]
+async fn open_client(pipe_name: &str) -> io::Result<BrokerClient> {
     ClientOptions::new().open(pipe_name)
 }
 
-async fn wait_for_broker(pipe_name: &str) -> CliResult<NamedPipeClient> {
+#[cfg(unix)]
+async fn open_client(socket_name: &str) -> io::Result<BrokerClient> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+    let metadata = fs::symlink_metadata(socket_name)?;
+    if !metadata.file_type().is_socket()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "MCP broker socket must be owned by the current user and owner-only",
+        ));
+    }
+    UnixStream::connect(socket_name).await
+}
+
+async fn wait_for_broker(pipe_name: &str) -> CliResult<BrokerClient> {
     let started = Instant::now();
     loop {
         match open_client(pipe_name).await {
@@ -640,6 +767,7 @@ async fn wait_for_broker(pipe_name: &str) -> CliResult<NamedPipeClient> {
     }
 }
 
+#[cfg(windows)]
 fn spawn_hidden_broker(path: &Path, reference: bool) -> CliResult<()> {
     use std::os::windows::process::CommandExt;
 
@@ -696,8 +824,158 @@ fn spawn_hidden_broker(path: &Path, reference: bool) -> CliResult<()> {
     Ok(())
 }
 
-fn pipe_name(pipe_id: &str) -> String {
-    format!("{BROKER_PIPE_PREFIX}{pipe_id}")
+#[cfg(unix)]
+fn spawn_hidden_broker(path: &Path, reference: bool) -> CliResult<()> {
+    let executable = std::env::current_exe()
+        .map_err(|_| unavailable("cannot resolve the ContextDB executable", false))?;
+    let mut command = Command::new(executable);
+    command
+        .arg("mcp-broker")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if reference {
+        command.arg("--reference");
+    }
+    command
+        .spawn()
+        .map_err(|_| unavailable("cannot start the local Unix MCP broker", true))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn endpoint_name(_archive_path: &Path, pipe_id: &str) -> CliResult<String> {
+    Ok(format!("{BROKER_PIPE_PREFIX}{pipe_id}"))
+}
+
+#[cfg(unix)]
+fn endpoint_name(archive_path: &Path, pipe_id: &str) -> CliResult<String> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+    let authority = std::env::var_os(state_head::STATE_HEAD_FILE_ENV).ok_or_else(|| {
+        unavailable(
+            "an external state-head authority is required for the local Unix MCP broker",
+            false,
+        )
+    })?;
+    let authority = Path::new(&authority);
+    if !authority.is_absolute() {
+        return Err(unavailable(
+            "Unix MCP broker requires an absolute external state-head authority path",
+            false,
+        ));
+    }
+    let parent = authority.parent().ok_or_else(|| {
+        unavailable(
+            "Unix MCP broker state-head authority must have a parent directory",
+            false,
+        )
+    })?;
+    let parent = fs::canonicalize(parent).map_err(CliError::from)?;
+    let metadata = fs::metadata(&parent).map_err(CliError::from)?;
+    if !metadata.is_dir()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o022 != 0
+    {
+        return Err(unavailable(
+            "Unix MCP broker authority directory must be owned by the current user and not group/world writable",
+            false,
+        ));
+    }
+    if archive_path
+        .parent()
+        .is_some_and(|directory| parent == directory)
+    {
+        return Err(unavailable(
+            "Unix MCP broker socket directory must remain outside the archive directory",
+            false,
+        ));
+    }
+    let broker_directory = parent.join("brokers");
+    match fs::symlink_metadata(&broker_directory) {
+        Ok(metadata) => {
+            if !metadata.is_dir()
+                || metadata.file_type().is_symlink()
+                || metadata.uid() != rustix::process::geteuid().as_raw()
+                || metadata.mode() & 0o077 != 0
+            {
+                return Err(unavailable(
+                    "Unix MCP broker directory must be an owner-only directory, not a symbolic link",
+                    false,
+                ));
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let mut builder = fs::DirBuilder::new();
+            builder.mode(0o700);
+            match builder.create(&broker_directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(CliError::from(error)),
+            }
+            let metadata = fs::symlink_metadata(&broker_directory).map_err(CliError::from)?;
+            if !metadata.is_dir()
+                || metadata.file_type().is_symlink()
+                || metadata.uid() != rustix::process::geteuid().as_raw()
+                || metadata.mode() & 0o077 != 0
+            {
+                return Err(unavailable(
+                    "Unix MCP broker directory could not be protected as owner-only",
+                    false,
+                ));
+            }
+        }
+        Err(error) => return Err(CliError::from(error)),
+    }
+    let socket = broker_directory.join(format!("{}.sock", &pipe_id[..24]));
+    if socket.as_os_str().as_bytes().len() > MAX_UNIX_SOCKET_PATH_BYTES {
+        return Err(unavailable(
+            "Unix MCP broker socket path exceeds the platform limit; shorten the state-head directory",
+            false,
+        ));
+    }
+    socket
+        .into_os_string()
+        .into_string()
+        .map_err(|_| unavailable("Unix MCP broker socket path must be valid UTF-8", false))
+}
+
+#[cfg(unix)]
+struct UnixSocketGuard {
+    path: String,
+    device: u64,
+    inode: u64,
+}
+
+#[cfg(unix)]
+impl UnixSocketGuard {
+    fn new(path: &str) -> io::Result<Self> {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = fs::symlink_metadata(path)?;
+        Ok(Self {
+            path: path.to_owned(),
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for UnixSocketGuard {
+    fn drop(&mut self) {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+        if fs::symlink_metadata(&self.path).is_ok_and(|metadata| {
+            metadata.file_type().is_socket()
+                && metadata.dev() == self.device
+                && metadata.ino() == self.inode
+        }) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 }
 
 fn unavailable(message: impl Into<String>, retryable: bool) -> CliError {

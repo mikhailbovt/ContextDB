@@ -1,11 +1,7 @@
 use std::collections::BTreeSet;
-use std::io::Write;
-#[cfg(windows)]
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-#[cfg(windows)]
-use std::process::Child;
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 #[cfg(windows)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,7 +10,6 @@ const TOKEN: &str = "37373737373737373737373737373737373737373737373737373737373
 struct TestAuthority {
     #[cfg(windows)]
     selector: String,
-    #[cfg(windows)]
     archive_directory: PathBuf,
     #[cfg(unix)]
     head: PathBuf,
@@ -23,7 +18,7 @@ struct TestAuthority {
 }
 
 impl TestAuthority {
-    fn new(_archive_directory: &Path) -> Self {
+    fn new(archive_directory: &Path) -> Self {
         #[cfg(windows)]
         {
             let nonce = SystemTime::now()
@@ -32,7 +27,7 @@ impl TestAuthority {
                 .as_nanos();
             Self {
                 selector: format!("cli-api-integration-{}-{nonce}", std::process::id()),
-                archive_directory: _archive_directory.to_path_buf(),
+                archive_directory: archive_directory.to_path_buf(),
             }
         }
         #[cfg(unix)]
@@ -41,6 +36,7 @@ impl TestAuthority {
             Self {
                 head: authority_directory.path().join("state-head.json"),
                 _directory: authority_directory,
+                archive_directory: archive_directory.to_path_buf(),
             }
         }
     }
@@ -60,10 +56,11 @@ impl TestAuthority {
     }
 }
 
-#[cfg(windows)]
 impl Drop for TestAuthority {
     fn drop(&mut self) {
+        #[cfg(windows)]
         use winreg::RegKey;
+        #[cfg(windows)]
         use winreg::enums::HKEY_CURRENT_USER;
 
         // A failed assertion must not leave a detached broker holding the
@@ -90,11 +87,16 @@ impl Drop for TestAuthority {
             }
         }
 
-        let digest = blake3::hash(self.selector.as_bytes()).to_hex();
-        let parent = RegKey::predef(HKEY_CURRENT_USER)
-            .open_subkey_with_flags("Software\\ContextDB\\StateHeads", winreg::enums::KEY_WRITE);
-        if let Ok(parent) = parent {
-            let _ = parent.delete_subkey_all(digest.to_string());
+        #[cfg(windows)]
+        {
+            let digest = blake3::hash(self.selector.as_bytes()).to_hex();
+            let parent = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
+                "Software\\ContextDB\\StateHeads",
+                winreg::enums::KEY_WRITE,
+            );
+            if let Ok(parent) = parent {
+                let _ = parent.delete_subkey_all(digest.to_string());
+            }
         }
     }
 }
@@ -212,7 +214,6 @@ fn invoke_memory_mcp(
     .expect("memory MCP response")
 }
 
-#[cfg(windows)]
 fn stop_memory_mcp(binary: &str, authority: &TestAuthority, archive: &Path) {
     let stopped = run(
         binary,
@@ -225,9 +226,6 @@ fn stop_memory_mcp(binary: &str, authority: &TestAuthority, archive: &Path) {
         String::from_utf8_lossy(&stopped.stderr)
     );
 }
-
-#[cfg(not(windows))]
-fn stop_memory_mcp(_binary: &str, _authority: &TestAuthority, _archive: &Path) {}
 
 fn memory_semantic_context(request_id: &str) -> serde_json::Value {
     serde_json::json!({
@@ -249,10 +247,8 @@ fn mcp_meta() -> serde_json::Value {
     })
 }
 
-#[cfg(windows)]
 struct BrokerChild(Child);
 
-#[cfg(windows)]
 impl BrokerChild {
     fn wait_for_exit(&mut self) {
         let status = self.0.wait().expect("wait for MCP broker");
@@ -263,7 +259,6 @@ impl BrokerChild {
     }
 }
 
-#[cfg(windows)]
 impl Drop for BrokerChild {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -271,7 +266,6 @@ impl Drop for BrokerChild {
     }
 }
 
-#[cfg(windows)]
 fn start_mcp_broker(binary: &str, authority: &TestAuthority, archive: &Path) -> BrokerChild {
     let mut command = Command::new(binary);
     command
@@ -296,7 +290,6 @@ fn start_mcp_broker(binary: &str, authority: &TestAuthority, archive: &Path) -> 
     BrokerChild(child)
 }
 
-#[cfg(windows)]
 fn spawn_memory_mcp(binary: &str, authority: &TestAuthority, archive: &Path) -> Child {
     let mut command = Command::new(binary);
     command
@@ -339,7 +332,6 @@ fn spawn_memory_mcp(binary: &str, authority: &TestAuthority, archive: &Path) -> 
     command.spawn().expect("spawn brokered MCP proxy")
 }
 
-#[cfg(windows)]
 fn send_one_mcp_request(mut child: Child, request: &serde_json::Value) -> Output {
     let mut stdin = child.stdin.take().expect("brokered MCP stdin");
     serde_json::to_writer(&mut stdin, request).expect("brokered MCP JSON");
@@ -348,7 +340,6 @@ fn send_one_mcp_request(mut child: Child, request: &serde_json::Value) -> Output
     child.wait_with_output().expect("brokered MCP output")
 }
 
-#[cfg(windows)]
 fn decoded_mcp_output(output: &Output) -> serde_json::Value {
     assert!(
         output.status.success(),
@@ -365,9 +356,8 @@ fn decoded_mcp_output(output: &Output) -> serde_json::Value {
     .expect("brokered MCP response")
 }
 
-#[cfg(windows)]
 #[test]
-fn windows_mcp_broker_serializes_concurrent_writes_and_reopens_after_restart() {
+fn mcp_broker_serializes_concurrent_writes_and_reopens_after_restart() {
     let binary = env!("CARGO_BIN_EXE_contextdb");
     let directory = tempfile::tempdir().expect("temporary directory");
     let archive = directory.path().join("brokered-memory.ctxb");
@@ -469,6 +459,169 @@ fn windows_mcp_broker_serializes_concurrent_writes_and_reopens_after_restart() {
     }
     stop_memory_mcp(binary, &authority, &archive);
     reopened_broker.wait_for_exit();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_mcp_broker_socket_is_owner_only_and_removed_after_shutdown() {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+    let binary = env!("CARGO_BIN_EXE_contextdb");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let archive = directory.path().join("owner-only-broker.ctxb");
+    let authority = TestAuthority::new(directory.path());
+    let initialized = run(
+        binary,
+        &authority,
+        &["--json", "init", archive.to_str().expect("archive path")],
+    );
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let mut broker = start_mcp_broker(binary, &authority, &archive);
+    let broker_directory = authority
+        .head
+        .parent()
+        .expect("state-head parent")
+        .join("brokers");
+    let directory_metadata =
+        std::fs::symlink_metadata(&broker_directory).expect("owner-only broker directory metadata");
+    assert!(directory_metadata.is_dir());
+    assert_eq!(directory_metadata.mode() & 0o777, 0o700);
+    assert_eq!(
+        directory_metadata.uid(),
+        rustix::process::geteuid().as_raw()
+    );
+
+    let sockets = std::fs::read_dir(&broker_directory)
+        .expect("broker directory")
+        .map(|entry| entry.expect("broker directory entry").path())
+        .collect::<Vec<_>>();
+    assert_eq!(sockets.len(), 1);
+    let socket = sockets.into_iter().next().expect("broker socket");
+    let metadata = std::fs::symlink_metadata(&socket).expect("broker socket metadata");
+    assert!(metadata.file_type().is_socket());
+    assert_eq!(metadata.mode() & 0o777, 0o600);
+    assert_eq!(metadata.uid(), rustix::process::geteuid().as_raw());
+
+    stop_memory_mcp(binary, &authority, &archive);
+    broker.wait_for_exit();
+    assert!(!socket.exists(), "broker shutdown must unlink its socket");
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_mcp_broker_rejects_symbolic_link_socket_directory() {
+    use std::os::unix::fs::symlink;
+
+    let binary = env!("CARGO_BIN_EXE_contextdb");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let archive = directory.path().join("symlink-broker.ctxb");
+    let authority = TestAuthority::new(directory.path());
+    let initialized = run(
+        binary,
+        &authority,
+        &["--json", "init", archive.to_str().expect("archive path")],
+    );
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let untrusted_directory = tempfile::tempdir().expect("untrusted broker directory");
+    let socket_directory = authority
+        .head
+        .parent()
+        .expect("state-head parent")
+        .join("brokers");
+    symlink(untrusted_directory.path(), &socket_directory).expect("broker directory symlink");
+    let rejected = run(
+        binary,
+        &authority,
+        &["mcp-broker", archive.to_str().expect("archive path")],
+    );
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("symbolic link"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_mcp_broker_concurrent_autostarts_share_one_authenticated_owner() {
+    use std::sync::{Arc, Barrier};
+
+    const SESSIONS: usize = 8;
+
+    let binary = env!("CARGO_BIN_EXE_contextdb");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let archive = directory.path().join("concurrent-autostart.ctxb");
+    let authority = TestAuthority::new(directory.path());
+    let initialized = run(
+        binary,
+        &authority,
+        &["--json", "init", archive.to_str().expect("archive path")],
+    );
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let gate = Arc::new(Barrier::new(SESSIONS));
+    let threads = std::thread::scope(|scope| {
+        (0..SESSIONS)
+            .map(|index| {
+                let gate = gate.clone();
+                let authority = &authority;
+                let archive = &archive;
+                scope.spawn(move || {
+                    gate.wait();
+                    let child = spawn_memory_mcp(binary, authority, archive);
+                    let request = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": index,
+                        "method": "tools/list",
+                        "params": {"_meta": mcp_meta()}
+                    });
+                    decoded_mcp_output(&send_one_mcp_request(child, &request))
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|thread| thread.join().expect("concurrent MCP session"))
+            .collect::<Vec<_>>()
+    });
+    for response in threads {
+        assert!(response["error"].is_null(), "{response:#}");
+        assert_eq!(
+            response["result"]["tools"]
+                .as_array()
+                .expect("MCP tool inventory")
+                .len(),
+            16
+        );
+    }
+
+    let broker_directory = authority
+        .head
+        .parent()
+        .expect("state-head parent")
+        .join("brokers");
+    assert_eq!(
+        std::fs::read_dir(broker_directory)
+            .expect("broker directory")
+            .count(),
+        1,
+        "simultaneous autostarts must converge on exactly one socket owner"
+    );
+    stop_memory_mcp(binary, &authority, &archive);
 }
 
 #[test]

@@ -1,15 +1,16 @@
 # Local-MCP third-party dependency bundle
 
-The Windows x86_64 local-MCP developer preview ships a reviewable dependency
-bundle next to `contextdb.exe`:
+Each Linux x86_64 and Windows x86_64 local-MCP developer preview ships an
+independently resolved, target-specific dependency bundle next to its native
+`contextdb` or `contextdb.exe` executable:
 
 - `release/THIRD_PARTY_NOTICES.txt` indexes every external Cargo package in the
   exact listener-free graph and includes the license texts selected by
   `cargo-about`;
 - `release/contextdb-local-mcp.cdx.json` is a deterministic CycloneDX 1.5 JSON
   SBOM for that same graph;
-- `release/contextdb-local-mcp-supply-chain.json` binds the graph, `Cargo.lock`,
-  generator versions, artifact hashes, and release-status limitations;
+- `release/contextdb-local-mcp-supply-chain.json` binds the exact native target,
+  graph, `Cargo.lock`, generator versions, artifact hashes, and release-status limitations;
 - `release/rust-runtime/` contains the standard-library copyright inventory and
   Apache-2.0/MIT texts copied byte-for-byte from the pinned Rust toolchain.
 
@@ -17,15 +18,25 @@ This bundle is release engineering evidence, not legal advice or a statement
 that the developer preview is signed, published, formally release-ready, or
 free of vulnerabilities.
 
+In the source checkout, Windows evidence lives directly under `release/` and Linux
+evidence lives under `release/platforms/linux-x86_64/`. Both packages map their own
+evidence to the same canonical internal `release/` paths. The two graph digests are
+independent; substituting a Windows dependency manifest into a Linux package fails.
+
 ## Exact dependency boundary
 
-The source of truth is the locked normal-plus-build dependency graph for:
+The source of truth is the locked normal-plus-build dependency graph for the
+native target. For Linux:
 
 ```console
 cargo tree --locked --offline -p contextdb-cli \
   --no-default-features --features local-mcp \
-  --target x86_64-pc-windows-msvc -e normal,build
+  --target x86_64-unknown-linux-gnu -e normal,build
 ```
+
+For Windows, use `--target x86_64-pc-windows-msvc`. Resolve each graph on its
+native operating system: build dependencies are host-sensitive, so a Linux
+target evaluated from a Windows Cargo host is not an equivalent Linux graph.
 
 Developer and test-only dependencies are excluded. Build dependencies are
 included because they can affect the executable bytes. ContextDB workspace
@@ -60,16 +71,19 @@ Generate, verify without rewriting, or perform a full byte-for-byte freshness
 check from the repository root:
 
 ```console
-python tools/local-mcp-preview/generate_supply_chain.py generate
-python tools/local-mcp-preview/generate_supply_chain.py verify
-python tools/local-mcp-preview/generate_supply_chain.py check
+python tools/local-mcp-preview/generate_supply_chain.py generate --platform linux-x86_64
+python tools/local-mcp-preview/generate_supply_chain.py verify --platform linux-x86_64
+python tools/local-mcp-preview/generate_supply_chain.py check --platform linux-x86_64
 ```
 
-`generate` and `check` require the pinned Windows x86_64 Rust 1.97.1 toolchain,
-including `rust-src`, because the Rust runtime notice files are copied from and
-verified against that sysroot. `verify` is also intentionally strict on the
-release host. The preview packager invokes this strict verification before it
-accepts a binary.
+Replace `linux-x86_64` with `windows-x86_64` for the Windows evidence set; omitting
+`--platform` selects the current host. `generate` and `check` require the pinned
+Rust 1.97.1 target-host toolchain, including `rust-src`, because runtime notices
+are copied from and verified against that sysroot. The graph always uses native
+Cargo. In WSL, already reviewed Windows generator executables can be reused with
+`--tool-cargo cargo.exe` while native Linux Cargo and Rust still establish the
+authoritative graph and runtime notice host. The packager runs strict native
+verification before accepting a binary.
 
 ## Verification performed by packages
 
@@ -82,11 +96,11 @@ The core and Codex plugin packagers fail closed unless:
 - every notice, SBOM, and Rust runtime file matches its recorded byte length and
   SHA-256;
 - the Rust notices match Rust 1.97.1 commit
-  `8bab26f4f68e0e26f0bb7960be334d5b520ea452` for
-  `x86_64-pc-windows-msvc`;
+  `8bab26f4f68e0e26f0bb7960be334d5b520ea452` and a supported native
+  `x86_64-unknown-linux-gnu` or `x86_64-pc-windows-msvc` toolchain;
 - the manifest continues to state that the preview is listener-free, unsigned,
   unpublished, and not formally release-ready.
 
 The outer ZIP receipt and checksum then bind the supply-chain bundle and the
-exact `contextdb.exe` bytes. This is integrity and provenance evidence for a
+exact native `contextdb` or `contextdb.exe` bytes. This is integrity and provenance evidence for a
 local developer preview; it is not code signing or an independent attestation.

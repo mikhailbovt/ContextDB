@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -19,8 +20,22 @@ from typing import Any, NoReturn, Sequence
 
 
 SCHEMA = "contextdb.local-mcp-supply-chain/v1"
-PROFILE_ID = "contextdb-local-mcp-windows-x86_64"
-TARGET = "x86_64-pc-windows-msvc"
+PLATFORM_TARGETS = {
+    "windows-x86_64": {
+        "profile_id": "contextdb-local-mcp-windows-x86_64",
+        "target": "x86_64-pc-windows-msvc",
+        "display_name": "Windows x86_64",
+    },
+    "linux-x86_64": {
+        "profile_id": "contextdb-local-mcp-linux-x86_64",
+        "target": "x86_64-unknown-linux-gnu",
+        "display_name": "Linux x86_64",
+    },
+}
+ACTIVE_PLATFORM = "windows-x86_64"
+PROFILE_ID = PLATFORM_TARGETS[ACTIVE_PLATFORM]["profile_id"]
+TARGET = PLATFORM_TARGETS[ACTIVE_PLATFORM]["target"]
+TOOL_CARGO = "cargo"
 PACKAGE = "contextdb-cli"
 FEATURES = ["local-mcp"]
 CANONICAL_REPOSITORY = "https://github.com/mikhailbovt/ContextDB"
@@ -55,6 +70,40 @@ def _fail(message: str) -> NoReturn:
     raise SupplyChainError(message)
 
 
+def _host_platform() -> str:
+    operating_system = platform.system().lower()
+    architecture = platform.machine().lower()
+    if architecture not in {"amd64", "x86_64"}:
+        _fail(f"unsupported local-MCP supply-chain architecture: {architecture}")
+    selected = f"{operating_system}-x86_64"
+    if selected not in PLATFORM_TARGETS:
+        _fail(f"unsupported local-MCP supply-chain operating system: {operating_system}")
+    return selected
+
+
+def _activate_platform(value: str | None) -> str:
+    global ACTIVE_PLATFORM, PROFILE_ID, TARGET
+
+    selected = value or _host_platform()
+    if selected not in PLATFORM_TARGETS:
+        _fail(f"unsupported local-MCP supply-chain target: {selected}")
+    ACTIVE_PLATFORM = selected
+    PROFILE_ID = PLATFORM_TARGETS[selected]["profile_id"]
+    TARGET = PLATFORM_TARGETS[selected]["target"]
+    return selected
+
+
+def _evidence_path(root: Path, relative: Path | str) -> Path:
+    path = Path(relative)
+    if ACTIVE_PLATFORM == "windows-x86_64":
+        return root / path
+    try:
+        within_release = path.relative_to("release")
+    except ValueError:
+        _fail(f"platform evidence must use a canonical release path: {path}")
+    return root / "release" / "platforms" / ACTIVE_PLATFORM / within_release
+
+
 def _run(
     command: Sequence[str],
     root: Path,
@@ -75,6 +124,15 @@ def _run(
         detail = (result.stderr or result.stdout).strip()
         _fail(f"command failed ({result.returncode}): {' '.join(command)}\n{detail}")
     return result
+
+
+def _tool_argument_path(path: Path, root: Path) -> str:
+    if os.name != "nt" and TOOL_CARGO.lower().endswith(".exe"):
+        translated = _run(["wslpath", "-w", str(path)], root).stdout.strip()
+        if not translated:
+            _fail("cannot translate a WSL output path for the pinned Windows Cargo tools")
+        return translated
+    return str(path)
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -140,9 +198,10 @@ def _rust_toolchain(root: Path) -> tuple[Path, dict[str, str]]:
         or commit is None
         or commit.group(1) != RUSTC_COMMIT
         or host is None
-        or host.group(1) != TARGET
+        or host.group(1)
+        not in {configuration["target"] for configuration in PLATFORM_TARGETS.values()}
     ):
-        _fail("rustc is not the pinned Rust 1.97.1 Windows x86_64 toolchain")
+        _fail("rustc is not a supported pinned Rust 1.97.1 x86_64 toolchain")
     sysroot = Path(_run(["rustc", "--print", "sysroot"], root).stdout.strip()).resolve()
     if not sysroot.is_dir():
         _fail("rustc returned a missing sysroot")
@@ -258,7 +317,7 @@ def resolve_graph(root: Path, cargo: str = "cargo") -> dict[str, Any]:
 
 def _generate_about(root: Path, destination: Path) -> dict[str, Any]:
     command = [
-        "cargo",
+        TOOL_CARGO,
         "about",
         "generate",
         "--frozen",
@@ -275,7 +334,7 @@ def _generate_about(root: Path, destination: Path) -> dict[str, Any]:
         "--format",
         "json",
         "--output-file",
-        str(destination),
+        _tool_argument_path(destination, root),
     ]
     _run(command, root)
     return _read_json(destination)
@@ -356,7 +415,10 @@ def _build_notices(about: dict[str, Any], graph: dict[str, Any]) -> tuple[bytes,
         f"Generated with cargo-about {ABOUT_VERSION} using {ABOUT_CONFIG.as_posix()}.",
         "",
         "This generated file records the license texts selected by cargo-about for",
-        "the locked Windows x86_64 local-MCP Cargo graph. It is not legal advice.",
+        (
+            f"the locked {PLATFORM_TARGETS[ACTIVE_PLATFORM]['display_name']} "
+            "local-MCP Cargo graph. It is not legal advice."
+        ),
         "ContextDB workspace crates and the Rust standard library are covered by",
         "the repository LICENSE and the separate rust-runtime notice files.",
         "",
@@ -412,7 +474,7 @@ def _generate_raw_sbom(root: Path) -> dict[str, Any]:
     environment["SOURCE_DATE_EPOCH"] = "0"
     environment["CARGO_NET_OFFLINE"] = "true"
     command = [
-        "cargo",
+        TOOL_CARGO,
         "cyclonedx",
         "--manifest-path",
         CLI_MANIFEST.as_posix(),
@@ -580,9 +642,11 @@ def _copy_rust_runtime(root: Path, output_root: Path) -> tuple[dict[str, str], l
 
 def _generate_to(root: Path, output_root: Path) -> dict[str, Any]:
     _workspace_package(root)
-    _tool_version(["cargo", "about", "--version"], root, r"cargo-about (\S+)", ABOUT_VERSION)
     _tool_version(
-        ["cargo", "cyclonedx", "--version"],
+        [TOOL_CARGO, "about", "--version"], root, r"cargo-about (\S+)", ABOUT_VERSION
+    )
+    _tool_version(
+        [TOOL_CARGO, "cyclonedx", "--version"],
         root,
         r"cargo-cyclonedx(?:-cyclonedx)? (\S+)",
         CYCLONEDX_VERSION,
@@ -662,7 +726,8 @@ def _sbom_identities(sbom: dict[str, Any]) -> set[tuple[str, str]]:
 
 def verify_artifacts(root: Path, cargo: str = "cargo") -> dict[str, Any]:
     workspace = _workspace_package(root)
-    manifest = _read_json(root / MANIFEST_PATH)
+    manifest_path = _evidence_path(root, MANIFEST_PATH)
+    manifest = _read_json(manifest_path)
     if manifest.get("schema_version") != SCHEMA or manifest.get("profile_id") != PROFILE_ID:
         _fail("unsupported local-MCP supply-chain manifest")
     if manifest.get("canonical_repository") != CANONICAL_REPOSITORY:
@@ -724,7 +789,7 @@ def verify_artifacts(root: Path, cargo: str = "cargo") -> dict[str, Any]:
         if not isinstance(item, dict) or not isinstance(item.get("path"), str):
             _fail("supply-chain artifact receipt contains an invalid item")
         relative = item["path"]
-        path = root / relative
+        path = _evidence_path(root, relative)
         if not path.is_file():
             _fail(f"supply-chain artifact is missing: {relative}")
         if item.get("sha256") != _sha256_file(path) or item.get("bytes") != path.stat().st_size:
@@ -733,16 +798,17 @@ def verify_artifacts(root: Path, cargo: str = "cargo") -> dict[str, Any]:
     if seen_artifacts != expected_artifacts:
         _fail("supply-chain artifact set differs from the required bundle")
 
-    notice = (root / NOTICE_PATH).read_text(encoding="utf-8")
+    notice = _evidence_path(root, NOTICE_PATH).read_text(encoding="utf-8")
     for identity in graph["external"]:
         if f"\n{identity[0]} {identity[1]}\n" not in notice:
             _fail(f"third-party notice index is missing {identity}")
-    sbom = _read_json(root / SBOM_PATH)
+    sbom_path = _evidence_path(root, SBOM_PATH)
+    sbom = _read_json(sbom_path)
     if sbom.get("bomFormat") != "CycloneDX" or sbom.get("specVersion") != "1.5":
         _fail("checked SBOM is not CycloneDX 1.5 JSON")
     if _sbom_identities(sbom) != set(graph["nodes"]):
         _fail("checked SBOM components differ from the exact local-MCP graph")
-    sbom_text = (root / SBOM_PATH).read_text(encoding="utf-8")
+    sbom_text = sbom_path.read_text(encoding="utf-8")
     for forbidden in ("file:///", "file://.", "contextdb/contextdb", str(root.resolve())):
         if forbidden.lower() in sbom_text.lower():
             _fail(f"checked SBOM contains a local or stale value: {forbidden}")
@@ -751,8 +817,13 @@ def verify_artifacts(root: Path, cargo: str = "cargo") -> dict[str, Any]:
     rust_receipt = manifest.get("rust_toolchain")
     if not isinstance(rust_receipt, dict):
         _fail("Rust runtime notice receipt is missing")
-    if {key: rust_receipt.get(key) for key in toolchain} != toolchain:
-        _fail("Rust runtime notice receipt targets a different toolchain")
+    if (
+        rust_receipt.get("release") != toolchain["release"]
+        or rust_receipt.get("commit_hash") != toolchain["commit_hash"]
+        or rust_receipt.get("host")
+        not in {configuration["target"] for configuration in PLATFORM_TARGETS.values()}
+    ):
+        _fail("Rust runtime notice receipt does not name a supported pinned toolchain")
     rust_files = rust_receipt.get("files")
     if not isinstance(rust_files, list) or len(rust_files) != len(RUST_RUNTIME_FILES):
         _fail("Rust runtime notice receipt is incomplete")
@@ -764,7 +835,7 @@ def verify_artifacts(root: Path, cargo: str = "cargo") -> dict[str, Any]:
         if output not in RUST_RUNTIME_FILES or source_relative != RUST_RUNTIME_FILES[output]:
             _fail("Rust runtime notice receipt contains an unexpected path")
         source = sysroot / source_relative
-        packaged = root / output
+        packaged = _evidence_path(root, output)
         if (
             not source.is_file()
             or not packaged.is_file()
@@ -789,7 +860,9 @@ def verify_artifacts(root: Path, cargo: str = "cargo") -> dict[str, Any]:
         "graph_sha256": graph["sha256"],
         "component_count": len(graph["nodes"]),
         "third_party_component_count": len(graph["external"]),
-        "manifest_sha256": _sha256_file(root / MANIFEST_PATH),
+        "target": TARGET,
+        "platform": ACTIVE_PLATFORM,
+        "manifest_sha256": _sha256_file(manifest_path),
     }
 
 
@@ -799,13 +872,13 @@ def _replace_generated(root: Path, generated: Path) -> None:
         source = generated / relative
         if not source.is_file():
             _fail(f"generator did not produce {relative.as_posix()}")
-        destination = root / relative
+        destination = _evidence_path(root, relative)
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
 
 
 def _generate(root: Path) -> dict[str, Any]:
-    target = root / "target/local-mcp-supply-chain"
+    target = root / "target/local-mcp-supply-chain" / ACTIVE_PLATFORM
     target.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="generate-", dir=target) as temporary:
         generated = Path(temporary)
@@ -816,13 +889,13 @@ def _generate(root: Path) -> dict[str, Any]:
 
 def _check(root: Path) -> dict[str, Any]:
     verified = verify_artifacts(root)
-    target = root / "target/local-mcp-supply-chain"
+    target = root / "target/local-mcp-supply-chain" / ACTIVE_PLATFORM
     target.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="check-", dir=target) as temporary:
         generated = Path(temporary)
         _generate_to(root, generated)
         for relative in [NOTICE_PATH, SBOM_PATH, MANIFEST_PATH, *map(Path, RUST_RUNTIME_FILES)]:
-            checked = root / relative
+            checked = _evidence_path(root, relative)
             fresh = generated / relative
             if checked.read_bytes() != fresh.read_bytes():
                 _fail(f"checked-in supply-chain artifact is stale: {relative.as_posix()}")
@@ -834,13 +907,27 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("command", choices=("generate", "verify", "check"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--cargo", default="cargo")
+    parser.add_argument(
+        "--tool-cargo",
+        default="cargo",
+        help="Cargo executable exposing the pinned cargo-about and cargo-cyclonedx tools",
+    )
+    parser.add_argument(
+        "--platform",
+        choices=sorted(PLATFORM_TARGETS),
+        help="target evidence set; defaults to the current supported x86_64 host",
+    )
     return parser
 
 
 def main() -> int:
+    global TOOL_CARGO
+
     args = _parser().parse_args()
     root = args.root.resolve()
     try:
+        _activate_platform(args.platform)
+        TOOL_CARGO = args.tool_cargo
         if args.command == "generate":
             result = _generate(root)
         elif args.command == "check":
