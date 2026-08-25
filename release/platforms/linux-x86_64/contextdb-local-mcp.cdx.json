@@ -800,7 +800,7 @@
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-context@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-context@0.2.0-alpha.2",
       "description": "Deterministic model-neutral ContextPack compiler and renderers for ContextDB",
       "externalReferences": [
         {
@@ -818,14 +818,14 @@
         }
       ],
       "name": "contextdb-context",
-      "purl": "pkg:cargo/contextdb-context@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-context@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-continuity@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-continuity@0.2.0-alpha.2",
       "description": "Deterministic cross-model continuity, migration, checkpoint, and handoff contracts for ContextDB",
       "externalReferences": [
         {
@@ -843,14 +843,14 @@
         }
       ],
       "name": "contextdb-continuity",
-      "purl": "pkg:cargo/contextdb-continuity@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-continuity@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-core@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-core@0.2.0-alpha.2",
       "description": "Model-independent logical types and invariants for ContextDB",
       "externalReferences": [
         {
@@ -868,14 +868,14 @@
         }
       ],
       "name": "contextdb-core",
-      "purl": "pkg:cargo/contextdb-core@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-core@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-mcp@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-mcp@0.2.0-alpha.2",
       "description": "External Model Context Protocol adapter for ContextDB",
       "externalReferences": [
         {
@@ -893,14 +893,14 @@
         }
       ],
       "name": "contextdb-mcp",
-      "purl": "pkg:cargo/contextdb-mcp@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-mcp@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-model@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-model@0.2.0-alpha.2",
       "description": "Provider-neutral model capability runtime for ContextDB",
       "externalReferences": [
         {
@@ -918,14 +918,14 @@
         }
       ],
       "name": "contextdb-model",
-      "purl": "pkg:cargo/contextdb-model@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-model@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-native-service@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-native-service@0.2.0-alpha.2",
       "description": "Incremental Fjall-backed CognitiveMemoryService for ContextDB",
       "externalReferences": [
         {
@@ -943,14 +943,14 @@
         }
       ],
       "name": "contextdb-native-service",
-      "purl": "pkg:cargo/contextdb-native-service@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-native-service@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-proto@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-proto@0.2.0-alpha.2",
       "description": "Generated canonical ContextDB v1 Protobuf and gRPC contract",
       "externalReferences": [
         {
@@ -968,14 +968,14 @@
         }
       ],
       "name": "contextdb-proto",
-      "purl": "pkg:cargo/contextdb-proto@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-proto@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-recall@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-recall@0.2.0-alpha.2",
       "description": "Deterministic universal recall planner and executor for ContextDB",
       "externalReferences": [
         {
@@ -993,14 +993,14 @@
         }
       ],
       "name": "contextdb-recall",
-      "purl": "pkg:cargo/contextdb-recall@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-recall@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-reference@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-reference@0.2.0-alpha.2",
       "description": "Deterministic in-memory correctness oracle for ContextDB",
       "externalReferences": [
         {
@@ -1018,14 +1018,14 @@
         }
       ],
       "name": "contextdb-reference",
-      "purl": "pkg:cargo/contextdb-reference@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-reference@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-server@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-server@0.2.0-alpha.2",
       "description": "Canonical ContextDB gRPC and HTTP/JSON transport adapters",
       "externalReferences": [
         {
@@ -1043,14 +1043,14 @@
         }
       ],
       "name": "contextdb-server",
-      "purl": "pkg:cargo/contextdb-server@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-server@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-service@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-service@0.2.0-alpha.2",
       "description": "Canonical embedded cognitive-memory application service for ContextDB",
       "externalReferences": [
         {
@@ -1068,14 +1068,14 @@
         }
       ],
       "name": "contextdb-service",
-      "purl": "pkg:cargo/contextdb-service@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-service@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-storage@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-storage@0.2.0-alpha.2",
       "description": "Backend-neutral physical storage contracts for ContextDB",
       "externalReferences": [
         {
@@ -1093,14 +1093,14 @@
         }
       ],
       "name": "contextdb-storage",
-      "purl": "pkg:cargo/contextdb-storage@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-storage@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.2",
       "description": "Fjall physical storage adapter for ContextDB",
       "externalReferences": [
         {
@@ -1118,10 +1118,10 @@
         }
       ],
       "name": "contextdb-storage-fjall",
-      "purl": "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.2",
       "scope": "required",
       "type": "library",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     {
       "author": "RustCrypto Developers",
@@ -4485,16 +4485,16 @@
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
         "registry+https://github.com/rust-lang/crates.io-index#chacha20poly1305@0.11.0",
         "registry+https://github.com/rust-lang/crates.io-index#clap@4.6.6",
-        "pkg:cargo/contextdb-context@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-continuity@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-core@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-mcp@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-native-service@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-proto@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-server@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-service@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-storage@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-context@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-continuity@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-mcp@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-native-service@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-proto@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-server@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-service@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-storage@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#getrandom@0.4.3",
         "registry+https://github.com/rust-lang/crates.io-index#prost@0.14.4",
         "registry+https://github.com/rust-lang/crates.io-index#rustix@1.1.4",
@@ -4504,32 +4504,32 @@
         "registry+https://github.com/rust-lang/crates.io-index#tokio@1.53.1",
         "registry+https://github.com/rust-lang/crates.io-index#zeroize@1.9.0"
       ],
-      "ref": "pkg:cargo/contextdb-cli@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-cli@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
-        "pkg:cargo/contextdb-core@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-recall@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#prost@0.14.4",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20"
       ],
-      "ref": "pkg:cargo/contextdb-context@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-context@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
-        "pkg:cargo/contextdb-context@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-core@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-model@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-recall@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-context@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-model@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20"
       ],
-      "ref": "pkg:cargo/contextdb-continuity@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-continuity@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
@@ -4538,41 +4538,41 @@
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20",
         "registry+https://github.com/rust-lang/crates.io-index#uuid@1.24.0"
       ],
-      "ref": "pkg:cargo/contextdb-core@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-core@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
-        "pkg:cargo/contextdb-service@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-service@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#unicode-normalization@0.1.25"
       ],
-      "ref": "pkg:cargo/contextdb-mcp@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-mcp@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
-        "pkg:cargo/contextdb-core@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20"
       ],
-      "ref": "pkg:cargo/contextdb-model@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-model@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
-        "pkg:cargo/contextdb-core@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-recall@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-service@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-storage@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-service@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-storage@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#zeroize@1.9.0"
       ],
-      "ref": "pkg:cargo/contextdb-native-service@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-native-service@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
@@ -4580,69 +4580,69 @@
         "registry+https://github.com/rust-lang/crates.io-index#protoc-bin-vendored@3.2.0",
         "registry+https://github.com/rust-lang/crates.io-index#tonic-prost-build@0.14.6"
       ],
-      "ref": "pkg:cargo/contextdb-proto@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-proto@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
-        "pkg:cargo/contextdb-core@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-reference@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-reference@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20"
       ],
-      "ref": "pkg:cargo/contextdb-recall@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-recall@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
-        "pkg:cargo/contextdb-core@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20"
       ],
-      "ref": "pkg:cargo/contextdb-reference@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-reference@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
-        "pkg:cargo/contextdb-proto@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-service@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-proto@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-service@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#zeroize@1.9.0"
       ],
-      "ref": "pkg:cargo/contextdb-server@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-server@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
-        "pkg:cargo/contextdb-context@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-continuity@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-core@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-recall@0.2.0-alpha.1",
-        "pkg:cargo/contextdb-reference@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-context@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-continuity@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.2",
+        "pkg:cargo/contextdb-reference@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20",
         "registry+https://github.com/rust-lang/crates.io-index#uuid@1.24.0",
         "registry+https://github.com/rust-lang/crates.io-index#zeroize@1.9.0"
       ],
-      "ref": "pkg:cargo/contextdb-service@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-service@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20"
       ],
-      "ref": "pkg:cargo/contextdb-storage@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-storage@0.2.0-alpha.2"
     },
     {
       "dependsOn": [
-        "pkg:cargo/contextdb-storage@0.2.0-alpha.1",
+        "pkg:cargo/contextdb-storage@0.2.0-alpha.2",
         "registry+https://github.com/rust-lang/crates.io-index#fjall@3.1.8"
       ],
-      "ref": "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.1"
+      "ref": "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.2"
     },
     {
       "dependsOn": [],
@@ -5290,14 +5290,14 @@
   "metadata": {
     "component": {
       "author": "Mikhail Bovt and ContextDB contributors",
-      "bom-ref": "pkg:cargo/contextdb-cli@0.2.0-alpha.1",
+      "bom-ref": "pkg:cargo/contextdb-cli@0.2.0-alpha.2",
       "components": [
         {
-          "bom-ref": "pkg:cargo/contextdb-cli@0.2.0-alpha.1#contextdb",
+          "bom-ref": "pkg:cargo/contextdb-cli@0.2.0-alpha.2#contextdb",
           "name": "contextdb",
-          "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.1#contextdb",
+          "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.2#contextdb",
           "type": "application",
-          "version": "0.2.0-alpha.1"
+          "version": "0.2.0-alpha.2"
         }
       ],
       "description": "Command-line interface for ContextDB",
@@ -5340,13 +5340,13 @@
         },
         {
           "name": "contextdb:dependency-graph-sha256",
-          "value": "fe48d220f8c315a28e929987e889df24e7b0e012ecc60809ad51a6eb018d9365"
+          "value": "65239f72681480ba99103bb666c2d330b889f28588f233d355619551c4b58403"
         }
       ],
-      "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.1",
+      "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.2",
       "scope": "required",
       "type": "application",
-      "version": "0.2.0-alpha.1"
+      "version": "0.2.0-alpha.2"
     },
     "properties": [
       {

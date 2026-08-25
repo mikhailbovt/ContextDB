@@ -14,7 +14,7 @@ TOOL = REPO_ROOT / "tools/local-mcp-preview/release_assets.py"
 class LocalMcpReleaseAssetTests(unittest.TestCase):
     def test_release_tag_must_bind_current_core_version(self) -> None:
         passing = subprocess.run(
-            [sys.executable, str(TOOL), "validate-tag", "--tag", "v0.2.0-alpha.1"],
+            [sys.executable, str(TOOL), "validate-tag", "--tag", "v0.2.0-alpha.2"],
             cwd=REPO_ROOT,
             check=False,
             capture_output=True,
@@ -51,8 +51,8 @@ class LocalMcpReleaseAssetTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             content = notes.read_text(encoding="utf-8")
-            self.assertIn("contextdb-local-mcp-0.2.0-alpha.1-linux-x86_64.zip", content)
-            self.assertIn("contextdb-local-mcp-0.2.0-alpha.1-windows-x86_64.zip", content)
+            self.assertIn("contextdb-local-mcp-0.2.0-alpha.2-linux-x86_64.zip", content)
+            self.assertIn("contextdb-local-mcp-0.2.0-alpha.2-windows-x86_64.zip", content)
             self.assertIn("network_listeners disabled", content)
             self.assertIn("not the formal ContextDB M18 Alpha", content)
 

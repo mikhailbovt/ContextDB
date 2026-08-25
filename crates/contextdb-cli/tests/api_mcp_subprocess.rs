@@ -6,6 +6,8 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const TOKEN: &str = "3737373737373737373737373737373737373737373737373737373737373737";
+#[cfg(unix)]
+const XDG_RUNTIME_DIR_ENV: &str = "XDG_RUNTIME_DIR";
 
 struct TestAuthority {
     #[cfg(windows)]
@@ -15,6 +17,10 @@ struct TestAuthority {
     head: PathBuf,
     #[cfg(unix)]
     _directory: tempfile::TempDir,
+    #[cfg(unix)]
+    runtime_env: PathBuf,
+    #[cfg(unix)]
+    _runtime_directory: Option<tempfile::TempDir>,
 }
 
 impl TestAuthority {
@@ -33,12 +39,64 @@ impl TestAuthority {
         #[cfg(unix)]
         {
             let authority_directory = tempfile::tempdir().expect("authority directory");
+            let runtime_directory = short_runtime_directory();
+            protect_owner_only_directory(runtime_directory.path());
             Self {
                 head: authority_directory.path().join("state-head.json"),
                 _directory: authority_directory,
+                runtime_env: runtime_directory.path().to_path_buf(),
+                _runtime_directory: Some(runtime_directory),
                 archive_directory: archive_directory.to_path_buf(),
             }
         }
+    }
+
+    #[cfg(unix)]
+    fn with_xdg_runtime_dir(archive_directory: &Path, runtime_env: PathBuf) -> Self {
+        let authority_directory = tempfile::tempdir().expect("authority directory");
+        Self {
+            head: authority_directory.path().join("state-head.json"),
+            _directory: authority_directory,
+            runtime_env,
+            _runtime_directory: None,
+            archive_directory: archive_directory.to_path_buf(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn with_long_state_head_path(archive_directory: &Path) -> Self {
+        let authority_directory = tempfile::tempdir().expect("authority directory");
+        let runtime_directory = short_runtime_directory();
+        protect_owner_only_directory(runtime_directory.path());
+        let parent = create_long_state_head_parent(authority_directory.path());
+        Self {
+            head: parent.join("state-head.json"),
+            _directory: authority_directory,
+            runtime_env: runtime_directory.path().to_path_buf(),
+            _runtime_directory: Some(runtime_directory),
+            archive_directory: archive_directory.to_path_buf(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn with_long_state_head_and_xdg_runtime_dir(
+        archive_directory: &Path,
+        runtime_env: PathBuf,
+    ) -> Self {
+        let authority_directory = tempfile::tempdir().expect("authority directory");
+        let parent = create_long_state_head_parent(authority_directory.path());
+        Self {
+            head: parent.join("state-head.json"),
+            _directory: authority_directory,
+            runtime_env,
+            _runtime_directory: None,
+            archive_directory: archive_directory.to_path_buf(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn runtime_broker_directory(&self) -> PathBuf {
+        self.runtime_env.join("contextdb-mcp")
     }
 
     fn configure(&self, command: &mut Command) {
@@ -52,7 +110,8 @@ impl TestAuthority {
         #[cfg(unix)]
         command
             .env("CONTEXTDB_STATE_HEAD_FILE", &self.head)
-            .env_remove("CONTEXTDB_STATE_HEAD_ID");
+            .env_remove("CONTEXTDB_STATE_HEAD_ID")
+            .env(XDG_RUNTIME_DIR_ENV, &self.runtime_env);
     }
 }
 
@@ -99,6 +158,73 @@ impl Drop for TestAuthority {
             }
         }
     }
+}
+
+#[cfg(unix)]
+fn create_long_state_head_parent(root: &Path) -> PathBuf {
+    let mut parent = root.to_path_buf();
+    for segment in [
+        "very-long-contextdb-state-head-parent-segment-000000000000000000000000",
+        "very-long-contextdb-state-head-parent-segment-111111111111111111111111",
+    ] {
+        parent = parent.join(segment);
+        std::fs::create_dir(&parent).expect("long state-head directory segment");
+        protect_owner_only_directory(&parent);
+    }
+    parent
+}
+
+#[cfg(unix)]
+fn protect_owner_only_directory(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .expect("protect owner-only test directory");
+}
+
+#[cfg(unix)]
+fn short_runtime_directory() -> tempfile::TempDir {
+    let shared_temporary_root =
+        std::fs::canonicalize("/tmp").expect("canonical shared temporary directory");
+    tempfile::Builder::new()
+        .prefix("cdb-runtime-")
+        .tempdir_in(shared_temporary_root)
+        .expect("short XDG runtime directory")
+}
+
+#[cfg(unix)]
+fn contextdb_archive_digest(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+
+    let canonical = std::fs::canonicalize(path).expect("canonical archive path");
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"contextdb/cli-canonical-path/v1\0");
+    hasher.update(canonical.as_os_str().as_bytes());
+    hasher.finalize().to_hex().to_string()
+}
+
+#[cfg(unix)]
+fn expected_runtime_socket(authority: &TestAuthority, archive: &Path) -> PathBuf {
+    let digest = contextdb_archive_digest(archive);
+    authority
+        .runtime_broker_directory()
+        .join(format!("{}.sock", &digest[..24]))
+}
+
+#[cfg(unix)]
+fn fallback_broker_directory() -> PathBuf {
+    std::fs::canonicalize("/tmp")
+        .expect("canonical shared temporary directory")
+        .join(format!(
+            "contextdb-mcp-{}",
+            rustix::process::geteuid().as_raw()
+        ))
+}
+
+#[cfg(unix)]
+fn expected_fallback_socket(archive: &Path) -> PathBuf {
+    let digest = contextdb_archive_digest(archive);
+    fallback_broker_directory().join(format!("{}.sock", &digest[..24]))
 }
 
 fn run(binary: &str, authority: &TestAuthority, arguments: &[&str]) -> Output {
@@ -482,11 +608,7 @@ fn unix_mcp_broker_socket_is_owner_only_and_removed_after_shutdown() {
     );
 
     let mut broker = start_mcp_broker(binary, &authority, &archive);
-    let broker_directory = authority
-        .head
-        .parent()
-        .expect("state-head parent")
-        .join("brokers");
+    let broker_directory = authority.runtime_broker_directory();
     let directory_metadata =
         std::fs::symlink_metadata(&broker_directory).expect("owner-only broker directory metadata");
     assert!(directory_metadata.is_dir());
@@ -501,7 +623,8 @@ fn unix_mcp_broker_socket_is_owner_only_and_removed_after_shutdown() {
         .map(|entry| entry.expect("broker directory entry").path())
         .collect::<Vec<_>>();
     assert_eq!(sockets.len(), 1);
-    let socket = sockets.into_iter().next().expect("broker socket");
+    let socket = expected_runtime_socket(&authority, &archive);
+    assert_eq!(sockets.into_iter().next().expect("broker socket"), socket);
     let metadata = std::fs::symlink_metadata(&socket).expect("broker socket metadata");
     assert!(metadata.file_type().is_socket());
     assert_eq!(metadata.mode() & 0o777, 0o600);
@@ -514,12 +637,100 @@ fn unix_mcp_broker_socket_is_owner_only_and_removed_after_shutdown() {
 
 #[cfg(unix)]
 #[test]
-fn unix_mcp_broker_rejects_symbolic_link_socket_directory() {
+fn unix_mcp_broker_uses_short_runtime_socket_with_long_state_head_path() {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::FileTypeExt;
+
+    let binary = env!("CARGO_BIN_EXE_contextdb");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let archive = directory.path().join("long-state-head-broker.ctxb");
+    let authority = TestAuthority::with_long_state_head_path(directory.path());
+    assert!(
+        authority.head.as_os_str().as_bytes().len() > 103,
+        "test fixture must exceed the Unix-domain socket limit used by the old authority-parent layout"
+    );
+    let initialized = run(
+        binary,
+        &authority,
+        &["--json", "init", archive.to_str().expect("archive path")],
+    );
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let mut broker = start_mcp_broker(binary, &authority, &archive);
+    let socket = expected_runtime_socket(&authority, &archive);
+    let metadata = std::fs::symlink_metadata(&socket).expect("runtime broker socket metadata");
+    assert!(metadata.file_type().is_socket());
+    assert!(
+        socket.as_os_str().as_bytes().len() <= 103,
+        "broker socket must stay inside the Unix-domain socket path limit"
+    );
+    assert!(
+        !authority
+            .head
+            .parent()
+            .expect("state-head parent")
+            .join("brokers")
+            .exists(),
+        "broker sockets must not be materialized beside the state-head authority"
+    );
+    stop_memory_mcp(binary, &authority, &archive);
+    broker.wait_for_exit();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_mcp_broker_falls_back_when_xdg_socket_path_is_too_long() {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::FileTypeExt;
+
+    let binary = env!("CARGO_BIN_EXE_contextdb");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let archive = directory.path().join("long-xdg-runtime-broker.ctxb");
+    let runtime_root = tempfile::tempdir().expect("long XDG runtime root");
+    protect_owner_only_directory(runtime_root.path());
+    let long_runtime = create_long_state_head_parent(runtime_root.path());
+    let authority = TestAuthority::with_long_state_head_and_xdg_runtime_dir(
+        directory.path(),
+        long_runtime.clone(),
+    );
+    let initialized = run(
+        binary,
+        &authority,
+        &["--json", "init", archive.to_str().expect("archive path")],
+    );
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let mut broker = start_mcp_broker(binary, &authority, &archive);
+    let socket = expected_fallback_socket(&archive);
+    let metadata = std::fs::symlink_metadata(&socket).expect("fallback broker socket metadata");
+    assert!(metadata.file_type().is_socket());
+    assert!(socket.as_os_str().as_bytes().len() <= 103);
+    assert!(
+        !long_runtime.join("contextdb-mcp").exists(),
+        "an overlong XDG runtime path must not receive a broker socket"
+    );
+    stop_memory_mcp(binary, &authority, &archive);
+    broker.wait_for_exit();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_mcp_broker_rejects_symbolic_link_runtime_broker_directory() {
     use std::os::unix::fs::symlink;
 
     let binary = env!("CARGO_BIN_EXE_contextdb");
     let directory = tempfile::tempdir().expect("temporary directory");
-    let archive = directory.path().join("symlink-broker.ctxb");
+    let archive = directory
+        .path()
+        .join("symlink-runtime-broker-directory.ctxb");
     let authority = TestAuthority::new(directory.path());
     let initialized = run(
         binary,
@@ -533,12 +744,11 @@ fn unix_mcp_broker_rejects_symbolic_link_socket_directory() {
     );
 
     let untrusted_directory = tempfile::tempdir().expect("untrusted broker directory");
-    let socket_directory = authority
-        .head
-        .parent()
-        .expect("state-head parent")
-        .join("brokers");
-    symlink(untrusted_directory.path(), &socket_directory).expect("broker directory symlink");
+    symlink(
+        untrusted_directory.path(),
+        authority.runtime_broker_directory(),
+    )
+    .expect("runtime broker directory symlink");
     let rejected = run(
         binary,
         &authority,
@@ -549,6 +759,187 @@ fn unix_mcp_broker_rejects_symbolic_link_socket_directory() {
         String::from_utf8_lossy(&rejected.stderr).contains("symbolic link"),
         "{}",
         String::from_utf8_lossy(&rejected.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_mcp_broker_ignores_symbolic_link_runtime_dir_and_uses_tmp_fallback() {
+    use std::os::unix::fs::{FileTypeExt, symlink};
+
+    let binary = env!("CARGO_BIN_EXE_contextdb");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let archive = directory.path().join("symlink-broker.ctxb");
+    let runtime_parent = tempfile::tempdir().expect("runtime symlink parent");
+    let runtime_target = tempfile::tempdir().expect("runtime symlink target");
+    protect_owner_only_directory(runtime_target.path());
+    let runtime_link = runtime_parent.path().join("xdg-runtime-link");
+    symlink(runtime_target.path(), &runtime_link).expect("XDG runtime directory symlink");
+    let authority = TestAuthority::with_xdg_runtime_dir(directory.path(), runtime_link);
+    let initialized = run(
+        binary,
+        &authority,
+        &["--json", "init", archive.to_str().expect("archive path")],
+    );
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let mut broker = start_mcp_broker(binary, &authority, &archive);
+    let socket = expected_fallback_socket(&archive);
+    let metadata = std::fs::symlink_metadata(&socket).expect("fallback broker socket metadata");
+    assert!(metadata.file_type().is_socket());
+    assert!(
+        !runtime_target.path().join("contextdb-mcp").exists(),
+        "a symlinked XDG_RUNTIME_DIR must not receive the broker socket"
+    );
+    stop_memory_mcp(binary, &authority, &archive);
+    broker.wait_for_exit();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_mcp_broker_ignores_group_writable_runtime_dir_and_uses_tmp_fallback() {
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+
+    let binary = env!("CARGO_BIN_EXE_contextdb");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let archive = directory.path().join("insecure-runtime-broker.ctxb");
+    let runtime_directory = tempfile::tempdir().expect("insecure XDG runtime directory");
+    std::fs::set_permissions(
+        runtime_directory.path(),
+        std::fs::Permissions::from_mode(0o722),
+    )
+    .expect("make XDG runtime directory group/world-writable");
+    let authority = TestAuthority::with_xdg_runtime_dir(
+        directory.path(),
+        runtime_directory.path().to_path_buf(),
+    );
+    let initialized = run(
+        binary,
+        &authority,
+        &["--json", "init", archive.to_str().expect("archive path")],
+    );
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let mut broker = start_mcp_broker(binary, &authority, &archive);
+    let socket = expected_fallback_socket(&archive);
+    let metadata = std::fs::symlink_metadata(&socket).expect("fallback broker socket metadata");
+    assert!(metadata.file_type().is_socket());
+    assert!(
+        !runtime_directory.path().join("contextdb-mcp").exists(),
+        "an insecure XDG_RUNTIME_DIR must not receive the broker socket"
+    );
+    stop_memory_mcp(binary, &authority, &archive);
+    broker.wait_for_exit();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_mcp_broker_concurrent_cold_autostarts_share_one_tmp_fallback_owner() {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+    use std::sync::{Arc, Barrier};
+
+    const SESSIONS: usize = 8;
+
+    let binary = env!("CARGO_BIN_EXE_contextdb");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let archive = directory.path().join("fallback-cold-autostart.ctxb");
+    let runtime_directory = tempfile::tempdir().expect("insecure XDG runtime directory");
+    std::fs::set_permissions(
+        runtime_directory.path(),
+        std::fs::Permissions::from_mode(0o722),
+    )
+    .expect("make XDG runtime directory group/world-writable");
+    let authority = TestAuthority::with_xdg_runtime_dir(
+        directory.path(),
+        runtime_directory.path().to_path_buf(),
+    );
+    let initialized = run(
+        binary,
+        &authority,
+        &["--json", "init", archive.to_str().expect("archive path")],
+    );
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let gate = Arc::new(Barrier::new(SESSIONS));
+    let threads = std::thread::scope(|scope| {
+        (0..SESSIONS)
+            .map(|index| {
+                let gate = gate.clone();
+                let authority = &authority;
+                let archive = &archive;
+                scope.spawn(move || {
+                    gate.wait();
+                    let child = spawn_memory_mcp(binary, authority, archive);
+                    let request = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": index,
+                        "method": "tools/list",
+                        "params": {"_meta": mcp_meta()}
+                    });
+                    decoded_mcp_output(&send_one_mcp_request(child, &request))
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|thread| thread.join().expect("concurrent fallback MCP session"))
+            .collect::<Vec<_>>()
+    });
+    for response in threads {
+        assert!(response["error"].is_null(), "{response:#}");
+        assert_eq!(
+            response["result"]["tools"]
+                .as_array()
+                .expect("MCP tool inventory")
+                .len(),
+            16
+        );
+    }
+
+    let broker_directory = fallback_broker_directory();
+    let directory_metadata =
+        std::fs::symlink_metadata(&broker_directory).expect("fallback broker directory metadata");
+    assert!(directory_metadata.is_dir());
+    assert_eq!(directory_metadata.mode() & 0o777, 0o700);
+    assert_eq!(
+        directory_metadata.uid(),
+        rustix::process::geteuid().as_raw()
+    );
+    let socket = expected_fallback_socket(&archive);
+    let sockets = std::fs::read_dir(&broker_directory)
+        .expect("fallback broker directory")
+        .map(|entry| entry.expect("fallback broker directory entry").path())
+        .filter(|path| path == &socket)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sockets.len(),
+        1,
+        "simultaneous fallback autostarts must converge on exactly one socket owner"
+    );
+    let metadata = std::fs::symlink_metadata(&socket).expect("fallback broker socket metadata");
+    assert!(metadata.file_type().is_socket());
+    assert_eq!(metadata.mode() & 0o777, 0o600);
+    assert_eq!(metadata.uid(), rustix::process::geteuid().as_raw());
+    assert!(
+        !runtime_directory.path().join("contextdb-mcp").exists(),
+        "an insecure XDG_RUNTIME_DIR must not receive the broker socket"
+    );
+
+    stop_memory_mcp(binary, &authority, &archive);
+    assert!(
+        !socket.exists(),
+        "fallback broker shutdown must unlink its socket"
     );
 }
 
@@ -609,11 +1000,7 @@ fn unix_mcp_broker_concurrent_autostarts_share_one_authenticated_owner() {
         );
     }
 
-    let broker_directory = authority
-        .head
-        .parent()
-        .expect("state-head parent")
-        .join("brokers");
+    let broker_directory = authority.runtime_broker_directory();
     assert_eq!(
         std::fs::read_dir(broker_directory)
             .expect("broker directory")

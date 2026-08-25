@@ -84,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-storage"
-version = "0.2.0-alpha.1"
+version = "0.2.0-alpha.2"
 dependencies = [
  "serde",
  "thiserror",
@@ -92,7 +92,7 @@ dependencies = [
 
 [[package]]
 name = "contextdb-storage-rocksdb-bench"
-version = "0.2.0-alpha.1"
+version = "0.2.0-alpha.2"
 dependencies = [
  "contextdb-storage",
  "rocksdb",

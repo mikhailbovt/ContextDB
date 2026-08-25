@@ -12,6 +12,8 @@ use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -852,7 +854,7 @@ fn endpoint_name(_archive_path: &Path, pipe_id: &str) -> CliResult<String> {
 #[cfg(unix)]
 fn endpoint_name(archive_path: &Path, pipe_id: &str) -> CliResult<String> {
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    use std::os::unix::fs::MetadataExt;
 
     let authority = std::env::var_os(state_head::STATE_HEAD_FILE_ENV).ok_or_else(|| {
         unavailable(
@@ -893,8 +895,113 @@ fn endpoint_name(archive_path: &Path, pipe_id: &str) -> CliResult<String> {
             false,
         ));
     }
-    let broker_directory = parent.join("brokers");
-    match fs::symlink_metadata(&broker_directory) {
+    let broker_directory = unix_broker_directory(pipe_id)?;
+    if archive_path.parent().is_some_and(|directory| {
+        broker_directory.starts_with(directory) || directory.starts_with(&broker_directory)
+    }) {
+        return Err(unavailable(
+            "Unix MCP broker runtime directory must remain outside the archive directory",
+            false,
+        ));
+    }
+    let socket = broker_directory.join(format!("{}.sock", &pipe_id[..24]));
+    if socket.as_os_str().as_bytes().len() > MAX_UNIX_SOCKET_PATH_BYTES {
+        return Err(unavailable(
+            "Unix MCP broker socket path exceeds the platform limit in the protected runtime directory",
+            false,
+        ));
+    }
+    socket
+        .into_os_string()
+        .into_string()
+        .map_err(|_| unavailable("Unix MCP broker socket path must be valid UTF-8", false))
+}
+
+#[cfg(unix)]
+fn unix_broker_directory(pipe_id: &str) -> CliResult<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let socket_name = format!("{}.sock", &pipe_id[..24]);
+    if let Some(runtime_root) = std::env::var_os("XDG_RUNTIME_DIR")
+        .as_deref()
+        .and_then(validated_owner_runtime_root)
+    {
+        let broker_directory = runtime_root.join("contextdb-mcp");
+        let socket = broker_directory.join(&socket_name);
+        if socket.as_os_str().as_bytes().len() <= MAX_UNIX_SOCKET_PATH_BYTES
+            && socket.to_str().is_some()
+        {
+            ensure_owner_only_directory(&broker_directory)?;
+            return Ok(broker_directory);
+        }
+    }
+
+    let temporary_root = validated_shared_temporary_root()?;
+    let broker_directory = temporary_root.join(format!(
+        "contextdb-mcp-{}",
+        rustix::process::geteuid().as_raw()
+    ));
+    let socket = broker_directory.join(socket_name);
+    if socket.as_os_str().as_bytes().len() > MAX_UNIX_SOCKET_PATH_BYTES || socket.to_str().is_none()
+    {
+        return Err(unavailable(
+            "Unix MCP broker cannot create a bounded UTF-8 socket path in the protected runtime directory",
+            false,
+        ));
+    }
+    ensure_owner_only_directory(&broker_directory)?;
+    Ok(broker_directory)
+}
+
+#[cfg(unix)]
+fn validated_owner_runtime_root(path: &std::ffi::OsStr) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return None;
+    }
+    let configured_metadata = fs::symlink_metadata(path).ok()?;
+    if configured_metadata.file_type().is_symlink() {
+        return None;
+    }
+    let canonical = fs::canonicalize(path).ok()?;
+    let metadata = fs::symlink_metadata(&canonical).ok()?;
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o077 != 0
+    {
+        return None;
+    }
+    Some(canonical)
+}
+
+#[cfg(unix)]
+fn validated_shared_temporary_root() -> CliResult<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let root = fs::canonicalize("/tmp").map_err(CliError::from)?;
+    let metadata = fs::symlink_metadata(&root).map_err(CliError::from)?;
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != 0
+        || metadata.mode() & 0o1000 == 0
+        || metadata.mode() & 0o002 == 0
+    {
+        return Err(unavailable(
+            "Unix MCP broker fallback requires a root-owned sticky shared temporary directory",
+            false,
+        ));
+    }
+    Ok(root)
+}
+
+#[cfg(unix)]
+fn ensure_owner_only_directory(path: &Path) -> CliResult<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+    match fs::symlink_metadata(path) {
         Ok(metadata) => {
             if !metadata.is_dir()
                 || metadata.file_type().is_symlink()
@@ -902,7 +1009,7 @@ fn endpoint_name(archive_path: &Path, pipe_id: &str) -> CliResult<String> {
                 || metadata.mode() & 0o077 != 0
             {
                 return Err(unavailable(
-                    "Unix MCP broker directory must be an owner-only directory, not a symbolic link",
+                    "Unix MCP broker directory must be owner-only and must not be a symbolic link",
                     false,
                 ));
             }
@@ -910,12 +1017,12 @@ fn endpoint_name(archive_path: &Path, pipe_id: &str) -> CliResult<String> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let mut builder = fs::DirBuilder::new();
             builder.mode(0o700);
-            match builder.create(&broker_directory) {
+            match builder.create(path) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(CliError::from(error)),
             }
-            let metadata = fs::symlink_metadata(&broker_directory).map_err(CliError::from)?;
+            let metadata = fs::symlink_metadata(path).map_err(CliError::from)?;
             if !metadata.is_dir()
                 || metadata.file_type().is_symlink()
                 || metadata.uid() != rustix::process::geteuid().as_raw()
@@ -929,17 +1036,7 @@ fn endpoint_name(archive_path: &Path, pipe_id: &str) -> CliResult<String> {
         }
         Err(error) => return Err(CliError::from(error)),
     }
-    let socket = broker_directory.join(format!("{}.sock", &pipe_id[..24]));
-    if socket.as_os_str().as_bytes().len() > MAX_UNIX_SOCKET_PATH_BYTES {
-        return Err(unavailable(
-            "Unix MCP broker socket path exceeds the platform limit; shorten the state-head directory",
-            false,
-        ));
-    }
-    socket
-        .into_os_string()
-        .into_string()
-        .map_err(|_| unavailable("Unix MCP broker socket path must be valid UTF-8", false))
+    Ok(())
 }
 
 #[cfg(unix)]

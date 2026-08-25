@@ -1,6 +1,6 @@
 {
   "name": "@contextdb/sdk",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "description": "Dependency-light HTTP SDK and agent middleware for ContextDB",
   "type": "module",
   "sideEffects": false,

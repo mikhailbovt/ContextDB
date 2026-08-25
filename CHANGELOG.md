@@ -7,6 +7,24 @@ the public API reaches v1.0.
 
 No changes yet.
 
+## [0.2.0-alpha.2] - 2026-08-25
+
+### Fixed
+
+- Unix MCP brokers now use a bounded owner-only per-user runtime directory instead of
+  placing their socket beside the durable state-head authority. A validated
+  `XDG_RUNTIME_DIR` is preferred; a root-owned sticky `/tmp` provides the protected
+  per-user fallback when it is absent, unsafe, or too long.
+- Normal Linux home directories, long XDG/custody paths, and macOS temporary paths no
+  longer exceed the platform AF_UNIX pathname limit.
+
+### Security
+
+- Runtime roots, broker directories, socket ownership, permissions, symbolic links,
+  sticky fallback custody, and archive/runtime separation are checked before use.
+- Regression coverage now includes long authority/runtime paths, insecure or symbolic
+  XDG roots, symbolic broker directories, concurrent autostart, and authenticated cleanup.
+
 ## [0.2.0-alpha.1] - 2026-08-25
 
 ### Added

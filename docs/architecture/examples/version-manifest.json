@@ -1,6 +1,6 @@
 {
   "schema_version": "contextdb.version-manifest/v1",
-  "product_version": "0.2.0-alpha.1",
+  "product_version": "0.2.0-alpha.2",
   "release_channel": "development",
   "source": {
     "git_commit": "0000000000000000000000000000000000000000",

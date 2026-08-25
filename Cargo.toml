@@ -39,7 +39,7 @@ members = [
 exclude = ["crates/contextdb-storage-rocksdb-bench"]
 
 [workspace.package]
-version = "0.2.0-alpha.1"
+version = "0.2.0-alpha.2"
 edition = "2024"
 rust-version = "1.97"
 authors = ["Mikhail Bovt and ContextDB contributors"]
@@ -53,36 +53,36 @@ axum = "0.8.9"
 blake3 = "1.8.6"
 chacha20poly1305 = { version = "0.11.0", features = ["zeroize"] }
 clap = { version = "4.6.6", features = ["derive"] }
-contextdb-bench = { version = "0.2.0-alpha.1", path = "crates/contextdb-bench" }
-contextdb-chat = { version = "0.2.0-alpha.1", path = "crates/contextdb-chat" }
-contextdb-cognition = { version = "0.2.0-alpha.1", path = "crates/contextdb-cognition" }
-contextdb-core = { version = "0.2.0-alpha.1", path = "crates/contextdb-core" }
-contextdb-context = { version = "0.2.0-alpha.1", path = "crates/contextdb-context" }
-contextdb-conformance = { version = "0.2.0-alpha.1", path = "crates/contextdb-conformance" }
-contextdb-continuity = { version = "0.2.0-alpha.1", path = "crates/contextdb-continuity" }
-contextdb-domain-code = { version = "0.2.0-alpha.1", path = "crates/contextdb-domain-code" }
-contextdb-format = { version = "0.2.0-alpha.1", path = "crates/contextdb-format" }
-contextdb-graph = { version = "0.2.0-alpha.1", path = "crates/contextdb-graph" }
-contextdb-hierarchy = { version = "0.2.0-alpha.1", path = "crates/contextdb-hierarchy" }
-contextdb-index = { version = "0.2.0-alpha.1", path = "crates/contextdb-index" }
-contextdb-journal = { version = "0.2.0-alpha.1", path = "crates/contextdb-journal" }
-contextdb-knowledge = { version = "0.2.0-alpha.1", path = "crates/contextdb-knowledge" }
-contextdb-mcp = { version = "0.2.0-alpha.1", path = "crates/contextdb-mcp" }
-contextdb-model = { version = "0.2.0-alpha.1", path = "crates/contextdb-model" }
-contextdb-native-service = { version = "0.2.0-alpha.1", path = "crates/contextdb-native-service" }
-contextdb-proto = { version = "0.2.0-alpha.1", path = "crates/contextdb-proto", default-features = false }
-contextdb-recall = { version = "0.2.0-alpha.1", path = "crates/contextdb-recall" }
-contextdb-reference = { version = "0.2.0-alpha.1", path = "crates/contextdb-reference" }
-contextdb-runtime = { version = "0.2.0-alpha.1", path = "crates/contextdb-runtime" }
-contextdb-security = { version = "0.2.0-alpha.1", path = "crates/contextdb-security" }
-contextdb-secure-store = { version = "0.2.0-alpha.1", path = "crates/contextdb-secure-store" }
-contextdb-server = { version = "0.2.0-alpha.1", path = "crates/contextdb-server", default-features = false }
-contextdb-service = { version = "0.2.0-alpha.1", path = "crates/contextdb-service" }
-contextdb-storage = { version = "0.2.0-alpha.1", path = "crates/contextdb-storage" }
-contextdb-storage-fault = { version = "0.2.0-alpha.1", path = "crates/contextdb-storage-fault" }
-contextdb-storage-fjall = { version = "0.2.0-alpha.1", path = "crates/contextdb-storage-fjall" }
-contextdb-storage-memory = { version = "0.2.0-alpha.1", path = "crates/contextdb-storage-memory" }
-contextdb-storage-redb = { version = "0.2.0-alpha.1", path = "crates/contextdb-storage-redb" }
+contextdb-bench = { version = "0.2.0-alpha.2", path = "crates/contextdb-bench" }
+contextdb-chat = { version = "0.2.0-alpha.2", path = "crates/contextdb-chat" }
+contextdb-cognition = { version = "0.2.0-alpha.2", path = "crates/contextdb-cognition" }
+contextdb-core = { version = "0.2.0-alpha.2", path = "crates/contextdb-core" }
+contextdb-context = { version = "0.2.0-alpha.2", path = "crates/contextdb-context" }
+contextdb-conformance = { version = "0.2.0-alpha.2", path = "crates/contextdb-conformance" }
+contextdb-continuity = { version = "0.2.0-alpha.2", path = "crates/contextdb-continuity" }
+contextdb-domain-code = { version = "0.2.0-alpha.2", path = "crates/contextdb-domain-code" }
+contextdb-format = { version = "0.2.0-alpha.2", path = "crates/contextdb-format" }
+contextdb-graph = { version = "0.2.0-alpha.2", path = "crates/contextdb-graph" }
+contextdb-hierarchy = { version = "0.2.0-alpha.2", path = "crates/contextdb-hierarchy" }
+contextdb-index = { version = "0.2.0-alpha.2", path = "crates/contextdb-index" }
+contextdb-journal = { version = "0.2.0-alpha.2", path = "crates/contextdb-journal" }
+contextdb-knowledge = { version = "0.2.0-alpha.2", path = "crates/contextdb-knowledge" }
+contextdb-mcp = { version = "0.2.0-alpha.2", path = "crates/contextdb-mcp" }
+contextdb-model = { version = "0.2.0-alpha.2", path = "crates/contextdb-model" }
+contextdb-native-service = { version = "0.2.0-alpha.2", path = "crates/contextdb-native-service" }
+contextdb-proto = { version = "0.2.0-alpha.2", path = "crates/contextdb-proto", default-features = false }
+contextdb-recall = { version = "0.2.0-alpha.2", path = "crates/contextdb-recall" }
+contextdb-reference = { version = "0.2.0-alpha.2", path = "crates/contextdb-reference" }
+contextdb-runtime = { version = "0.2.0-alpha.2", path = "crates/contextdb-runtime" }
+contextdb-security = { version = "0.2.0-alpha.2", path = "crates/contextdb-security" }
+contextdb-secure-store = { version = "0.2.0-alpha.2", path = "crates/contextdb-secure-store" }
+contextdb-server = { version = "0.2.0-alpha.2", path = "crates/contextdb-server", default-features = false }
+contextdb-service = { version = "0.2.0-alpha.2", path = "crates/contextdb-service" }
+contextdb-storage = { version = "0.2.0-alpha.2", path = "crates/contextdb-storage" }
+contextdb-storage-fault = { version = "0.2.0-alpha.2", path = "crates/contextdb-storage-fault" }
+contextdb-storage-fjall = { version = "0.2.0-alpha.2", path = "crates/contextdb-storage-fjall" }
+contextdb-storage-memory = { version = "0.2.0-alpha.2", path = "crates/contextdb-storage-memory" }
+contextdb-storage-redb = { version = "0.2.0-alpha.2", path = "crates/contextdb-storage-redb" }
 fjall = "3.1.8"
 getrandom = "0.4.3"
 ed25519-dalek = "3.0.0"

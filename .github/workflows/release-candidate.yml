@@ -16,7 +16,7 @@ on:
         description: Exact semantic version expected from the candidate binary
         required: true
         type: string
-        default: 0.2.0-alpha.1
+        default: 0.2.0-alpha.2
       source_date_epoch:
         description: Fixed UTC epoch used for deterministic candidate metadata
         required: true

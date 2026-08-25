@@ -52,10 +52,10 @@ class LocalMcpPreviewTests(unittest.TestCase):
 
     def test_wire_only_feature_tree_is_accepted(self) -> None:
         tree = """\
-contextdb-cli v0.2.0-alpha.1 [local-mcp,mcp]
-├── contextdb-mcp v0.2.0-alpha.1 []
+contextdb-cli v0.2.0-alpha.2 [local-mcp,mcp]
+├── contextdb-mcp v0.2.0-alpha.2 []
 └── contextdb-server feature "wire"
-    └── contextdb-server v0.2.0-alpha.1 [wire]
+    └── contextdb-server v0.2.0-alpha.2 [wire]
 """
         TOOL._validate_feature_tree(tree)
 
@@ -79,7 +79,7 @@ contextdb-cli v0.2.0-alpha.1 [local-mcp,mcp]
 
     def test_binary_surface_requires_mcp_and_rejects_listener_commands(self) -> None:
         version = """\
-contextdb 0.2.0-alpha.1
+contextdb 0.2.0-alpha.2
 build_profile local-mcp
 network_listeners disabled
 wire_schema 1
@@ -92,12 +92,12 @@ mcp_protocol 2026-07-28
             "Usage: contextdb <COMMAND>\n\n"
             "Commands:\n  version  Print\n  mcp      Run\n\nOptions:\n"
         )
-        TOOL._validate_binary_surface(help_text, version, "0.2.0-alpha.1")
+        TOOL._validate_binary_surface(help_text, version, "0.2.0-alpha.2")
         with self.assertRaises(TOOL.ContractError):
             TOOL._validate_binary_surface(
                 help_text.replace("  mcp      Run", "  mcp      Run\n  serve    Listen"),
                 version,
-                "0.2.0-alpha.1",
+                "0.2.0-alpha.2",
             )
 
     def test_zip_bytes_are_deterministic_for_identical_staging(self) -> None:
