@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "contextdb-sdk"
-version = "0.2.0a2"
+version = "0.2.0a3"
 description = "Typed Python HTTP SDK for ContextDB"
 readme = "README.md"
 requires-python = ">=3.11"

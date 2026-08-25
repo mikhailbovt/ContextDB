@@ -77,6 +77,14 @@ jobs:
             --output-dir "dist/${PLATFORM}" \
             --target-dir "target/local-mcp-release/${PLATFORM}/cargo"
 
+      - name: Enforce the Ubuntu 22.04 GLIBC compatibility ceiling
+        if: matrix.platform == 'linux-x86_64'
+        shell: bash
+        run: |
+          python tools/local-mcp-preview/local_mcp_preview.py \
+            --platform linux-x86_64 verify-linux-abi \
+            --binary "target/local-mcp-release/${PLATFORM}/cargo/release/contextdb"
+
       - name: Verify package custody and materialize exact standalone assets
         shell: bash
         run: |

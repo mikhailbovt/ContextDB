@@ -637,6 +637,54 @@ fn unix_mcp_broker_socket_is_owner_only_and_removed_after_shutdown() {
 
 #[cfg(unix)]
 #[test]
+fn unix_mcp_broker_stop_reclaims_owned_stale_socket_after_abrupt_death() {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+    let binary = env!("CARGO_BIN_EXE_contextdb");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let archive = directory.path().join("stale-broker.ctxb");
+    let authority = TestAuthority::new(directory.path());
+    let initialized = run(
+        binary,
+        &authority,
+        &["--json", "init", archive.to_str().expect("archive path")],
+    );
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let mut broker = start_mcp_broker(binary, &authority, &archive);
+    let socket = expected_runtime_socket(&authority, &archive);
+    let original = std::fs::symlink_metadata(&socket).expect("live broker socket metadata");
+    assert!(original.file_type().is_socket());
+    assert_eq!(original.uid(), rustix::process::geteuid().as_raw());
+    assert_eq!(original.mode() & 0o777, 0o600);
+
+    broker.0.kill().expect("abruptly terminate MCP broker");
+    let status = broker
+        .0
+        .wait()
+        .expect("wait for abruptly terminated broker");
+    assert!(
+        !status.success(),
+        "abrupt broker termination must be observable"
+    );
+    let stale = std::fs::symlink_metadata(&socket).expect("stale broker socket metadata");
+    assert!(stale.file_type().is_socket());
+    assert_eq!(stale.dev(), original.dev());
+    assert_eq!(stale.ino(), original.ino());
+
+    stop_memory_mcp(binary, &authority, &archive);
+    assert!(
+        !socket.exists(),
+        "authenticated broker stop must remove the exact owned stale socket"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn unix_mcp_broker_uses_short_runtime_socket_with_long_state_head_path() {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::FileTypeExt;

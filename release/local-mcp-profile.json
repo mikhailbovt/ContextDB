@@ -3,7 +3,7 @@
   "profile_id": "contextdb-local-mcp-windows-x86_64",
   "profile_revision": 1,
   "release_class": "developer-preview",
-  "core_version": "0.2.0-alpha.2",
+  "core_version": "0.2.0-alpha.3",
   "formal_release": {
     "m18_alpha": false,
     "release_ready": false,

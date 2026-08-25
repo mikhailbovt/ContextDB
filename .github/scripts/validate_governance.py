@@ -1720,9 +1720,11 @@ def validate_workflows() -> None:
     workflows = sorted([*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")])
     assert workflows, "No GitHub workflows found"
     combined = ""
+    documents: dict[str, dict] = {}
     for path in workflows:
         document = load_yaml(path)
         assert isinstance(document, dict), f"Workflow {path.name} must be a mapping"
+        documents[path.name] = document
         raw = load_text(path, label="workflow")
         assert "permissions:" in raw, f"Workflow {path.name} lacks explicit permissions"
         combined += "\n" + raw
@@ -1741,6 +1743,66 @@ def validate_workflows() -> None:
     )
     for token in required_tokens:
         assert token in combined, f"CI workflows missing required token: {token}"
+
+    release = documents.get("release-local-mcp-preview.yml")
+    assert isinstance(release, dict), "Local MCP release workflow is missing"
+    release_jobs = release.get("jobs")
+    assert isinstance(release_jobs, dict), "Local MCP release workflow lacks jobs"
+    build_job = release_jobs.get("build-platform")
+    assert isinstance(build_job, dict), "Local MCP release workflow lacks build-platform"
+    strategy = build_job.get("strategy")
+    assert isinstance(strategy, dict), "Local MCP build lacks a strategy"
+    matrix = strategy.get("matrix")
+    assert isinstance(matrix, dict), "Local MCP build lacks a matrix"
+    release_entries = matrix.get("include")
+    assert isinstance(release_entries, list), "Local MCP build matrix lacks include entries"
+    linux_release_entries = [
+        entry
+        for entry in release_entries
+        if isinstance(entry, dict) and entry.get("platform") == "linux-x86_64"
+    ]
+    assert len(linux_release_entries) == 1, (
+        "Local MCP release must have exactly one Linux x86_64 build"
+    )
+    assert linux_release_entries[0].get("runner") == "ubuntu-22.04", (
+        "Linux local-MCP release must build on the Ubuntu 22.04 compatibility floor"
+    )
+    steps = build_job.get("steps")
+    assert isinstance(steps, list), "Local MCP build lacks steps"
+    abi_steps = [
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and isinstance(step.get("run"), str)
+        and "verify-linux-abi" in step["run"]
+    ]
+    assert len(abi_steps) == 1, "Linux local-MCP release lacks an explicit GLIBC ABI gate"
+    assert abi_steps[0].get("if") == "matrix.platform == 'linux-x86_64'", (
+        "GLIBC ABI gate must run only for the Linux x86_64 release target"
+    )
+
+    ci = documents.get("ci.yml")
+    assert isinstance(ci, dict), "CI workflow is missing"
+    ci_jobs = ci.get("jobs")
+    assert isinstance(ci_jobs, dict), "CI workflow lacks jobs"
+    rust_job = ci_jobs.get("rust")
+    assert isinstance(rust_job, dict), "CI workflow lacks the Rust job"
+    rust_strategy = rust_job.get("strategy")
+    assert isinstance(rust_strategy, dict), "Rust CI job lacks a strategy"
+    rust_matrix = rust_strategy.get("matrix")
+    assert isinstance(rust_matrix, dict), "Rust CI job lacks a matrix"
+    rust_entries = rust_matrix.get("include")
+    assert isinstance(rust_entries, list), "Rust CI matrix lacks include entries"
+    linux_ci_entries = [
+        entry
+        for entry in rust_entries
+        if isinstance(entry, dict)
+        and entry.get("target") == "x86_64-unknown-linux-gnu"
+    ]
+    assert len(linux_ci_entries) == 1, "Rust CI must have one Linux x86_64 target"
+    assert linux_ci_entries[0].get("os") == "ubuntu-22.04", (
+        "Rust CI must continuously exercise the Ubuntu 22.04 Linux compatibility floor"
+    )
 
 
 def main() -> None:

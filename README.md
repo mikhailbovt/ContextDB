@@ -4,7 +4,7 @@
   <br />
 
   [![CI](https://github.com/mikhailbovt/ContextDB/actions/workflows/ci.yml/badge.svg)](https://github.com/mikhailbovt/ContextDB/actions/workflows/ci.yml)
-  [![Release](https://img.shields.io/badge/release-0.2.0--alpha.2-8b79ff?style=flat-square)](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.2.0-alpha.2)
+  [![Release](https://img.shields.io/badge/release-0.2.0--alpha.3-8b79ff?style=flat-square)](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.2.0-alpha.3)
   [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows-23bca8?style=flat-square)](docs/release/local-mcp-developer-preview.md)
   [![Rust 1.97+](https://img.shields.io/badge/Rust-1.97%2B-45d9e8?style=flat-square&logo=rust&logoColor=white)](rust-toolchain.toml)
   [![License](https://img.shields.io/badge/license-Apache--2.0-4f81ff?style=flat-square)](LICENSE)
@@ -13,11 +13,11 @@
   **Durable, explainable memory for AI systems.**<br />
   Immutable experience. Versioned meaning. Policy-first recall.
 
-  [Download preview](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.2.0-alpha.2) · [Get started](#try-the-alpha) · [Architecture](#from-observation-to-context) · [Docs](#documentation) · [Use it with Codex](#give-codex-a-memory)
+  [Download preview](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.2.0-alpha.3) · [Get started](#try-the-alpha) · [Architecture](#from-observation-to-context) · [Docs](#documentation) · [Use it with Codex](#give-codex-a-memory)
 </div>
 
 > [!IMPORTANT]
-> **Current release: `0.2.0-alpha.2`.** Native listener-free local-MCP developer previews are
+> **Current release: `0.2.0-alpha.3`.** Native listener-free local-MCP developer previews are
 > available for **Linux x86-64 and Windows x86-64**, each with its own authenticated local
 > broker, independently resolved dependency graph, CycloneDX SBOM, and verified package.
 > Signed installers, Linux arm64, macOS, and stable production operation are not claimed.
@@ -116,7 +116,7 @@ Read the full [architecture overview](docs/architecture/v1-overview.md) or the
 
 ## Try the alpha
 
-The [versioned GitHub prerelease](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.2.0-alpha.2)
+The [versioned GitHub prerelease](https://github.com/mikhailbovt/ContextDB/releases/tag/v0.2.0-alpha.3)
 contains independently verified listener-free packages for **Linux x86-64** and **Windows x86-64**.
 Each target includes a native standalone executable, SHA-256 sidecars, target-specific dependency
 notices, a CycloneDX SBOM, and an exact package receipt. For a one-command installation with automatic
@@ -125,8 +125,8 @@ the standalone core package is the lower-level integration surface.
 
 | Platform | Standalone executable | Verified package |
 | --- | --- | --- |
-| Linux x86-64 | `contextdb-linux-x86_64` | `contextdb-local-mcp-0.2.0-alpha.2-linux-x86_64.zip` |
-| Windows x86-64 | `contextdb-windows-x86_64.exe` | `contextdb-local-mcp-0.2.0-alpha.2-windows-x86_64.zip` |
+| Linux x86-64 | `contextdb-linux-x86_64` | `contextdb-local-mcp-0.2.0-alpha.3-linux-x86_64.zip` |
+| Windows x86-64 | `contextdb-windows-x86_64.exe` | `contextdb-local-mcp-0.2.0-alpha.3-windows-x86_64.zip` |
 
 Both packages are unsigned developer previews: verify the matching `.sha256` sidecar before use.
 

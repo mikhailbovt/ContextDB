@@ -40,6 +40,7 @@ EXPECTED_FEATURES = ["local-mcp"]
 EXPECTED_PACKAGE = "contextdb-cli"
 EXPECTED_BINARY = "contextdb"
 SUPPORTED_ARCHITECTURES = {"amd64", "x86_64"}
+LINUX_GLIBC_BASELINE = (2, 35)
 PLATFORMS: dict[str, dict[str, Any]] = {
     "windows-x86_64": {
         "operating_system": "windows",
@@ -412,19 +413,103 @@ def _validate_binary_surface(help_text: str, version_text: str, core_version: st
         _fail("packaged binary reports a mixed network-enabled feature set")
 
 
-def inspect_binary(binary: Path, root: Path, version: str) -> dict[str, Any]:
+def _version_tuple_text(version: tuple[int, ...]) -> str:
+    return ".".join(str(component) for component in version)
+
+
+def _validate_linux_glibc_version_info(version_info: str) -> dict[str, Any]:
+    versions = {
+        tuple(int(component) for component in match.split("."))
+        for match in re.findall(r"\bGLIBC_(\d+(?:\.\d+)+)\b", version_info)
+    }
+    if not versions:
+        _fail("Linux ELF has no readable versioned GLIBC imports")
+
+    maximum_required = max(versions)
+    comparison_width = max(len(maximum_required), len(LINUX_GLIBC_BASELINE))
+    required_key = maximum_required + (0,) * (comparison_width - len(maximum_required))
+    baseline_key = LINUX_GLIBC_BASELINE + (0,) * (
+        comparison_width - len(LINUX_GLIBC_BASELINE)
+    )
+    if required_key > baseline_key:
+        _fail(
+            "Linux ELF requires "
+            f"GLIBC_{_version_tuple_text(maximum_required)}; the Ubuntu 22.04 "
+            f"compatibility ceiling is GLIBC_{_version_tuple_text(LINUX_GLIBC_BASELINE)}"
+        )
+    return {
+        "libc": "glibc",
+        "support_baseline": "Ubuntu 22.04 LTS",
+        "maximum_allowed_symbol_version": _version_tuple_text(LINUX_GLIBC_BASELINE),
+        "maximum_required_symbol_version": _version_tuple_text(maximum_required),
+        "required_symbol_versions": [
+            _version_tuple_text(value) for value in sorted(versions)
+        ],
+    }
+
+
+def _validate_linux_abi_receipt(value: Any) -> dict[str, Any]:
+    receipt = _require_object(value, "receipt.binary.linux_abi")
+    versions = _require_string_list(
+        receipt.get("required_symbol_versions"),
+        "receipt.binary.linux_abi.required_symbol_versions",
+    )
+    if any(re.fullmatch(r"\d+(?:\.\d+)+", version) is None for version in versions):
+        _fail("Linux ABI receipt contains a malformed GLIBC symbol version")
+    expected = _validate_linux_glibc_version_info(
+        " ".join(f"GLIBC_{version}" for version in versions)
+    )
+    if receipt != expected:
+        _fail("Linux ABI receipt does not canonically bind the GLIBC compatibility floor")
+    return expected
+
+
+def verify_linux_abi(binary: Path, root: Path, readelf: str = "readelf") -> dict[str, Any]:
+    """Reject Linux ELFs that cannot run on the advertised Ubuntu 22.04 floor."""
+
+    if not binary.is_file():
+        _fail(f"built Linux binary is missing: {binary}")
+    try:
+        version_info = _run(
+            [readelf, "--version-info", "--wide", str(binary)], root
+        ).stdout
+    except OSError as error:
+        _fail(f"cannot execute readelf for Linux ABI verification: {error}")
+    result = _validate_linux_glibc_version_info(version_info)
+    return {
+        "status": "passed",
+        "binary": str(binary),
+        **result,
+    }
+
+
+def inspect_binary(
+    binary: Path,
+    root: Path,
+    version: str,
+    platform_name: str | None = None,
+) -> dict[str, Any]:
     if not binary.is_file():
         _fail(f"built binary is missing: {binary}")
+    selected, _ = _platform_configuration(platform_name)
     help_text = _run([str(binary), "--help"], root).stdout
     version_text = _run([str(binary), "version"], root).stdout
     _validate_binary_surface(help_text, version_text, version)
-    return {
+    result = {
         "path": str(binary),
         "sha256": _sha256_file(binary),
         "size_bytes": binary.stat().st_size,
         "commands": sorted(_command_names(help_text)),
         "version_output": version_text.replace("\r\n", "\n").splitlines(),
     }
+    if selected == "linux-x86_64":
+        linux_abi = verify_linux_abi(binary, root)
+        result["linux_abi"] = {
+            key: value
+            for key, value in linux_abi.items()
+            if key not in {"status", "binary"}
+        }
+    return result
 
 
 def _sha256_file(path: Path) -> str:
@@ -741,6 +826,10 @@ def verify_archive(archive: Path, hash_sidecar: Path | None = None) -> dict[str,
     binary = _require_object(receipt.get("binary"), "receipt.binary")
     if binary.get("path") != configuration["binary_name"]:
         _fail("package receipt binary path differs from its target platform")
+    if configuration["operating_system"] == "linux":
+        _validate_linux_abi_receipt(binary.get("linux_abi"))
+    elif "linux_abi" in binary:
+        _fail("non-Linux package receipt must not contain Linux ABI evidence")
     if binary.get("sha256") != hashlib.sha256(binary_payload).hexdigest():
         _fail("package receipt does not bind the binary digest")
     if binary.get("size_bytes") != len(binary_payload):
@@ -837,7 +926,7 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
     ]
     _run(build_command, root)
     binary = target_dir / "release" / configuration["binary_name"]
-    binary_receipt = inspect_binary(binary, root, version)
+    binary_receipt = inspect_binary(binary, root, version, selected)
 
     output_dir = (args.output_dir or root / "target/local-mcp-preview/packages").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -895,6 +984,11 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
                 "size_bytes": binary_receipt["size_bytes"],
                 "commands": binary_receipt["commands"],
                 "version_output": binary_receipt["version_output"],
+                **(
+                    {"linux_abi": binary_receipt["linux_abi"]}
+                    if selected == "linux-x86_64"
+                    else {}
+                ),
             },
             "supply_chain": {
                 "manifest_path": SUPPLY_CHAIN_MANIFEST_PATH.as_posix(),
@@ -944,7 +1038,7 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
         except OSError as error:
             _fail(f"cannot publish package output without overwrite: {error}")
 
-    return {
+    result = {
         "status": "passed",
         "profile_id": profile["profile_id"],
         "target": configuration["target"],
@@ -960,6 +1054,9 @@ def _package(root: Path, profile: dict[str, Any], args: argparse.Namespace) -> d
             "third_party_component_count"
         ],
     }
+    if selected == "linux-x86_64":
+        result["linux_abi"] = binary_receipt["linux_abi"]
+    return result
 
 
 def _repo_root(value: Path | None) -> Path:
@@ -993,6 +1090,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     verify_package.add_argument("archive", type=Path, help="local MCP preview ZIP")
     verify_package.add_argument("--hash-sidecar", type=Path, help="archive SHA-256 sidecar")
+    verify_linux = subparsers.add_parser(
+        "verify-linux-abi",
+        help="enforce the Ubuntu 22.04 / GLIBC 2.35 ELF compatibility ceiling",
+    )
+    verify_linux.add_argument("--binary", required=True, type=Path, help="native Linux ELF")
+    verify_linux.add_argument("--readelf", default="readelf", help="readelf executable")
     return parser
 
 
@@ -1003,6 +1106,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         root = _repo_root(args.repo_root)
         if args.command == "verify-package":
             result = verify_archive(args.archive.resolve(), args.hash_sidecar)
+        elif args.command == "verify-linux-abi":
+            selected, _ = _platform_configuration(args.platform)
+            if selected != "linux-x86_64":
+                _fail("Linux ABI verification requires --platform linux-x86_64")
+            result = verify_linux_abi(args.binary.resolve(), root, args.readelf)
         else:
             profile = validate_profile(root, args.platform)
         if args.command == "verify":

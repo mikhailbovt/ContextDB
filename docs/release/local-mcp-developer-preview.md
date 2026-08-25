@@ -10,19 +10,24 @@ native executable, authenticated single-owner broker, and integrity receipt.
 | Boundary | Linux x86_64 | Windows x86_64 |
 | --- | --- | --- |
 | Rust target | `x86_64-unknown-linux-gnu` | `x86_64-pc-windows-msvc` |
+| Runtime baseline | Ubuntu 22.04 LTS / glibc 2.35 or newer | Windows x86_64 developer preview |
 | Profile | `contextdb-local-mcp-linux-x86_64` | `contextdb-local-mcp-windows-x86_64` |
 | Native executable | `contextdb` | `contextdb.exe` |
 | Shared MCP transport | Standard input/output | Standard input/output |
 | Authenticated broker | Owner-only Unix-domain socket | Local Windows named pipe |
 | Token-key authority | External owner-only `CONTEXTDB_TOKEN_KEY_FILE` | Existing Windows external custody |
 | State-head authority | External owner-only `CONTEXTDB_STATE_HEAD_FILE` | Existing Windows external custody |
-| Package identity | `contextdb-local-mcp-0.2.0-alpha.2-linux-x86_64.zip` | `contextdb-local-mcp-0.2.0-alpha.2-windows-x86_64.zip` |
+| Package identity | `contextdb-local-mcp-0.2.0-alpha.3-linux-x86_64.zip` | `contextdb-local-mcp-0.2.0-alpha.3-windows-x86_64.zip` |
 | Listener commands | `serve` and `probe` absent | `serve` and `probe` absent |
 
 Both targets expose standard MCP `2025-03-26`, `2025-06-18`, and `2025-11-25`, plus the
-stateless `2026-07-28` adapter. Both require exact core version `0.2.0-alpha.2` and an exact
+stateless `2026-07-28` adapter. Both require exact core version `0.2.0-alpha.3` and an exact
 binary SHA-256. A SemVer-compatible range, file name, or source build is not a substitute for
 target-specific package verification.
+
+The Linux tag build runs natively on Ubuntu 22.04 and rejects any ELF importing a GLIBC symbol
+newer than 2.35 before publication. This is the tested GNU/Linux compatibility floor, not a
+generic claim for musl-based systems or every Linux distribution.
 
 The machine-readable Windows contract is
 [`release/local-mcp-profile.json`](../../release/local-mcp-profile.json); the Linux contract is
@@ -52,7 +57,7 @@ python tools/local-mcp-preview/local_mcp_preview.py --platform windows-x86_64 ve
 ```console
 python tools/local-mcp-preview/local_mcp_preview.py package --output-dir dist
 python tools/local-mcp-preview/local_mcp_preview.py verify-package \
-  dist/contextdb-local-mcp-0.2.0-alpha.2-linux-x86_64.zip
+  dist/contextdb-local-mcp-0.2.0-alpha.3-linux-x86_64.zip
 ```
 
 Replace the Linux archive name with the Windows archive when running on Windows. Packaging

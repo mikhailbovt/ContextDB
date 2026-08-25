@@ -7,6 +7,28 @@ the public API reaches v1.0.
 
 No changes yet.
 
+## [0.2.0-alpha.3] - 2026-08-26
+
+### Fixed
+
+- `mcp-broker-stop` now securely reclaims an owner-only stale Unix-domain
+  socket left behind when the broker is terminated before its cleanup guard can
+  run. Cleanup rechecks socket type, owner, mode, link count, device, inode, and
+  live connectivity before unlinking the exact endpoint.
+- Linux maintenance operations no longer wait for the broker startup timeout
+  after an abrupt broker death; they still prove that the durable state-head
+  authority is quiescent before continuing.
+
+### Security
+
+- Regression coverage now SIGKILLs a real Unix broker, proves the stale inode
+  survives the crash, and requires authenticated stop to reclaim it without
+  weakening live, foreign, symbolic, insecure, hard-linked, or raced endpoint
+  handling.
+- Linux release packaging now inspects the native ELF version requirements and
+  rejects imports newer than `GLIBC_2.35`, continuously preserving the declared
+  Ubuntu 22.04 LTS compatibility floor.
+
 ## [0.2.0-alpha.2] - 2026-08-25
 
 ### Fixed

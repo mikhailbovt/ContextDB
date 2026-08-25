@@ -232,6 +232,20 @@ pub(crate) fn stop_broker(path: &Path) -> CliResult<()> {
     let client = match runtime.block_on(open_client(&pipe_name)) {
         Ok(client) => client,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        #[cfg(unix)]
+        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
+            if remove_owned_stale_socket(&pipe_name).map_err(CliError::from)? {
+                // A crashed owner can leave the filesystem endpoint behind.
+                // Removing that exact stale inode is not sufficient evidence
+                // for maintenance: also prove that no process still owns the
+                // durable state-head authority.
+                drop(crate::StateHeadStore::open(&canonical_path).map_err(|_| {
+                    unavailable("MCP broker did not quiesce its durable authorities", true)
+                })?);
+                return Ok(());
+            }
+            runtime.block_on(wait_for_broker(&pipe_name))?
+        }
         Err(_) => runtime.block_on(wait_for_broker(&pipe_name))?,
     };
     let key = read_external_key(&canonical_path)?;
@@ -749,6 +763,56 @@ async fn open_client(socket_name: &str) -> io::Result<BrokerClient> {
         ));
     }
     UnixStream::connect(socket_name).await
+}
+
+#[cfg(unix)]
+fn remove_owned_stale_socket(socket_name: &str) -> io::Result<bool> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+    let original = match fs::symlink_metadata(socket_name) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error),
+    };
+    if !original.file_type().is_socket()
+        || original.uid() != rustix::process::geteuid().as_raw()
+        || original.mode() & 0o077 != 0
+        || original.nlink() != 1
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "stale MCP broker endpoint must be an owner-only, singly linked Unix socket",
+        ));
+    }
+    let device = original.dev();
+    let inode = original.ino();
+
+    match std::os::unix::net::UnixStream::connect(socket_name) {
+        Ok(_) => return Ok(false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {}
+        Err(error) => return Err(error),
+    }
+
+    let current = match fs::symlink_metadata(socket_name) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error),
+    };
+    if !current.file_type().is_socket()
+        || current.uid() != rustix::process::geteuid().as_raw()
+        || current.mode() & 0o077 != 0
+        || current.nlink() != 1
+        || current.dev() != device
+        || current.ino() != inode
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "stale MCP broker endpoint changed identity during guarded cleanup",
+        ));
+    }
+    fs::remove_file(socket_name)?;
+    Ok(true)
 }
 
 async fn wait_for_broker(pipe_name: &str) -> CliResult<BrokerClient> {

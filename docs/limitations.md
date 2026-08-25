@@ -26,6 +26,8 @@ and release verifier—not the presence of an API name—determine completion.
   certification shape; E01/E02/E03 remain open.
 - Native Linux x86_64 and Windows x86_64 local-MCP developer previews have distinct
   target-bound packages; this does not imply signed production release certification.
+- The Linux x86_64 preview is tested from Ubuntu 22.04 LTS / glibc 2.35 upward; its GNU-target
+  compatibility claim does not cover musl-based distributions.
 - Linux arm64 and macOS arm64 package installation remain unproven and unsupported.
 - Docker files have static checks only; no Docker build/run is claimed without
   explicit authorization.

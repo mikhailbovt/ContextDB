@@ -66,7 +66,7 @@ def prepare(root: Path, platform_name: str, dist: Path, target_dir: Path) -> dic
         raise ReleaseAssetError("refusing to publish a package produced from a dirty checkout")
 
     built = target_dir / "release" / configuration["binary_name"]
-    binary = preview.inspect_binary(built, root, version)
+    binary = preview.inspect_binary(built, root, version, platform_name)
     shutil.copy2(built, standalone)
     if configuration["operating_system"] == "linux":
         standalone.chmod(standalone.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -138,6 +138,8 @@ def write_notes(root: Path, destination: Path, source_commit: str) -> dict[str, 
         "",
         "- `contextdb-linux-x86_64` — standalone native ELF executable.",
         "- `contextdb-linux-x86_64.sha256` — exact executable SHA-256.",
+        "- Compatibility baseline: Ubuntu 22.04 LTS / glibc 2.35 or newer; the "
+        "release gate rejects ELFs importing newer GLIBC symbol versions.",
         f"- `contextdb-local-mcp-{version}-linux-x86_64.zip` — verified Linux package "
         "with its Linux-target graph, notices, CycloneDX SBOM, profile, and receipt.",
         f"- `contextdb-local-mcp-{version}-linux-x86_64.zip.sha256` — package SHA-256.",

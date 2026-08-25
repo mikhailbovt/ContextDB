@@ -52,10 +52,10 @@ class LocalMcpPreviewTests(unittest.TestCase):
 
     def test_wire_only_feature_tree_is_accepted(self) -> None:
         tree = """\
-contextdb-cli v0.2.0-alpha.2 [local-mcp,mcp]
-├── contextdb-mcp v0.2.0-alpha.2 []
+contextdb-cli v0.2.0-alpha.3 [local-mcp,mcp]
+├── contextdb-mcp v0.2.0-alpha.3 []
 └── contextdb-server feature "wire"
-    └── contextdb-server v0.2.0-alpha.2 [wire]
+    └── contextdb-server v0.2.0-alpha.3 [wire]
 """
         TOOL._validate_feature_tree(tree)
 
@@ -79,7 +79,7 @@ contextdb-cli v0.2.0-alpha.2 [local-mcp,mcp]
 
     def test_binary_surface_requires_mcp_and_rejects_listener_commands(self) -> None:
         version = """\
-contextdb 0.2.0-alpha.2
+contextdb 0.2.0-alpha.3
 build_profile local-mcp
 network_listeners disabled
 wire_schema 1
@@ -92,13 +92,34 @@ mcp_protocol 2026-07-28
             "Usage: contextdb <COMMAND>\n\n"
             "Commands:\n  version  Print\n  mcp      Run\n\nOptions:\n"
         )
-        TOOL._validate_binary_surface(help_text, version, "0.2.0-alpha.2")
+        TOOL._validate_binary_surface(help_text, version, "0.2.0-alpha.3")
         with self.assertRaises(TOOL.ContractError):
             TOOL._validate_binary_surface(
                 help_text.replace("  mcp      Run", "  mcp      Run\n  serve    Listen"),
                 version,
-                "0.2.0-alpha.2",
+                "0.2.0-alpha.3",
             )
+
+    def test_linux_glibc_floor_accepts_ubuntu_22_compatible_symbols(self) -> None:
+        result = TOOL._validate_linux_glibc_version_info(
+            "Version needs section: GLIBC_2.2.5 GLIBC_2.17 GLIBC_2.34 GLIBC_2.35"
+        )
+        self.assertEqual(result["support_baseline"], "Ubuntu 22.04 LTS")
+        self.assertEqual(result["maximum_allowed_symbol_version"], "2.35")
+        self.assertEqual(result["maximum_required_symbol_version"], "2.35")
+
+    def test_linux_glibc_floor_rejects_newer_symbols(self) -> None:
+        with self.assertRaisesRegex(
+            TOOL.ContractError,
+            r"requires GLIBC_2\.39.*ceiling is GLIBC_2\.35",
+        ):
+            TOOL._validate_linux_glibc_version_info(
+                "Version needs section: GLIBC_2.2.5 GLIBC_2.35 GLIBC_2.39"
+            )
+
+    def test_linux_glibc_floor_rejects_missing_version_evidence(self) -> None:
+        with self.assertRaisesRegex(TOOL.ContractError, "no readable versioned GLIBC"):
+            TOOL._validate_linux_glibc_version_info("No version information found")
 
     def test_zip_bytes_are_deterministic_for_identical_staging(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -216,6 +237,31 @@ mcp_protocol 2026-07-28
             self.assertEqual(result["status"], "passed")
             self.assertFalse(result["distributable"])
 
+            receipt["binary"]["linux_abi"] = {
+                "libc": "glibc",
+                "support_baseline": "Ubuntu 22.04 LTS",
+                "maximum_allowed_symbol_version": "2.35",
+                "maximum_required_symbol_version": "2.34",
+                "required_symbol_versions": ["2.2.5", "2.34"],
+            }
+            (bundle / "RECEIPT.json").write_text(json.dumps(receipt), encoding="utf-8")
+            TOOL._write_checksums(bundle)
+            windows_with_linux_abi = root / "windows-with-linux-abi.zip"
+            TOOL._write_deterministic_zip(bundle, windows_with_linux_abi)
+            windows_with_linux_abi_sidecar = root / "windows-with-linux-abi.zip.sha256"
+            windows_with_linux_abi_sidecar.write_text(
+                f"{TOOL._sha256_file(windows_with_linux_abi)}  "
+                f"{windows_with_linux_abi.name}\n",
+                encoding="ascii",
+            )
+            with self.assertRaisesRegex(TOOL.ContractError, "must not contain Linux ABI"):
+                TOOL.verify_archive(
+                    windows_with_linux_abi,
+                    windows_with_linux_abi_sidecar,
+                )
+            receipt["binary"].pop("linux_abi")
+            (bundle / "RECEIPT.json").write_text(json.dumps(receipt), encoding="utf-8")
+
             notice_path = bundle / TOOL.NOTICE_PATH
             notice_path.write_bytes(notice_path.read_bytes() + b"tampered\n")
             TOOL._write_checksums(bundle)
@@ -295,6 +341,13 @@ mcp_protocol 2026-07-28
                         "context_pack_schema 1",
                         "mcp_protocol 2026-07-28",
                     ],
+                    "linux_abi": {
+                        "libc": "glibc",
+                        "support_baseline": "Ubuntu 22.04 LTS",
+                        "maximum_allowed_symbol_version": "2.35",
+                        "maximum_required_symbol_version": "2.34",
+                        "required_symbol_versions": ["2.2.5", "2.17", "2.34"],
+                    },
                 },
                 "supply_chain": {
                     "manifest_path": TOOL.SUPPLY_CHAIN_MANIFEST_PATH.as_posix(),
@@ -331,6 +384,38 @@ mcp_protocol 2026-07-28
             result = TOOL.verify_archive(archive, sidecar)
             self.assertEqual(result["profile_id"], configuration["profile_id"])
             self.assertEqual(result["target"], configuration["target"])
+
+            linux_abi = receipt["binary"].pop("linux_abi")
+            (bundle / "RECEIPT.json").write_text(json.dumps(receipt), encoding="utf-8")
+            TOOL._write_checksums(bundle)
+            missing_abi = root / "missing-linux-abi.zip"
+            TOOL._write_deterministic_zip(bundle, missing_abi)
+            missing_abi_sidecar = root / "missing-linux-abi.zip.sha256"
+            missing_abi_sidecar.write_text(
+                f"{TOOL._sha256_file(missing_abi)}  {missing_abi.name}\n",
+                encoding="ascii",
+            )
+            with self.assertRaisesRegex(TOOL.ContractError, "linux_abi must be an object"):
+                TOOL.verify_archive(missing_abi, missing_abi_sidecar)
+
+            receipt["binary"]["linux_abi"] = {
+                **linux_abi,
+                "maximum_required_symbol_version": "2.39",
+                "required_symbol_versions": ["2.2.5", "2.17", "2.34", "2.39"],
+            }
+            (bundle / "RECEIPT.json").write_text(json.dumps(receipt), encoding="utf-8")
+            TOOL._write_checksums(bundle)
+            incompatible_abi = root / "incompatible-linux-abi.zip"
+            TOOL._write_deterministic_zip(bundle, incompatible_abi)
+            incompatible_abi_sidecar = root / "incompatible-linux-abi.zip.sha256"
+            incompatible_abi_sidecar.write_text(
+                f"{TOOL._sha256_file(incompatible_abi)}  {incompatible_abi.name}\n",
+                encoding="ascii",
+            )
+            with self.assertRaisesRegex(TOOL.ContractError, "requires GLIBC_2.39"):
+                TOOL.verify_archive(incompatible_abi, incompatible_abi_sidecar)
+
+            receipt["binary"]["linux_abi"] = linux_abi
 
             manifest["target"] = TOOL.PLATFORMS["windows-x86_64"]["target"]
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")

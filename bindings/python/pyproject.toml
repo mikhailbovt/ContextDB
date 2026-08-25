@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "contextdb-embedded"
-version = "0.2.0a2"
+version = "0.2.0a3"
 description = "Embedded Python bindings for ContextDB"
 requires-python = ">=3.9"
 license = "Apache-2.0"
