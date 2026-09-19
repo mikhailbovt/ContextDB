@@ -163,7 +163,7 @@ pub(crate) fn run_broker(path: &Path, reference: bool) -> CliResult<()> {
         create_server(&pipe_name, true).map_err(CliError::from)?
     };
     #[cfg(unix)]
-    let _socket_cleanup = UnixSocketGuard::new(&pipe_name).map_err(CliError::from)?;
+    let socket_cleanup = UnixSocketGuard::new(&pipe_name).map_err(CliError::from)?;
     let state = load_state(&canonical_path)?;
     let handshake_key = Arc::new(TokenKey::new(state.key.expose_copy())?);
     let service: Arc<dyn CognitiveMemoryService> = if reference {
@@ -173,16 +173,24 @@ pub(crate) fn run_broker(path: &Path, reference: bool) -> CliResult<()> {
     };
 
     eprintln!("contextdb MCP broker ready");
-    runtime
+    let result = runtime
         .block_on(serve_broker(
             first_server,
             pipe_name,
             pipe_id,
             reference,
             handshake_key,
-            service,
+            service.clone(),
         ))
-        .map_err(CliError::from)
+        .map_err(CliError::from);
+    // Quiesce every connection and unlink the endpoint while the durable
+    // authority is still held. stop_broker's lock acquisition must not race
+    // the socket guard's destructor after an authenticated shutdown.
+    drop(runtime);
+    #[cfg(unix)]
+    drop(socket_cleanup);
+    drop(service);
+    result
 }
 
 /// Connects one stdio MCP session to the persistent broker, starting the
