@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, sync::Arc, time::Instant};
 
 use contextdb_capture::{CaptureHost, PendingToolCapture};
 use contextdb_context::*;
@@ -8,9 +8,10 @@ use contextdb_recall::{IndexedQuery, QueryBudget};
 use contextdb_service::*;
 
 use super::{
-    ModelDispatchFence, ModelReconciliation, PreparationHook, ReaderAdapter, ReaderOutcome,
-    ReaderReply, RollingPolicy, charge, context_error, conversation_routes, exhausted, invalid,
-    rolling,
+    CacheResidencyController, CacheResidencyPolicy, ModelDispatchFence, ModelReconciliation,
+    PreparationHook, ReaderAdapter, ReaderOutcome, ReaderReply, RollingPolicy, RuntimeMeasurements,
+    StepMeasurement, charge, context_error, conversation_routes, exhausted, invalid, rolling,
+    telemetry::{self, Telemetry},
 };
 
 mod drive;
@@ -33,12 +34,31 @@ pub struct RuntimeSettings {
     pub outgoing_budget: OutgoingBudget,
     /// High/low thresholds and bounded retry policy.
     pub rolling: RollingPolicy,
+    /// Optional measured cache hysteresis. Fixed thresholds are the default profile.
+    pub cache_residency: Option<CacheResidencyPolicy>,
+    /// Metadata limits for automatic raw discovery, such as a replay input cutoff.
+    /// Default selects all authorized originals. Explicit expansion routes and
+    /// mandatory current state remain separate; this is not an access policy.
+    pub automatic_recall_filter: RawFilter,
 }
 impl RuntimeSettings {
     fn validate(&self, profile: &ModelProfile) -> ServiceResult<()> {
         profile.validate().map_err(context_error)?;
+        if self.automatic_recall_filter.event_ids.len() > 64 {
+            return Err(invalid(
+                "automatic recall identity filter exceeds 64 originals",
+            ));
+        }
+        if let Some(range) = self.automatic_recall_filter.recorded_range {
+            range
+                .validate()
+                .map_err(|_| invalid("automatic recall time range is invalid"))?;
+        }
         self.rolling
             .validate(self.outgoing_budget.max_input_tokens)?;
+        if let Some(cache) = self.cache_residency {
+            cache.validate(self.rolling, self.outgoing_budget.max_input_tokens)?;
+        }
         if self
             .outgoing_budget
             .max_input_tokens
@@ -138,6 +158,8 @@ pub struct OwnedAgentRuntime<S: ?Sized> {
     pending_checkpoint: Option<SaveRunCheckpointRequest>,
     pending_tool_capture: Option<Box<PendingToolCapture>>,
     phase: CallPhase,
+    telemetry: Telemetry,
+    cache_controller: CacheResidencyController,
 }
 impl<S: ?Sized> std::fmt::Debug for OwnedAgentRuntime<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -199,6 +221,8 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             pending_checkpoint: None,
             pending_tool_capture: None,
             phase: CallPhase::Ready,
+            telemetry: Telemetry::default(),
+            cache_controller: CacheResidencyController::default(),
         })
     }
 
@@ -234,6 +258,8 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             pending_checkpoint: None,
             pending_tool_capture: None,
             phase: CallPhase::Ready,
+            telemetry: Telemetry::resumed(),
+            cache_controller: CacheResidencyController::default(),
         };
         if let Some(pending) = &runtime.state.pending_model {
             runtime.phase = if pending.wire_digest.is_some() {
@@ -272,6 +298,12 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
     /// True means outcome reconciliation is required before any further model call.
     pub fn model_outcome_unknown(&self) -> bool {
         matches!(self.phase, CallPhase::Unknown)
+    }
+
+    /// Drain bounded process-local measurements for a complete host run report.
+    /// Keep failed steps and missing counters; never price missing history as free.
+    pub fn drain_measurements(&mut self) -> RuntimeMeasurements {
+        self.telemetry.drain()
     }
 
     /// Capture a complete user message before it can become hot context.
@@ -359,6 +391,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         settings.validate(&reader.profile())?;
         self.validate_reader_protocol(&reader.profile())?;
         self.state.model_profile = reader.profile();
+        self.cache_controller = CacheResidencyController::default();
         self.settings = settings;
         self.save_checkpoint(now, budget)
     }
@@ -461,6 +494,45 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         now: TimestampMicros,
         budget: &mut QueryBudget,
     ) -> ServiceResult<CompletedTurn> {
+        let started = Instant::now();
+        let work = budget.remaining_work();
+        let bytes = budget.remaining_bytes();
+        let mut measurement = StepMeasurement {
+            run: Some(self.state.identity.run_id),
+            ..StepMeasurement::default()
+        };
+        let result = self.step_measured(
+            reader,
+            fence,
+            hook,
+            extra_routes,
+            now,
+            budget,
+            &mut measurement,
+        );
+        measurement.elapsed_micros = telemetry::elapsed(started);
+        measurement.work_units = work.saturating_sub(budget.remaining_work());
+        measurement.charged_bytes = bytes.saturating_sub(budget.remaining_bytes());
+        measurement.error = result.as_ref().err().map(|error| error.code);
+        measurement.outcome_unknown = self.model_outcome_unknown();
+        self.telemetry.push(measurement);
+        result
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "step instrumentation shares the bounded attempt"
+    )]
+    fn step_measured(
+        &mut self,
+        reader: &dyn ReaderAdapter,
+        fence: &dyn ModelDispatchFence,
+        hook: &dyn PreparationHook,
+        extra_routes: &[IndexedQuery],
+        now: TimestampMicros,
+        budget: &mut QueryBudget,
+        measurement: &mut StepMeasurement,
+    ) -> ServiceResult<CompletedTurn> {
         self.ensure_active()?;
         validate_reader(reader)?;
         self.validate_reader_protocol(&reader.profile())?;
@@ -482,6 +554,13 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             return Err(invalid("no current interaction awaits a model response"));
         }
         let mut removed = 0;
+        let (rolling_policy, reason) = self.cache_controller.select(
+            self.settings.rolling,
+            self.settings.cache_residency,
+            self.settings.outgoing_budget.max_input_tokens,
+        )?;
+        measurement.residency_reason = reason;
+        measurement.rotation_high_tokens = rolling_policy.high_tokens;
         if matches!(self.phase, CallPhase::Ready | CallPhase::Planned) {
             if self.state.pending_model.is_none() {
                 self.state.pending_model = Some(PendingModelCall {
@@ -495,22 +574,30 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             }
             let mut prepared = None;
             for attempt in 0..self.settings.rolling.max_prepare_attempts {
-                let (base, evicted) = rolling::rotate(
+                let started = Instant::now();
+                let rotation = rolling::rotate(
                     self.owner.as_ref(),
                     &self.context,
                     &mut self.state,
                     &self.settings.control,
                     reader,
-                    self.settings.rolling,
+                    rolling_policy,
                     budget,
-                )?;
+                );
+                measurement.rotation_micros += telemetry::elapsed(started);
+                let (base, evicted) = rotation?;
                 removed += evicted;
+                measurement.evicted_groups += evicted as u32;
                 if evicted != 0 {
                     self.save_checkpoint(now, budget)?;
                 }
-                hook.before_prepare(&self.context, budget)?;
+                let started = Instant::now();
+                let hook_result = hook.before_prepare(&self.context, budget);
+                measurement.preparation_hook_micros += telemetry::elapsed(started);
+                hook_result?;
                 let mut routes = extra_routes.to_vec();
-                for route in conversation_routes(&base) {
+                for mut route in conversation_routes(&base) {
+                    route.filter = self.settings.automatic_recall_filter.clone();
                     if routes.len() == 8 {
                         break;
                     }
@@ -533,11 +620,17 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     outgoing_budget: self.settings.outgoing_budget,
                     explicit_memory_request: false,
                 };
-                match self
-                    .owner
-                    .prepare_context(request, reader.tokenizer(), reader, budget)
-                {
+                let started = Instant::now();
+                measurement.prepare_attempts += 1;
+                let preparation =
+                    self.owner
+                        .prepare_context(request, reader.tokenizer(), reader, budget);
+                measurement.prepare_micros += telemetry::elapsed(started);
+                match preparation {
                     Ok(result) => {
+                        if measurement.prepare_attempts == 1 {
+                            measurement.scorer_micros = Some(result.scorer_micros);
+                        }
                         prepared = Some(result);
                         break;
                     }
@@ -553,6 +646,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                             return Err(error);
                         }
                         removed += evicted;
+                        measurement.evicted_groups += evicted as u32;
                         self.save_checkpoint(now, budget)?;
                     }
                     Err(error) => return Err(error),
@@ -579,6 +673,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     "reader capture manifest differs from the prepared wire",
                 ));
             }
+            telemetry::manifest_counts(&manifest, measurement);
             let mut request = self.event(
                 EventKind::ModelRequested,
                 EventRole::Host,
@@ -602,6 +697,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             .as_ref()
             .ok_or_else(|| invalid("model intent absent"))?
             .clone();
+        measurement.call = Some(call.call_id);
         if let Err(error) = fence.before_model(
             &self.context,
             &self.checkpoint_receipt,
@@ -616,9 +712,21 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             return Err(error);
         }
         let prepared = (**prepared).clone();
+        self.telemetry.wire(&prepared.outgoing.wire, measurement);
         // From this point an error or process loss is an uncertain provider outcome.
         self.phase = CallPhase::Unknown;
-        let reply = match reader.complete(call.call_id, &prepared.outgoing) {
+        measurement.dispatched = true;
+        let started = Instant::now();
+        let outcome = reader.complete(call.call_id, &prepared.outgoing);
+        measurement.reader_micros = Some(telemetry::elapsed(started));
+        let usage = reader.usage(call.call_id);
+        if usage.validate().is_ok() {
+            measurement.usage = usage;
+        } else {
+            measurement.invalid_usage = true;
+        }
+        self.cache_controller.observe(&measurement.usage);
+        let reply = match outcome {
             Ok(ReaderOutcome::Completed(reply)) => reply,
             Ok(ReaderOutcome::Interrupted(output)) => {
                 self.capture_interruption(&call, output, now, budget)?;

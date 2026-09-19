@@ -33,6 +33,8 @@ jobs:
         run: python3 -m unittest discover -s tools/local-mcp-preview/tests -v
       - name: Validate governance artifacts
         run: python3 .github/scripts/validate_governance.py .
+      - name: Verify reader experiment accounting without model calls
+        run: python3 -m unittest discover -s benchmarks/continuous-context -p test_reader.py -v
 
   rust:
     name: "Rust ${{ matrix.target }} (${{ matrix.tier }})"

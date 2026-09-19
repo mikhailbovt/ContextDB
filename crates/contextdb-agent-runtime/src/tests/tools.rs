@@ -179,7 +179,7 @@ fn cancellation_releases_unexecuted_proposals_without_inventing_tool_results() {
 
 #[test]
 fn native_owner_admits_a_real_effect_and_rejects_a_new_constraint_before_dispatch() {
-    for change in ["none", "source", "obligation"] {
+    for change in ["none", "source", "obligation", "pending"] {
         let directory = tempfile::tempdir().expect("directory");
         let owner = Arc::new(
             NativeService::open(directory.path().join("native"), "runtime", [7; 32]).expect("open"),
@@ -210,16 +210,47 @@ fn native_owner_admits_a_real_effect_and_rejects_a_new_constraint_before_dispatc
                 &mut budget(),
             )
             .expect("input");
-        runtime
-            .step(
-                &reader,
-                &fence,
-                &FixturePreparation(Arc::clone(&owner)),
-                &[],
-                now(),
-                &mut budget(),
-            )
+        if change == "pending" {
+            let seed = owner
+                .read_original(ReadOriginalRequest {
+                    context: context.clone(),
+                    event_id: user.event_id,
+                    after_receipt: Some(user.clone()),
+                })
+                .expect("source")
+                .event;
+            for sequence in 1..=140 {
+                let mut event = seed.clone();
+                event.event_id = ObservationId::new();
+                event.source_id = SourceId::new();
+                event.producer_id = StreamId::new();
+                event.producer_sequence = 1;
+                event.run_id = None;
+                owner
+                    .append_event(CaptureRequest {
+                        context: context.clone(),
+                        idempotency_key: format!("pending-{sequence}"),
+                        event,
+                    })
+                    .expect("uninterpreted history");
+            }
+            assert!(
+                owner
+                    .project_originals(&context, false, 256, &mut budget())
+                    .expect("index")
+                    .caught_up
+            );
+        }
+        let interpreted = FixturePreparation(Arc::clone(&owner));
+        let hook: &dyn PreparationHook = if change == "pending" {
+            &KeepUninterpreted
+        } else {
+            &interpreted
+        };
+        let turn = runtime
+            .step(&reader, &fence, hook, &[], now(), &mut budget())
             .expect("native model admission");
+        assert_eq!(turn.prepared.pending_interpretation, change == "pending");
         if change == "source" {
             let mut event = owner
                 .read_original(ReadOriginalRequest {

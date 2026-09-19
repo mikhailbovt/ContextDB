@@ -262,7 +262,8 @@ captures the whole request, calls a required dispatch guard, then captures the
 visible response. A bounded `drive` loop executes registered tools and source-bound
 memory expansion between model calls. A missing interpreter retains explicit
 unknown state; it does not certify arbitrary text as understood. The owner dispatch
-adapter checks native leases; real reader/cache measurements remain delivery gates.
+adapter checks native leases. A bounded local text reader is measured separately
+in the [comparison harness](../../benchmarks/continuous-context/README.md).
 
 `OwnedRunPort` publishes each source-addressed checkpoint and run head in the
 same native synchronized capture transaction. Revisions use compare-and-publish;
@@ -343,6 +344,36 @@ nonblocking handoff and in-flight cancellation require a tested transport profil
 External version comparison/idempotency and operation authorization remain target
 contracts. A current lease proves dependency freshness, not natural-language
 understanding or permission to execute arbitrary model-proposed code.
+
+## Measured residency and cost
+
+The optional `CacheResidencyController` adjusts only the soft high watermark from
+the last two to four measured calls, with separate enter/leave thresholds. It
+keeps complete-group eviction, mandatory state and hard request limits intact.
+Unknown or invalid usage resets adaptation. This is a cache-reuse heuristic;
+configured prices and measured end-to-end outcomes determine economic benefit.
+The content scorer never sets lifecycle policy or grants authority.
+
+`ReaderUsage` keeps uncached input, cache creation, cache reads and billed output
+disjoint. Reasoning is a subset of output. Missing counters stay unknown, including
+after failed dispatch. `ReaderTariff` requires an explicit currency and all billed
+categories; it cannot infer a provider price or treat local computation as free.
+Additional memory is priced in the actual outgoing protocol. Only exact input
+counts may be subtracted; two conservative upper bounds cannot justify a discount.
+
+`drain_measurements` exports a bounded 64-step process-local window, including
+failed preparation, retries, reader time, scorer time, source echo/novel bytes and
+logical work allowances. Overwritten records and work before process resume are
+explicit. Hosts must join exported windows, tool/helper charges and persistence
+work for a complete run ledger. Prefix-byte similarity is a diagnostic lower
+bound, never a measured cache hit; logical bytes are not physical disk traffic.
+
+More than 128 unprocessed originals yields `PendingWindowExceeded`, rather than
+blocking authorized raw recall. Pending IDs describe only the inspected subset.
+Current state remains incomplete, and native external-effect admission still
+fails. The host may restrict automatic discovery with `automatic_recall_filter`
+for a replay cutoff; mandatory state and current authorization remain unchanged.
+Explicit expansion routes retain their own validated filters.
 
 ## Provenance, migration and evaluation
 

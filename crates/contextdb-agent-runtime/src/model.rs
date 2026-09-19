@@ -139,6 +139,12 @@ pub trait ReaderAdapter: OutgoingEncoder {
         call: ModelCallId,
         request: &EncodedOutgoing,
     ) -> ServiceResult<ReaderOutcome>;
+    /// Non-dispatching lookup of counters for this exact attempt, also after an
+    /// error. Defaults to unknown, not zero. Adapters must include every billed
+    /// input category and count reasoning once within total output.
+    fn usage(&self, _call: ModelCallId) -> crate::ReaderUsage {
+        crate::ReaderUsage::default()
+    }
     /// Recover an uncertain attempt without dispatching it again.
     fn reconcile(
         &self,

@@ -48,6 +48,8 @@ pub struct PrepareContextRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreparedContext {
+    /// Measured successful compiler scorer time; never a model usage counter.
+    pub scorer_micros: u64,
     /// Owner seal of this exact assembly and its preparation-time validity.
     /// It is not a registered lease and cannot authorize a different wire.
     pub admission_token: String,

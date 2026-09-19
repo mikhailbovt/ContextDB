@@ -222,6 +222,67 @@ fn raw_joke_is_returned_without_promotion_and_pending_correction_is_explicit() {
 }
 
 #[test]
+fn long_uninterpreted_history_preserves_raw_recall_without_establishing_current_state() {
+    let directory = tempfile::tempdir().expect("fixture");
+    let service = NativeService::open(directory.path(), "pending-window", [7; 32]).expect("open");
+    let input = setup(&service);
+    service
+        .initialize_state_catalog(&input.context, &mut allowance())
+        .expect("catalog");
+    let mut joke = capture(2, "Та самая шутка: чайный адмирал.");
+    joke.context.request.purpose = "conversation".into();
+    service.append_event(joke.clone()).expect("original");
+    for sequence in 3..=143 {
+        let mut event = capture(sequence, "Новое неинтерпретированное сообщение.");
+        event.context.request.purpose = "conversation".into();
+        service.append_event(event).expect("history");
+    }
+    // Index maintenance claims lexical coverage only, never semantic understanding.
+    assert!(
+        service
+            .project_originals(&input.context, false, 256, &mut allowance())
+            .expect("index")
+            .caught_up
+    );
+    let state = query(&service, &input, 0, None);
+    assert_eq!(state.resolution.state, ResolvedState::Incomplete);
+    assert!(
+        state
+            .coverage_gaps
+            .contains(&StateCoverageGap::PendingWindowExceeded)
+    );
+    assert_eq!(state.pending_events.len(), MAX_WINDOW);
+    let mut plan = request(&input);
+    plan.raw_queries.push(IndexedQuery {
+        filter: RawFilter {
+            event_ids: BTreeSet::from([joke.event.event_id]),
+            ..Default::default()
+        },
+        text: None,
+        neighbor_of: None,
+        selection: IndexedSelection::TopK { limit: 4 },
+    });
+    let prepared = prepare(&service, plan).expect("bounded conversational preparation");
+    assert!(prepared.pending_interpretation);
+    assert!(prepared.context_pack.sections.decisions.is_empty());
+    assert!(
+        prepared
+            .messages
+            .iter()
+            .any(|message| message.text.contains("чайный адмирал"))
+    );
+    assert!(
+        !prepared
+            .context_pack
+            .compilation
+            .sufficiency
+            .blocking_unknowns
+            .is_empty()
+    );
+    service.verify_native(true).expect("native closure");
+}
+
+#[test]
 fn revoked_hot_source_and_bad_span_fail_before_disclosure() {
     let directory = tempfile::tempdir().expect("fixture");
     let service = NativeService::open(directory.path(), "prepare", [7; 32]).expect("open");

@@ -221,7 +221,9 @@ impl NativeService {
         match raw_window {
             Ok((events, _, more)) => {
                 if more {
-                    return Err(stale("state raw overlay exceeds its bounded window"));
+                    // Raw recall remains available while semantic completeness
+                    // is unknown. Every state/action consumer must honor this gap.
+                    gaps.push(StateCoverageGap::PendingWindowExceeded);
                 }
                 pending.extend(events);
             }

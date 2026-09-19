@@ -273,6 +273,8 @@ pub struct CompiledAssembly {
     pub manifest: OutgoingAssemblyManifest,
     pub optional_seeds: BTreeSet<BlockId>,
     pub selection_evaluations: u32,
+    /// Monotonic time inside scorer calls only; excludes discovery and packing.
+    pub scorer_micros: u64,
 }
 
 pub(crate) fn charge(budget: &mut QueryBudget, work: u64, bytes: u64) -> Result<()> {

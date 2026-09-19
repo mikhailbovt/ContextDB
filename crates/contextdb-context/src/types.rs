@@ -1298,6 +1298,8 @@ pub struct PackSufficiencyReport {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContextBudgetUsage {
+    /// Legacy rendered text, or added actual provider input for continuous
+    /// assemblies. Upper-bound encoders conservatively charge the whole input.
     pub rendered_tokens: u32,
     pub control_tokens: u32,
     pub data_tokens: u32,

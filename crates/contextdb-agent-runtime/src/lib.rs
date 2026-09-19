@@ -4,18 +4,22 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod economy;
 mod fence;
 mod model;
 mod rolling;
 mod runtime;
+mod telemetry;
 
 #[cfg(test)]
 mod tests;
 
+pub use economy::*;
 pub use fence::*;
 pub use model::*;
 pub use rolling::*;
 pub use runtime::*;
+pub use telemetry::{RuntimeMeasurements, StepMeasurement};
 
 use contextdb_service::{ErrorCode, ServiceError, ServiceResult};
 

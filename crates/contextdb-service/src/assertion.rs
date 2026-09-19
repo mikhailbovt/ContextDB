@@ -139,6 +139,9 @@ pub struct ResolveStateRequest {
 pub enum StateCoverageGap {
     /// A relevant original has not been fully interpreted.
     PendingInterpretation,
+    /// The bounded raw window cannot establish complete coverage. Pending IDs
+    /// are an authorized subset; no claim is made about the uninspected suffix.
+    PendingWindowExceeded,
     /// The producer or source observation is incomplete.
     CaptureGap,
     /// Required support is no longer available under current source policy.

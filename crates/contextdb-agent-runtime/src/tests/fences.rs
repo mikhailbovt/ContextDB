@@ -99,6 +99,20 @@ fn disclosure_replans_before_send_and_stops_after_bounded_continuous_invalidatio
             &mut budget(),
         );
         assert_eq!(fence.attempts.load(Ordering::SeqCst), 2);
+        let measurements = runtime.drain_measurements();
+        assert_eq!(measurements.steps.len(), 2);
+        assert!(!measurements.steps[0].dispatched);
+        assert!(measurements.steps[0].error.is_some());
+        assert_eq!(measurements.steps[1].dispatched, !continuous);
+        assert_eq!(measurements.dropped_steps, 0);
+        assert!(
+            measurements
+                .steps
+                .iter()
+                .all(|step| step.usage.input_tokens.is_none())
+        );
+        let serialized = serde_json::to_string(&measurements).expect("measurement JSON");
+        assert!(!serialized.contains("Continue this fixture conversation"));
         if continuous {
             assert_eq!(
                 result.expect_err("bounded refresh cap").code,
