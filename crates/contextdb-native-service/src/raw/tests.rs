@@ -146,7 +146,9 @@ fn logical_cursor_freezes_capture_but_rechecks_current_policy_before_content() {
     service.append_event(second.clone()).expect("second");
     let mut query = request(&first);
     query.page_size = 1;
-    let page = service.recall_originals(query.clone()).expect("page one");
+    let page = service
+        .recall_originals_oracle(query.clone())
+        .expect("page one");
     let cursor = page.continuation.expect("continuation");
     let cursor_bytes = decode_hex(&cursor).expect("opaque ciphertext");
     assert!(
@@ -160,7 +162,7 @@ fn logical_cursor_freezes_capture_but_rechecks_current_policy_before_content() {
     token.replace_range(..2, if &token[..2] == "00" { "ff" } else { "00" });
     assert_eq!(
         service
-            .recall_originals(tampered)
+            .recall_originals_oracle(tampered)
             .expect_err("authenticated cursor")
             .code,
         ErrorCode::InvalidContinuation
@@ -192,14 +194,14 @@ fn logical_cursor_freezes_capture_but_rechecks_current_policy_before_content() {
     .expect("corrupt");
     tx.commit(Durability::Sync).expect("commit");
     let page = service
-        .recall_originals(query.clone())
+        .recall_originals_oracle(query.clone())
         .expect("no forbidden body read");
     assert!(page.hits.is_empty());
     assert_eq!(page.status, RawPageStatus::Complete);
     assert_eq!(
         page.snapshot,
         service
-            .recall_originals(query.clone())
+            .recall_originals_oracle(query.clone())
             .expect("same logical view")
             .snapshot
     );
@@ -207,7 +209,7 @@ fn logical_cursor_freezes_capture_but_rechecks_current_policy_before_content() {
     changed.context.request.purpose = "other".into();
     assert_eq!(
         service
-            .recall_originals(changed)
+            .recall_originals_oracle(changed)
             .expect_err("principal binding")
             .code,
         ErrorCode::InvalidContinuation
@@ -216,7 +218,7 @@ fn logical_cursor_freezes_capture_but_rechecks_current_policy_before_content() {
     changed.filter.source_id = Some(SourceId::new());
     assert_eq!(
         service
-            .recall_originals(changed)
+            .recall_originals_oracle(changed)
             .expect_err("query binding")
             .code,
         ErrorCode::InvalidContinuation
@@ -252,14 +254,14 @@ fn work_and_byte_limits_are_explicit_and_cursor_resumes_without_losing_sources()
     query.text = Some(RawTextQuery::AllTerms("needle".into()));
     query.budget.max_payload_bytes = 8;
     let page = service
-        .recall_originals(query.clone())
+        .recall_originals_oracle(query.clone())
         .expect("bounded partial");
     assert!(page.hits.is_empty());
     assert_eq!(page.status, RawPageStatus::ByteLimit);
     query.continuation = page.continuation;
     assert_eq!(
         service
-            .recall_originals(query.clone())
+            .recall_originals_oracle(query.clone())
             .expect_err("one record exceeds budget")
             .code,
         ErrorCode::ResourceExhausted
@@ -268,7 +270,9 @@ fn work_and_byte_limits_are_explicit_and_cursor_resumes_without_losing_sources()
     assert_eq!(collect(&service, query).len(), 1);
     let mut query = request(&first);
     query.budget.max_records = 1;
-    let page = service.recall_originals(query).expect("one scanned record");
+    let page = service
+        .recall_originals_oracle(query)
+        .expect("one scanned record");
     assert_eq!(page.status, RawPageStatus::WorkLimit);
     assert_eq!(page.hits.len(), 1);
 }

@@ -8,12 +8,14 @@
 
 mod engine;
 mod error;
+mod indexed;
 mod provider;
 mod reference;
 mod types;
 
 pub use engine::RecallEngine;
 pub use error::{RecallError, Result};
+pub use indexed::*;
 pub use provider::{AuthorizedCorpus, RecallProvider};
 pub use reference::ReferenceProvider;
 pub use types::*;

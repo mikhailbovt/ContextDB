@@ -32,7 +32,7 @@ struct RawCursor {
 
 impl RawRecallPort for NativeService {
     fn recall_originals(&self, request: RawRecallRequest) -> ServiceResult<RawRecallPage> {
-        self.recall_originals_oracle(request)
+        self.recall_originals_indexed(request)
     }
 
     fn materialize_original(
@@ -292,11 +292,18 @@ impl NativeService {
         let mut nonce = [0; 24];
         getrandom::fill(&mut nonce).map_err(|_| integrity("cursor nonce generation failed"))?;
         let aad = encode(&(&self.database_id, domain))?;
+        let mut plaintext = encode(value)?;
+        if plaintext.len() > 2048 {
+            return Err(exhausted(
+                "private cursor payload exceeds its fixed envelope",
+            ));
+        }
+        plaintext.resize(2048, b' ');
         let ciphertext = cipher
             .encrypt(
                 &XNonce::from(nonce),
                 Payload {
-                    msg: &encode(value)?,
+                    msg: &plaintext,
                     aad: &aad,
                 },
             )

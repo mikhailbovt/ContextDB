@@ -22,7 +22,7 @@ pub struct OriginalPayloadRef {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OriginalSourceSpan {
-    /// Independent original event; model request echoes are not source roots.
+    /// Original event. Audit spans of request echoes cannot be independent roots.
     pub event_id: ObservationId,
     /// Digest of that event's complete original.
     pub payload_digest: ContentDigest,

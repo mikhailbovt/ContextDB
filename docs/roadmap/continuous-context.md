@@ -9,9 +9,9 @@ native or model acceptance.
 | --- | --- | --- |
 | 00 | Native ownership contract, shared histories, finite Rust oracle, baseline | Merged in #2; CI passed on all four native targets |
 | 01 | Native conversation capture, receipts, streams and recovery | Merged in #3; CI passed on all four native targets |
-| 02 | Tool/artifact capture, request provenance and reconciliation | Implemented; local checks passed, CI pending |
-| 03 | Original ID/source/range/lexical recall without promotion | Native oracle implemented; persistent provider follows in 04 |
-| 04 | Persistent authorized indexed provider and exhaustive paging | Planned |
+| 02 | Tool/artifact capture, request provenance and reconciliation | Merged in #4; CI passed on all four native targets |
+| 03 | Original ID/source/range/lexical recall without promotion | Merged in #5; CI passed on all four native targets |
+| 04 | Persistent authorized indexed provider and exhaustive paging | Implemented; local checks passed, CI pending |
 | 05 | Temporal assertions, resolution, negative overlay and coverage | Planned |
 | 06 | Evidence compiler, whole-request manifest, R0 and budgets | Planned |
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Planned |
@@ -74,3 +74,14 @@ partial capture, chunk boundaries, encrypted cursor binding and current ACL
 checks before a corrupted forbidden body. Exhaustion is explicit and resumable.
 The raw oracle retains bounded scanning for conformance; it does not establish
 indexed performance, extraction coverage or a real reader's answer quality.
+
+Phase 04 passes 130 tests across index, recall and native service, followed by
+the final seven indexed-provider scenarios after refinement. Persistent routes
+match raw-oracle fixtures across restart. Selective posting work stays constant
+between one and 201 sources; this is a bounded-work fixture, not a million-event
+latency result. Checks include forbidden-domain insertion, corrupted forbidden
+content, current-policy revocation, staged rebuild/cutover, backup restore,
+bounded fresh tail, explicit overflow, generation-aware enumeration, large-source
+fallback, causal history, cancellation, writer contention and missing-index
+reconstruction. The existing materialized semantic corpus provider stays available
+as an oracle; continuous current-state selection is the next phase.
