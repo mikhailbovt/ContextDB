@@ -7,9 +7,9 @@ native or model acceptance.
 
 | Phase | Deliverable | Status |
 | --- | --- | --- |
-| 00 | Native ownership contract, shared histories, finite Rust oracle, baseline | Implemented; local checks passed, CI pending |
-| 01 | Native conversation capture, receipts, streams and recovery | Implemented; local checks passed, CI pending |
-| 02 | Tool/artifact capture, request provenance and reconciliation | Planned |
+| 00 | Native ownership contract, shared histories, finite Rust oracle, baseline | Merged in #2; CI passed on all four native targets |
+| 01 | Native conversation capture, receipts, streams and recovery | Merged in #3; CI passed on all four native targets |
+| 02 | Tool/artifact capture, request provenance and reconciliation | Implemented; local checks passed, CI pending |
 | 03 | Original ID/source/range/lexical recall without promotion | Planned |
 | 04 | Persistent authorized indexed provider and exhaustive paging | Planned |
 | 05 | Temporal assertions, resolution, negative overlay and coverage | Planned |
@@ -54,5 +54,15 @@ Clippy with warnings denied. Capture checks use the real Fjall owner: exact
 Unicode/raw bytes, restart, eight concurrent retries, lost response, edits,
 producer-gap backpressure, aborted chunks, authority binding and backup restore.
 Three abrupt subprocess exits exercise staged payload, pre-commit and post-sync
-recovery. Deep verification detects missing outbox data. The profile pauses on
-overflow; large-payload adapters, extraction and the owned runtime follow later.
+recovery. Deep verification detects missing outbox data. These checks establish
+the initial inline profile; phase 02 extends its payload and adapter boundaries.
+
+Phase 02 passes all 42 native-service tests, plus targeted all-feature Clippy.
+The new capture adapters preserve large originals, task-linked tool/artifact
+events and ordered request wire bytes. A subprocess exits after a real file
+effect; recovery reconciles the target without executing again. Another check
+retains a full output through a failed capture and retries only persistence.
+Chunked backup/restore, missing-source detection, source ACL checks before
+request materialization and rejection of independent echo roots also pass.
+External target guarantees remain explicit adapter contracts; the strict
+runtime and model-quality acceptance gates remain in later phases.

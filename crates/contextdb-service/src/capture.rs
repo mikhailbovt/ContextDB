@@ -40,6 +40,16 @@ pub struct CaptureReceipt {
     pub token: String,
 }
 
+/// Per-call publication result; this flag is not part of the durable receipt.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureAcceptance {
+    /// Durable publication identity, identical for exact retries.
+    pub receipt: CaptureReceipt,
+    /// True only for the invocation that first committed this event.
+    pub newly_accepted: bool,
+}
+
 /// Host append request. Authentication precedes event inspection.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -103,7 +113,14 @@ pub struct ProducerCoverage {
 /// model-facing memory proposal tools do not acquire this port implicitly.
 pub trait CapturePort: Send + Sync {
     /// Atomically accept the original, receipt, producer coverage and projection work.
-    fn append_event(&self, request: CaptureRequest) -> ServiceResult<CaptureReceipt>;
+    fn append_event(&self, request: CaptureRequest) -> ServiceResult<CaptureReceipt> {
+        self.append_event_with_status(request)
+            .map(|accepted| accepted.receipt)
+    }
+
+    /// Distinguish first publication from retry atomically at the owner.
+    fn append_event_with_status(&self, request: CaptureRequest)
+    -> ServiceResult<CaptureAcceptance>;
 
     /// Fetch exact accepted bytes without extraction, embeddings or promotion.
     fn read_original(&self, request: ReadOriginalRequest) -> ServiceResult<CapturedOriginal>;
@@ -121,4 +138,52 @@ pub trait CapturePort: Send + Sync {
         context: &AuthenticatedRequestContext,
         producer: StreamId,
     ) -> ServiceResult<ProducerCoverage>;
+}
+
+/// Host staging request for a large immutable original.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StagePayloadRequest {
+    /// Authenticated custody authority.
+    pub context: AuthenticatedRequestContext,
+    /// Stable retry identity, reused through recovery.
+    pub idempotency_key: String,
+    /// Immutable content block identity selected by the host.
+    pub block_id: contextdb_core::ContentBlockId,
+    /// Full observed source bytes, subject to the advertised capture bound.
+    pub bytes: Vec<u8>,
+}
+
+impl std::fmt::Debug for StagePayloadRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StagePayloadRequest")
+            .field("block_id", &self.block_id)
+            .field("byte_length", &self.bytes.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Durable staging receipt, explicitly separate from event publication.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PayloadReceipt {
+    /// Native database identity.
+    pub database_id: String,
+    /// Policy-bound immutable reference.
+    pub reference: contextdb_core::OriginalPayloadRef,
+    /// Synchronized staging durability; an event still needs its capture receipt.
+    pub durability: CaptureDurability,
+}
+
+/// Bounded original staging and source-span materialization for host adapters.
+pub trait PayloadPort: CapturePort {
+    /// Synchronize a complete large original before any event can reference it.
+    fn stage_payload(&self, request: StagePayloadRequest) -> ServiceResult<PayloadReceipt>;
+
+    /// Read an exact immutable source span under its current source permissions.
+    fn read_original_span(
+        &self,
+        context: &AuthenticatedRequestContext,
+        span: &contextdb_core::OriginalSourceSpan,
+    ) -> ServiceResult<Vec<u8>>;
 }

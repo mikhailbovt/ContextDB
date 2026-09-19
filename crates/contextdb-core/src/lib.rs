@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod capability;
+mod capture;
 mod collections;
 mod error;
 mod event;
@@ -23,6 +24,7 @@ mod semantic;
 mod time;
 
 pub use capability::*;
+pub use capture::*;
 pub use collections::NonEmptyVec;
 pub use error::{ValidationError, ValidationResult};
 pub use event::*;

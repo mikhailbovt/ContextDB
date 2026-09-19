@@ -21,6 +21,7 @@ serde_json.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+contextdb-capture.workspace = true
 contextdb-chat = { workspace = true, features = ["service-adapter"] }
 contextdb-context.workspace = true
 tempfile.workspace = true

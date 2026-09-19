@@ -444,6 +444,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "contextdb-capture"
+version = "0.2.0-alpha.3"
+dependencies = [
+ "blake3",
+ "contextdb-core",
+ "contextdb-service",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "contextdb-chat"
 version = "0.2.0-alpha.3"
 dependencies = [
@@ -716,6 +727,7 @@ name = "contextdb-native-service"
 version = "0.2.0-alpha.3"
 dependencies = [
  "blake3",
+ "contextdb-capture",
  "contextdb-chat",
  "contextdb-context",
  "contextdb-core",
