@@ -526,7 +526,7 @@ impl NativeService {
             .scan_prefix(&self.keyspaces.continuous, b"")
             .map_err(storage_error)?
             .into_iter()
-            .filter(|entry| !entry.key.starts_with(b"payload/"))
+            .filter(|entry| !entry.key.starts_with(b"payload/") && !entry.key.starts_with(b"raw/"))
             .collect::<Vec<_>>();
         if entries.is_empty() {
             return Ok(());
@@ -681,6 +681,10 @@ impl NativeService {
         for (stream, head) in streams {
             expected.insert(stream.into_bytes(), encode(&head)?);
         }
+        for (scope, epoch) in self.raw_revocation_scope_epochs(snapshot)? {
+            let current = scopes.entry(scope).or_default();
+            *current = (*current).max(epoch);
+        }
         for (scope, epoch) in scopes {
             expected.insert(scope, encode(&epoch)?);
         }
@@ -730,6 +734,57 @@ impl NativeService {
             }
         }
         Ok(())
+    }
+
+    /// Closure labels for a homogeneous persistent index domain. Maintenance
+    /// calls this before indexing; query routes check every label before search.
+    pub(super) fn capture_index_policies<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event_id: ObservationId,
+    ) -> ServiceResult<Vec<contextdb_service::AccessPolicy>> {
+        let mut policies = Vec::new();
+        let policy: StoredObservationPolicy = decode(
+            &snapshot
+                .get(
+                    &self.keyspaces.observations_policy,
+                    digest_bytes(event_id.to_string().as_bytes()).as_bytes(),
+                )
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("index source policy absent"))?,
+            "index source policy",
+        )?;
+        policies.push(policy.access);
+        let record: CaptureRecord = read_required(snapshot, self, &record_key(event_id))?;
+        for dependency in record.dependencies {
+            match dependency {
+                CaptureDependency::Payload { reference } => {
+                    policies.push(self.payload_index_policy(snapshot, &reference)?)
+                }
+                CaptureDependency::Source { event_id: source } => {
+                    let policy: StoredObservationPolicy = decode(
+                        &snapshot
+                            .get(
+                                &self.keyspaces.observations_policy,
+                                digest_bytes(source.to_string().as_bytes()).as_bytes(),
+                            )
+                            .map_err(storage_error)?
+                            .ok_or_else(|| integrity("index evidence policy absent"))?,
+                        "index evidence policy",
+                    )?;
+                    policies.push(policy.access);
+                    let source_record: CaptureRecord =
+                        read_required(snapshot, self, &record_key(source))?;
+                    for dependency in source_record.dependencies {
+                        let CaptureDependency::Payload { reference } = dependency else {
+                            return Err(integrity("index source closure contains an echo"));
+                        };
+                        policies.push(self.payload_index_policy(snapshot, &reference)?);
+                    }
+                }
+            }
+        }
+        Ok(policies)
     }
 
     pub(super) fn verify_capture_journal_reference<S: ReadSnapshot>(

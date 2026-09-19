@@ -162,6 +162,20 @@ fn visit_tokens(text: &str, mut visit: impl FnMut(String, RawTokenSpan)) {
     }
 }
 
+/// A whole interior token is a safe posting anchor for an exact substring.
+/// Partial edge tokens are deliberately excluded; punctuation-only phrases use
+/// a bounded metadata/range route instead of a false-negative word restriction.
+#[must_use]
+pub fn raw_phrase_anchor(phrase: &str) -> Option<String> {
+    let mut anchor = None;
+    visit_tokens(phrase, |term, span| {
+        if anchor.is_none() && span.start > 0 && span.end < phrase.len() as u64 {
+            anchor = Some(term);
+        }
+    });
+    anchor
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

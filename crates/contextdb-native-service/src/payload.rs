@@ -178,6 +178,28 @@ impl NativeService {
         start: u64,
         end: u64,
     ) -> ServiceResult<Vec<u8>> {
+        self.original_range_with_policy(snapshot, Some(context), event, start, end)
+    }
+
+    /// Internal custody maintenance only; never an untrusted materialization port.
+    pub(super) fn original_range_for_custody<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event: &EventEnvelope,
+        start: u64,
+        end: u64,
+    ) -> ServiceResult<Vec<u8>> {
+        self.original_range_with_policy(snapshot, None, event, start, end)
+    }
+
+    fn original_range_with_policy<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: Option<&AuthenticatedRequestContext>,
+        event: &EventEnvelope,
+        start: u64,
+        end: u64,
+    ) -> ServiceResult<Vec<u8>> {
         match &event.payload {
             EventPayload::InlineUtf8 { text, .. } => {
                 Ok(text.as_bytes()[source_range(start, end, text.len())?].to_vec())
@@ -186,11 +208,11 @@ impl NativeService {
                 Ok(bytes[source_range(start, end, bytes.len())?].to_vec())
             }
             EventPayload::Staged { reference, .. } => {
-                let header = self.checked_payload_header(snapshot, Some(context), reference)?;
+                let header = self.checked_payload_header(snapshot, context, reference)?;
                 self.payload_range(snapshot, &header, start, end)
             }
             EventPayload::Assembly { manifest } => {
-                let bytes = self.assemble_request(snapshot, Some(context), manifest)?;
+                let bytes = self.assemble_request(snapshot, context, manifest)?;
                 Ok(bytes[source_range(start, end, bytes.len())?].to_vec())
             }
             EventPayload::Omitted { .. } => Err(ServiceError::new(
@@ -199,6 +221,16 @@ impl NativeService {
                 false,
             )),
         }
+    }
+
+    pub(super) fn payload_index_policy<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        reference: &OriginalPayloadRef,
+    ) -> ServiceResult<AccessPolicy> {
+        Ok(self
+            .checked_payload_header(snapshot, None, reference)?
+            .access)
     }
 
     pub(super) fn enable_source_format<T: WriteTransaction>(

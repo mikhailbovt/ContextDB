@@ -96,8 +96,9 @@ The existing exact corpus provider remains a reference oracle. ID, source,
 time/range and lexical routes work with extraction and embeddings disabled.
 Analyzer versions, index coverage, outbox progress and query work are explicit.
 
-`RawRecallPort` currently exposes the bounded native oracle and original-span
-materialization. It finds accepted events by ID, source, session, recorded time,
+`RawRecallPort` exposes persistent native routes and original-span materialization;
+`recall_originals_oracle` remains the bounded conformance oracle. Both find accepted
+events by ID, source, session, recorded time,
 all lexical terms or an exact UTF-8 phrase without semantic publication. Results
 carry role, source version, omission/partial status and immutable payload/span
 digests. Equal text in separate events stays separate. Model-request occurrences
@@ -109,8 +110,34 @@ Unicode normalization form. Binary originals remain addressable without invented
 text. Encrypted cursors bind the database, query, current principal and logical
 knowledge position. Every resumed page rechecks current source permissions.
 Work/byte exhaustion returns an explicit partial status and continuation; it is
-not a negative answer. The oracle scans bounded outbox pages on non-ID routes.
-Persistent indexed routing and interactive latency proof belong to phase 04.
+not a negative answer. Direct IDs do not depend on index readiness. The oracle
+scans bounded outbox pages on other routes; interactive selection uses persisted
+postings, source/session/time routes and addressed causal neighbors.
+
+`project_originals` builds from the native outbox outside the writer lock and
+publishes a generation manifest after comparing its predecessor and authorization
+epoch. Rebuilds switch separately constructed generations after catch-up. Reads
+use short Fjall snapshots; neither index construction nor archive-wide corpus
+materialization runs inside a query. Empty projection polls do not create writes.
+
+Scope eligibility precedes domain labels and content search. Each domain includes
+the original's policy and every source dependency's policy. Ranking uses match
+spread, source length and stable ID, with no cross-domain document-frequency
+statistics. Native source revocation atomically advances authorization/scope
+epochs and journals the accepted transition. Old indexed routes are disabled
+until rebuild, and historical reads still enforce revocation. Semantic retirement
+and current-head overlays are integrated by the temporal-state phase.
+
+The initial index profile admits 1,024 eligible domains, 128 pending raw events,
+64 concurrent read views (30-second lifetime), three retained generations and
+15-minute encrypted cursors. Source lexical projections cover up to 1 MiB and
+16,384 unique terms; larger sources remain on an explicit unindexed route.
+Exact phrases use a safe interior-word anchor when available, otherwise bounded
+metadata/range traversal. Exhaustive pages freeze generation coverage and tail;
+top-k reports incomplete work separately. Shared work/byte/deadline/cancellation
+checks cover the query and projection publication lock. These finite bounds do
+not establish the million-event latency target or eliminate hardware timing
+channels. Generation reclamation and broader custody controls follow in hardening.
 
 Reconcile an index generation with a bounded revision overlay that includes
 updates, retractions, supersession, deletion and permission changes. Mask old

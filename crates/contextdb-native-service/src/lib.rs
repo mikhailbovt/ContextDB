@@ -15,13 +15,17 @@
 mod adapter_tests;
 mod backup;
 mod capture;
+mod indexed_provider;
 mod payload;
 mod provider;
 mod raw;
+mod raw_index;
 
 pub use backup::{NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT};
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
+pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
+pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -267,6 +271,8 @@ struct StoredEvent {
     accepted_original: Option<capture::CaptureWork>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_payload: Option<contextdb_core::OriginalPayloadRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_original_revocation: Option<OriginalRevocationReceipt>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -306,6 +312,7 @@ pub struct NativeService {
     database_id: String,
     token_key: Zeroizing<[u8; 32]>,
     writes: Mutex<()>,
+    index_views: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl fmt::Debug for NativeService {
@@ -338,6 +345,7 @@ impl NativeService {
             database_id,
             token_key: Zeroizing::new(token_key),
             writes: Mutex::new(()),
+            index_views: std::sync::Arc::default(),
         };
         service.install_or_verify_manifest()?;
         service.verify_native(false)?;
@@ -549,6 +557,11 @@ impl NativeService {
                 None
             },
             event_digest: String::new(),
+            accepted_original_revocation: if operation == "original_revocation" {
+                Some(decode(&response_bytes, "original revocation receipt")?)
+            } else {
+                None
+            },
         };
         event.event_digest = event_digest(&event)?;
         let idempotency = StoredIdempotency {
@@ -1010,6 +1023,7 @@ impl NativeService {
         self.verify_active_graph_invariants(snapshot)?;
         self.verify_capture_records(snapshot)?;
         self.verify_payload_records(snapshot)?;
+        self.verify_raw_index_records(snapshot)?;
         for entry in snapshot
             .scan_prefix(&self.keyspaces.events, b"")
             .map_err(storage_error)?
@@ -2908,7 +2922,9 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.format != FORMAT_NAME
         || manifest.database_id != database_id
         || manifest.features.iter().any(|feature| {
-            feature != capture::CAPTURE_FEATURE && feature != payload::SOURCE_FEATURE
+            feature != capture::CAPTURE_FEATURE
+                && feature != payload::SOURCE_FEATURE
+                && feature != raw_index::INDEX_FEATURE
         })
         || manifest.checksum != manifest_checksum(manifest)?
     {
