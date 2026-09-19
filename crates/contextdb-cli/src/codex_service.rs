@@ -10,7 +10,9 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use contextdb_native_service::{NATIVE_BACKUP_FORMAT, NativeService};
+use contextdb_native_service::{
+    NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NativeService,
+};
 use contextdb_service::{
     BackupResponse, Capability, CapabilityState, CognitiveMemoryService, CompileContextRequest,
     CompileContextResponse, CorrectRequest, CreateBackupRequest, ErrorCode, ExplainRecallRequest,
@@ -248,7 +250,10 @@ impl CognitiveMemoryService for CodexService {
                 ));
             }
             let native = self.native.create_backup(request)?;
-            if native.format != NATIVE_BACKUP_FORMAT {
+            if !matches!(
+                native.format.as_str(),
+                NATIVE_BACKUP_FORMAT | NATIVE_CONTINUOUS_BACKUP_FORMAT
+            ) {
                 return Err(integrity_backup("native backup format diverged"));
             }
             let native_commit_seq = native.commit_seq;
@@ -438,12 +443,12 @@ struct CodexBackupEnvelope {
 fn encode_codex_backup(envelope: &CodexBackupEnvelope) -> ServiceResult<Vec<u8>> {
     validate_codex_component(
         &envelope.lifecycle,
-        "contextdb.logical.v1",
+        &["contextdb.logical.v1"],
         MAX_LIFECYCLE_COMPONENT_BYTES,
     )?;
     validate_codex_component(
         &envelope.native,
-        NATIVE_BACKUP_FORMAT,
+        &[NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT],
         MAX_NATIVE_COMPONENT_BYTES,
     )?;
     let identity = crate::state_head::inspect_archive(&envelope.lifecycle.bytes)
@@ -513,12 +518,12 @@ fn decode_codex_backup(bytes: &[u8]) -> ServiceResult<CodexBackupEnvelope> {
     };
     validate_codex_component(
         &envelope.lifecycle,
-        "contextdb.logical.v1",
+        &["contextdb.logical.v1"],
         MAX_LIFECYCLE_COMPONENT_BYTES,
     )?;
     validate_codex_component(
         &envelope.native,
-        NATIVE_BACKUP_FORMAT,
+        &[NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT],
         MAX_NATIVE_COMPONENT_BYTES,
     )?;
     let identity = crate::state_head::inspect_archive(&envelope.lifecycle.bytes)
@@ -541,10 +546,10 @@ fn decode_codex_backup(bytes: &[u8]) -> ServiceResult<CodexBackupEnvelope> {
 
 fn validate_codex_component(
     component: &BackupComponent,
-    expected_format: &str,
+    expected_formats: &[&str],
     maximum: usize,
 ) -> ServiceResult<()> {
-    if component.format != expected_format {
+    if !expected_formats.contains(&component.format.as_str()) {
         return Err(ServiceError::new(
             ErrorCode::FormatIncompatible,
             "Codex backup component format is incompatible",
@@ -868,6 +873,33 @@ mod tests {
     }
 
     #[test]
+    fn composite_backup_accepts_legacy_native_format_and_rejects_unknown_formats() {
+        let (_directory, _state, service) = fixture();
+        let backup = service
+            .create_backup(CreateBackupRequest {
+                context: authenticated("request:legacy-backup", [Capability::Admin]),
+            })
+            .expect("pristine native v1 backup");
+        let mut envelope = decode_codex_backup(&backup.bytes).expect("legacy component");
+        assert_eq!(envelope.native.format, NATIVE_BACKUP_FORMAT);
+        service
+            .restore_backup(RestoreBackupRequest {
+                context: authenticated("request:legacy-restore", [Capability::Admin]),
+                format: backup.format,
+                bytes: backup.bytes,
+                digest: backup.digest,
+            })
+            .expect("restore legacy native component");
+        envelope.native.format = "contextdb.native-fjall.logical-backup.unknown".into();
+        assert_eq!(
+            encode_codex_backup(&envelope)
+                .expect_err("unknown native format")
+                .code,
+            ErrorCode::FormatIncompatible
+        );
+    }
+
+    #[test]
     fn composite_backup_restores_only_a_pristine_native_authority_and_reopens() {
         let (directory, state, service) = fixture();
         let path = directory.path().join("codex-hybrid.ctxb");
@@ -880,6 +912,13 @@ mod tests {
             })
             .expect("create composite backup");
         assert_eq!(backup.format, CODEX_BACKUP_FORMAT);
+        assert_eq!(
+            decode_codex_backup(&backup.bytes)
+                .expect("decode backup")
+                .native
+                .format,
+            NATIVE_CONTINUOUS_BACKUP_FORMAT
+        );
         assert_eq!(
             backup.digest,
             blake3::hash(&backup.bytes).to_hex().to_string()
