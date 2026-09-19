@@ -9,6 +9,8 @@
 #![warn(missing_docs)]
 
 mod benchmark;
+#[cfg(feature = "service-adapter")]
+mod capture;
 mod clock;
 mod cognition;
 mod control;
@@ -22,6 +24,8 @@ mod store;
 mod types;
 
 pub use benchmark::*;
+#[cfg(feature = "service-adapter")]
+pub use capture::*;
 pub use clock::*;
 pub use cognition::*;
 pub use control::*;

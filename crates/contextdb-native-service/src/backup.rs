@@ -23,8 +23,9 @@ use super::{
 
 /// Exact format returned by the native administrative backup operation.
 pub const NATIVE_BACKUP_FORMAT: &str = "contextdb.native-fjall.logical-backup.v1";
+/// Backup format including the continuous capture authority.
+pub const NATIVE_CONTINUOUS_BACKUP_FORMAT: &str = "contextdb.native-fjall.logical-backup.v2";
 
-const BACKUP_SCHEMA_VERSION: u16 = 1;
 const BACKUP_MAGIC: &[u8] = b"contextdb/native-backup/v1\0";
 const BACKUP_FOOTER_BYTES: usize = 32;
 const MAX_BACKUP_BYTES: usize = 256 * 1024 * 1024;
@@ -43,6 +44,7 @@ struct BackupKeyspace {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct NativeBackup {
+    format: String,
     database_id: String,
     commit_seq: u64,
     deep_digest: String,
@@ -75,6 +77,12 @@ impl NativeService {
         // rescanning an unbounded source keyspace after the cap-enforcing
         // paged collection pass.
         let mut archive = NativeBackup {
+            format: if keyspaces.len() == self.keyspaces.all().len() {
+                NATIVE_CONTINUOUS_BACKUP_FORMAT
+            } else {
+                NATIVE_BACKUP_FORMAT
+            }
+            .to_owned(),
             database_id: self.database_id.clone(),
             commit_seq: 0,
             deep_digest: "0".repeat(64),
@@ -88,7 +96,7 @@ impl NativeService {
         archive.deep_digest = deep_digest;
         let bytes = encode_backup(&archive)?;
         Ok(BackupResponse {
-            format: NATIVE_BACKUP_FORMAT.to_owned(),
+            format: archive.format,
             digest: digest_bytes(&bytes),
             bytes,
             commit_seq,
@@ -103,7 +111,10 @@ impl NativeService {
         // database identity must not be usable as an oracle by an untrusted
         // caller.
         require_capability(&request.context, Capability::Admin)?;
-        if request.format != NATIVE_BACKUP_FORMAT {
+        if !matches!(
+            request.format.as_str(),
+            NATIVE_BACKUP_FORMAT | NATIVE_CONTINUOUS_BACKUP_FORMAT
+        ) {
             return Err(ServiceError::new(
                 ErrorCode::FormatIncompatible,
                 "native backup format is incompatible",
@@ -116,8 +127,16 @@ impl NativeService {
         if request.digest != digest_bytes(&request.bytes) {
             return Err(integrity("native backup digest is invalid"));
         }
-        let RestoreBackupRequest { context, bytes, .. } = request;
+        let RestoreBackupRequest {
+            context,
+            bytes,
+            format,
+            ..
+        } = request;
         let archive = decode_backup(&bytes, &self.database_id)?;
+        if archive.format != format {
+            return Err(integrity("native backup format differs from its header"));
+        }
         drop(bytes);
         let archive_snapshot = BackupSnapshot::new(&archive);
         let (commit_seq, deep_digest) = self.verify_backup_snapshot(&archive_snapshot)?;
@@ -264,6 +283,10 @@ impl NativeService {
                     return Err(integrity("native backup scan cursor did not advance"));
                 }
                 continuation = Some(next);
+            }
+            // Preserve the exact v1 archive layout when capture has never run.
+            if keyspace == &self.keyspaces.continuous && entries.is_empty() {
+                continue;
             }
             output.push(BackupKeyspace {
                 name: keyspace.as_str().to_owned(),
@@ -495,8 +518,15 @@ fn validate_backup_entry(entry: &Entry) -> ServiceResult<()> {
 fn encode_backup(archive: &NativeBackup) -> ServiceResult<Vec<u8>> {
     let mut output = Vec::new();
     push_bytes(&mut output, BACKUP_MAGIC)?;
-    push_u16(&mut output, BACKUP_SCHEMA_VERSION)?;
-    push_string(&mut output, NATIVE_BACKUP_FORMAT)?;
+    push_u16(
+        &mut output,
+        if archive.format == NATIVE_BACKUP_FORMAT {
+            1
+        } else {
+            2
+        },
+    )?;
+    push_string(&mut output, &archive.format)?;
     push_string(&mut output, FORMAT_NAME)?;
     push_string(&mut output, &archive.database_id)?;
     push_u64(&mut output, archive.commit_seq)?;
@@ -533,9 +563,14 @@ fn decode_backup(bytes: &[u8], database_id: &str) -> ServiceResult<NativeBackup>
         return Err(integrity("native backup footer digest is invalid"));
     }
     let mut reader = BackupReader::new(body);
-    if reader.take(BACKUP_MAGIC.len())? != BACKUP_MAGIC
-        || reader.read_u16()? != BACKUP_SCHEMA_VERSION
-        || reader.read_string(128)? != NATIVE_BACKUP_FORMAT
+    let magic = reader.take(BACKUP_MAGIC.len())?;
+    let schema = reader.read_u16()?;
+    let format = reader.read_string(128)?;
+    if magic != BACKUP_MAGIC
+        || !matches!(
+            (schema, format.as_str()),
+            (1, NATIVE_BACKUP_FORMAT) | (2, NATIVE_CONTINUOUS_BACKUP_FORMAT)
+        )
         || reader.read_string(128)? != FORMAT_NAME
     {
         return Err(ServiceError::new(
@@ -560,6 +595,7 @@ fn decode_backup(bytes: &[u8], database_id: &str) -> ServiceResult<NativeBackup>
     let expected_keyspaces = super::Keyspaces::new()?
         .all()
         .into_iter()
+        .take(if schema == 1 { 11 } else { 12 })
         .map(|keyspace| keyspace.as_str().to_owned())
         .collect::<Vec<_>>();
     if usize::from(reader.read_u16()?) != expected_keyspaces.len() {
@@ -619,6 +655,7 @@ fn decode_backup(bytes: &[u8], database_id: &str) -> ServiceResult<NativeBackup>
         return Err(integrity("native backup contains trailing body bytes"));
     }
     let archive = NativeBackup {
+        format,
         database_id: archive_database_id,
         commit_seq,
         deep_digest,
