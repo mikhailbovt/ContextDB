@@ -831,9 +831,22 @@ fn mixed_under_compaction(
     let max_bytes = dataset.config().working_buffer_budget_bytes;
     let compaction = thread::spawn(move || -> Result<u64> {
         let started = Instant::now();
-        compact_engine.compact(CompactRequest {
-            max_bytes: Some(max_bytes),
-        })?;
+        loop {
+            if compact_engine
+                .try_compact(CompactRequest {
+                    max_bytes: Some(max_bytes),
+                })?
+                .is_some()
+            {
+                break;
+            }
+            if started.elapsed() >= std::time::Duration::from_secs(10) {
+                return Err(BenchError::Integrity(
+                    "background compaction remained busy for 10 seconds".into(),
+                ));
+            }
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
         elapsed_ns(started)
     });
     let primary = keyspace(PRIMARY_SPACE)?;

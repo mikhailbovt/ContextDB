@@ -90,6 +90,25 @@ impl RedbStorage {
     fn database(&self) -> Result<std::sync::MutexGuard<'_, Database>> {
         self.database.lock().map_err(|_| StorageError::LockPoisoned)
     }
+
+    /// Try physical compaction without waiting for open MVCC transactions.
+    /// `None` means deferred, not compacted; callers may retry within their own
+    /// deadline after releasing snapshots. Other backend failures remain errors.
+    pub fn try_compact(&self, _request: CompactRequest) -> Result<Option<CompactReport>> {
+        let mut database = self.database()?;
+        let sequence = {
+            let transaction = database.begin_read().map_err(backend)?;
+            head_from_read(&transaction)?
+        };
+        match database.compact() {
+            Ok(compacted) => Ok(Some(CompactReport {
+                sequence,
+                bytes_reclaimed: u64::from(compacted),
+            })),
+            Err(redb::CompactionError::TransactionInProgress) => Ok(None),
+            Err(error) => Err(backend(error)),
+        }
+    }
 }
 
 /// Immutable redb MVCC read transaction.
@@ -321,13 +340,9 @@ impl StorageEngine for RedbStorage {
         })
     }
 
-    fn compact(&self, _request: CompactRequest) -> Result<CompactReport> {
-        let sequence = self.head_sequence()?;
-        let compacted = self.database()?.compact().map_err(backend)?;
-        Ok(CompactReport {
-            sequence,
-            bytes_reclaimed: u64::from(compacted),
-        })
+    fn compact(&self, request: CompactRequest) -> Result<CompactReport> {
+        self.try_compact(request)?
+            .ok_or_else(|| backend(redb::CompactionError::TransactionInProgress))
     }
 
     fn verify(&self, _mode: VerifyMode) -> Result<VerifyReport> {
@@ -356,6 +371,26 @@ mod tests {
     };
 
     use super::RedbStorage;
+
+    #[test]
+    fn compaction_is_explicitly_deferred_until_the_snapshot_is_released() {
+        let directory = tempfile::tempdir().expect("directory");
+        let db = RedbStorage::open(directory.path().join("compaction.redb")).expect("open");
+        let held = db
+            .begin_read(SnapshotSelector::Latest)
+            .expect("held snapshot");
+        let request = contextdb_storage::CompactRequest { max_bytes: None };
+        assert!(db.try_compact(request).expect("try while held").is_none());
+        assert_eq!(held.sequence(), 0);
+        drop(held);
+        assert_eq!(
+            db.try_compact(request)
+                .expect("idle compaction")
+                .expect("performed")
+                .sequence,
+            0
+        );
+    }
 
     #[test]
     fn synced_commit_survives_reopen() {
