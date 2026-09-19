@@ -3,6 +3,8 @@ use contextdb_context::*;
 use contextdb_recall::{IndexedQuery, IndexedSelection};
 use contextdb_service::{Capability, PrepareContextPort, PrepareContextRequest};
 
+mod leases;
+
 fn allowance() -> QueryBudget {
     QueryBudget::new(
         500_000,

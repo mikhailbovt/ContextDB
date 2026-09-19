@@ -17,6 +17,7 @@ mod assertions;
 mod backup;
 mod capture;
 mod indexed_provider;
+mod lease;
 mod owned;
 mod payload;
 mod prepare;
@@ -323,6 +324,9 @@ pub struct NativeService {
     token_key: Zeroizing<[u8; 32]>,
     writes: Mutex<()>,
     index_views: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    leases: Mutex<lease::LeaseRegistry>,
+    lease_started: std::time::Instant,
+    lease_instance: uuid::Uuid,
 }
 
 impl fmt::Debug for NativeService {
@@ -356,6 +360,9 @@ impl NativeService {
             token_key: Zeroizing::new(token_key),
             writes: Mutex::new(()),
             index_views: std::sync::Arc::default(),
+            leases: Mutex::new(lease::LeaseRegistry::default()),
+            lease_started: std::time::Instant::now(),
+            lease_instance: contextdb_core::ObservationId::new().as_uuid(),
         };
         service.install_or_verify_manifest()?;
         service.verify_native(false)?;

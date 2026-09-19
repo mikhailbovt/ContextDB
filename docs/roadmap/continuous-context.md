@@ -14,8 +14,8 @@ native or model acceptance.
 | 04 | Persistent authorized indexed provider and exhaustive paging | Merged in #6; CI passed on all four native targets |
 | 05 | Temporal assertions, resolution, negative overlay and coverage | Merged in #7; CI passed on all four native targets |
 | 06 | Evidence compiler, whole-request manifest, R0 and budgets | Merged in #8; all eight CI jobs passed |
-| 07 | Owned conversation runtime, rolling, checkpoint and resume | Implemented embedded lifecycle; reader/cache acceptance remains open |
-| 08 | Atomic lease admission, invalidation and action fences | Planned |
+| 07 | Owned conversation runtime, rolling, checkpoint and resume | Merged in #9; all eight CI jobs passed; reader/cache acceptance remains open |
+| 08 | Atomic lease admission, invalidation and action fences | Embedded owner checks implemented; strict transport handoff remains open |
 | 09 | Cache/cost controller and paired runtime evaluation | Planned |
 | 10 | Restore/revocation, retention, custody and bounded publication | Planned |
 | 11 | Migration, integrations, demo and release evidence | Planned |
@@ -121,5 +121,16 @@ proposal causes the next encoded request to contain the selected original.
 Interrupted protocol bytes survive a lost receipt and restart without becoming
 executable tool calls. The final affected run passes 108 tests (8 agent runtime,
 25 continuity, 75 native service). These are engine/lifecycle checks; the guard
-and reader are explicit test fixtures. The native phase-08 dispatch fence, real
-reader quality and measured prefill/cache behavior remain open.
+and reader are explicit test fixtures. Real reader quality and measured
+prefill/cache behavior remain open; native admission is covered below.
+
+Phase 08 adds owner-sealed preparation, atomic lease registration, coalesced scope
+subscriptions and fresh model/tool admission. Native checks cover registration
+races, new negative state, wire/source-list tampering, current authorization,
+owner restart and real temporal expiry without a write. The owned flow admits a
+real file effect with unchanged dependencies, blocks it after new source input or
+an obligation change, and bounds repeated invalidation before any model send.
+Built-in expansion works with the native guard and interpretation left pending.
+The affected 157 Rust tests, all-workspace Clippy and governance checks pass.
+Strict transport handoff/cancellation, real provider measurements and later
+retention/custody hardening remain separate gates.

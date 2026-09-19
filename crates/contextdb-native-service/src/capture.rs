@@ -151,6 +151,39 @@ impl CapturePort for NativeService {
 }
 
 impl NativeService {
+    /// Check an already-verified immutable version without decoding its original
+    /// body while a dispatch admission holds publication authority.
+    pub(super) fn check_captured_payload_version<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        expected: ContentDigest,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<()> {
+        self.authorized_capture_policy(snapshot, context, id)?;
+        self.authorize_capture_dependencies(snapshot, context, id)?;
+        let bytes = snapshot
+            .get(&self.keyspaces.continuous, &record_key(id))
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("lease capture receipt missing"))?;
+        budget
+            .charge(1, bytes.len() as u64)
+            .map_err(super::raw_index::budget_error)?;
+        let record: CaptureRecord = decode(&bytes, "lease capture version")?;
+        if record.receipt.event_id != id
+            || record.receipt.database_id != self.database_id
+            || record.receipt.workspace_id.to_string() != context.request.workspace_id
+            || record.receipt.domain != NATIVE_CAPTURE_DOMAIN
+            || record.receipt.payload_digest != Some(expected)
+        {
+            return Err(integrity(
+                "lease source version differs from its native receipt",
+            ));
+        }
+        Ok(())
+    }
+
     // Only OwnedRunPort can bind an operational checkpoint to the run head.
     // Normal capture cannot manufacture this authority through a provenance tag.
     pub(super) fn append_owned_capture(

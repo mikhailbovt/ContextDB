@@ -99,6 +99,25 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         now: TimestampMicros,
         budget: &mut QueryBudget,
     ) -> ServiceResult<ToolOutcome> {
+        self.execute_tool_with_class(
+            registered_operation,
+            target,
+            fence,
+            ToolAdmissionClass::ExternalEffect,
+            now,
+            budget,
+        )
+    }
+
+    pub(super) fn execute_tool_with_class(
+        &mut self,
+        registered_operation: &str,
+        target: &dyn ExternalTool,
+        fence: &dyn ToolDispatchFence,
+        class: ToolAdmissionClass,
+        now: TimestampMicros,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<ToolOutcome> {
         self.ensure_active()?;
         if !matches!(self.phase, CallPhase::Ready) {
             return Err(invalid("model attempt is not at a tool boundary"));
@@ -157,6 +176,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             .parent_event_ids
             .insert(planned.proposal.event_id);
         let guarded = GuardedTool {
+            class,
             target,
             fence,
             checkpoint: &self.checkpoint_receipt,
@@ -309,6 +329,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
 }
 
 struct GuardedTool<'a> {
+    class: ToolAdmissionClass,
     target: &'a dyn ExternalTool,
     fence: &'a dyn ToolDispatchFence,
     checkpoint: &'a CaptureReceipt,
@@ -329,10 +350,14 @@ impl ExternalTool for GuardedTool<'_> {
             .budget
             .lock()
             .map_err(|_| invalid("tool dispatch budget lock poisoned"))?;
-        if let Err(error) =
-            self.fence
-                .before_tool(context, self.checkpoint, self.planned, action, &mut budget)
-        {
+        if let Err(error) = self.fence.before_tool(
+            context,
+            self.checkpoint,
+            self.planned,
+            action,
+            self.class,
+            &mut budget,
+        ) {
             return Ok(ToolObservation {
                 outcome: ToolOutcome::Failed,
                 bytes: Some(

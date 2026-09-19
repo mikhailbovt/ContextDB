@@ -218,14 +218,13 @@ dependencies and sufficient support alternatives before admission, and measures
 each optional singleton or bounded complementary pair against the complete
 rendered request. Shared source ranges count once. R0 can stop without removing
 mandatory state; it cannot confer authority. Preparation rechecks scope/policy
-epochs and temporal expiry after rendering, but does not yet register a lease.
+epochs and temporal expiry after rendering; registration remains a separate step.
 
 The initial embedded profile supports 32 scopes, 256 mandatory slots, eight raw
 routes, 512 candidates, 2,048 supports, 64 complementary pairs and a caller-bounded
 selection work limit. The reference JSON encoder uses its declared reference
 tokenizer; it is not a vendor model protocol or model tokenization claim. Actual
-provider integration, dispatch fences and transport adapters are delivered by
-the following phases.
+provider integration and transport adapters remain separate delivery gates.
 
 1. Select and freeze the prospective hot layout **after planned eviction**.
    Only completed, durably captured protocol groups can be evicted.
@@ -262,8 +261,8 @@ post-eviction hot groups, derives bounded lexical discovery routes, prepares and
 captures the whole request, calls a required dispatch guard, then captures the
 visible response. A bounded `drive` loop executes registered tools and source-bound
 memory expansion between model calls. A missing interpreter retains explicit
-unknown state; it does not certify arbitrary text as understood. Native guards
-and real reader/cache measurements remain delivery gates.
+unknown state; it does not certify arbitrary text as understood. The owner dispatch
+adapter checks native leases; real reader/cache measurements remain delivery gates.
 
 `OwnedRunPort` publishes each source-addressed checkpoint and run head in the
 same native synchronized capture transaction. Revisions use compare-and-publish;
@@ -314,6 +313,36 @@ Explicit host `ModelRequest` provenance binds disclosure-only scope behavior to
 the immutable event; legacy observations retain their original scope impact.
 `continuous-request-transforms-v1` and `continuous-capture-impact-v1` prevent older
 readers from silently accepting these rules.
+
+## Native context leases
+
+`ContextLeasePort` compares an owner-sealed assembly and registers its source and
+scope dependencies under the native publication lock. Scope epochs cover absent
+constraints as well as selected records. Polling gives coalesced invalidations;
+dispatch always rechecks epochs, source permissions, capability grants and the
+current run head. A modified wire/read-set cannot reuse a preparation seal.
+
+`OwnerDispatchFence` registers and checks before model handoff. Tool admission
+also binds the exact action, originating model request, resident decision context
+and obligations. A bounded journal check distinguishes that model's own proposal
+and operational checkpoints from new input, semantics or tool results requiring
+replanning. External effects require established current interpretation; the
+host-selected built-in memory expansion can read originals while interpretation
+is still explicitly incomplete. Operation text cannot choose the effect class.
+
+The initial profile retains at most 64 leases / 16 MiB of dependency metadata,
+checks at most 64 intervening commits, and caps validity at 30 seconds or the next
+known temporal/consent boundary. Both elapsed and wall time apply. Leases retain no
+physical snapshot and expire on release or owner restart. Expiry requires fresh
+preparation; slow-reader lifetime tuning remains part of runtime evaluation.
+Invalidation refresh shares the bounded drive allowance and stops on exhaustion.
+
+This is checked local admission. The writer is released before model/target I/O;
+it does not make a remote handoff atomic with a concurrent native write. Strict
+nonblocking handoff and in-flight cancellation require a tested transport profile.
+External version comparison/idempotency and operation authorization remain target
+contracts. A current lease proves dependency freshness, not natural-language
+understanding or permission to execute arbitrary model-proposed code.
 
 ## Provenance, migration and evaluation
 

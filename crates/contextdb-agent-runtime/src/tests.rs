@@ -16,6 +16,7 @@ use contextdb_service::{Capability, *};
 
 use super::*;
 
+mod fences;
 mod partial;
 mod tools;
 
@@ -292,6 +293,7 @@ impl ToolDispatchFence for FixtureFence {
         _: &CaptureReceipt,
         _: &PendingToolInvocation,
         _: &contextdb_capture::ToolAction,
+        _: ToolAdmissionClass,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         charge(budget, 1, 0)
