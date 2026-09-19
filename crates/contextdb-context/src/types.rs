@@ -811,7 +811,8 @@ pub struct ModelProfile {
 }
 
 impl ModelProfile {
-    pub(crate) fn validate(&self) -> Result<()> {
+    /// Validate the declared tokenizer, renderer and usable input/output capacity.
+    pub fn validate(&self) -> Result<()> {
         validate_non_blank(&self.id, "model profile ID")?;
         validate_non_blank(&self.family, "model family")?;
         validate_non_blank(&self.tokenizer_id, "tokenizer ID")?;

@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "bindings/python",
+    "crates/contextdb-agent-runtime",
     "crates/contextdb-bench",
     "crates/contextdb-capture",
     "crates/contextdb-chat",
@@ -50,6 +51,7 @@ homepage = "https://github.com/mikhailbovt/ContextDB"
 description = "AI-native persistent memory engine for language models and AI systems"
 
 [workspace.dependencies]
+contextdb-agent-runtime = { version = "0.2.0-alpha.3", path = "crates/contextdb-agent-runtime" }
 axum = "0.8.9"
 blake3 = "1.8.6"
 chacha20poly1305 = { version = "0.11.0", features = ["zeroize"] }

@@ -141,6 +141,173 @@ fn request_manifest_replays_exact_wire_and_rejects_echo_roots_and_reordering() {
 }
 
 #[test]
+fn json_request_capture_preserves_escaped_original_identity_and_current_acl() {
+    use contextdb_context::*;
+    use contextdb_recall::QueryBudget;
+    let directory = tempfile::tempdir().expect("directory");
+    let service = NativeService::open(directory.path(), "capture-db", [7; 32]).expect("open");
+    let original = request(1, "Шутка: \"C:\\лапша\"\nВторая строка\tи табуляция.");
+    service.append_event(original.clone()).expect("capture");
+    let bytes = original.event.payload.original_bytes().expect("text");
+    let messages = vec![OutgoingMessage {
+        id: BlockId::new("current").expect("id"),
+        zone: OutgoingZone::CurrentTurn,
+        role: OutgoingRole::User,
+        text: std::str::from_utf8(bytes).expect("UTF-8").into(),
+        originals: vec![VisibleOriginal {
+            span: span(&original.event, bytes),
+            text_start: 0,
+            text_end: bytes.len() as u64,
+        }],
+        tool_calls: vec![],
+        tool_result: None,
+    }];
+    let encoder = ReferenceOutgoingEncoder(&ReferenceTokenizer);
+    let mut budget = QueryBudget::new(
+        1000,
+        1024 * 1024,
+        std::time::Duration::from_secs(5),
+        Default::default(),
+    );
+    let wire = encoder.encode(&messages, &mut budget).expect("wire");
+    let manifest = encoder
+        .capture_manifest(ModelCallId::new(), &messages, &wire, &mut budget)
+        .expect("provenance");
+    assert!(
+        manifest
+            .parts
+            .iter()
+            .any(|part| matches!(part, RequestPart::JsonStringSource { .. }))
+    );
+    let mut occurrence = request(2, "placeholder");
+    occurrence
+        .context
+        .capability_grants
+        .insert(Capability::Runtime);
+    occurrence.event.kind = EventKind::ModelRequested;
+    occurrence.event.role = contextdb_core::EventRole::Host;
+    occurrence.event.provenance = Some(contextdb_core::EventProvenance::ModelRequest {
+        model_call_id: manifest.model_call_id,
+    });
+    occurrence.event.payload = EventPayload::Assembly { manifest };
+    service
+        .append_event(occurrence.clone())
+        .expect("escaped capture");
+    let snapshot = service
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("view");
+    let scope = original.event.scope_ids.first().expect("scope");
+    let epoch: u64 = decode(
+        &snapshot
+            .get(
+                &service.keyspaces.continuous,
+                &crate::capture::scope_key(
+                    &crate::digest_bytes(original.context.request.workspace_id.as_bytes()),
+                    &scope.to_string(),
+                ),
+            )
+            .expect("epoch")
+            .expect("scope exists"),
+        "epoch",
+    )
+    .expect("decode");
+    assert_eq!(
+        epoch, 1,
+        "verified disclosure echo must not invalidate its own preparation"
+    );
+    let replay_span = span(&occurrence.event, &wire.wire);
+    assert_eq!(
+        service
+            .read_original_span(&occurrence.context, &replay_span)
+            .expect("replay"),
+        wire.wire
+    );
+    service
+        .verify_native(true)
+        .expect("transformed source closure");
+    service
+        .revoke_original(
+            &original.context,
+            original.event.event_id,
+            "revoke",
+            &mut budget,
+        )
+        .expect("revoke");
+    assert!(
+        service
+            .read_original_span(&occurrence.context, &replay_span)
+            .is_err()
+    );
+}
+
+#[test]
+fn capture_host_stages_large_novel_request_parts_without_losing_source_identity() {
+    let directory = tempfile::tempdir().expect("directory");
+    let owner =
+        Arc::new(NativeService::open(directory.path(), "capture-db", [7; 32]).expect("open"));
+    let original = request(1, "Exact old original");
+    owner.append_event(original.clone()).expect("source");
+    let source = original.event.payload.original_bytes().expect("bytes");
+    let prefix = vec![b'a'; 150_000];
+    let suffix = vec![b'b'; 150_000];
+    let wire = [prefix.as_slice(), source, suffix.as_slice()].concat();
+    let manifest = ModelRequestManifest {
+        model_call_id: ModelCallId::new(),
+        renderer: "test-large-wire/v1".into(),
+        wire_digest: raw_digest(&wire),
+        byte_length: wire.len() as u64,
+        parts: vec![
+            RequestPart::Novel { bytes: prefix },
+            RequestPart::Source {
+                span: span(&original.event, source),
+            },
+            RequestPart::Novel { bytes: suffix },
+        ],
+    };
+    let host = contextdb_capture::CaptureHost::new(Arc::clone(&owner));
+    let mut input = request(2, "");
+    input.context.capability_grants.insert(Capability::Runtime);
+    let receipt = host
+        .capture_model_request(input.clone(), manifest.clone())
+        .expect("staged wire")
+        .receipt;
+    assert_eq!(
+        host.capture_model_request(input.clone(), manifest)
+            .expect("same staged retry")
+            .receipt,
+        receipt
+    );
+    let captured = owner
+        .read_original(ReadOriginalRequest {
+            context: input.context.clone(),
+            event_id: receipt.event_id,
+            after_receipt: None,
+        })
+        .expect("manifest");
+    let EventPayload::Assembly { manifest } = &captured.event.payload else {
+        panic!("assembly expected");
+    };
+    assert_eq!(
+        manifest
+            .parts
+            .iter()
+            .filter(|part| matches!(part, RequestPart::StoredNovel { .. }))
+            .count(),
+        2
+    );
+    assert_eq!(
+        owner
+            .read_original_span(&input.context, &span(&captured.event, &wire))
+            .expect("wire replay"),
+        wire
+    );
+    owner
+        .verify_native(true)
+        .expect("staged novel blocks and referenced source closure");
+}
+
+#[test]
 fn request_source_permission_is_checked_before_request_body_materialization() {
     let dir = tempfile::tempdir().expect("directory");
     let service = NativeService::open(dir.path(), "capture-db", [7; 32]).expect("open");

@@ -17,6 +17,7 @@ mod assertions;
 mod backup;
 mod capture;
 mod indexed_provider;
+mod owned;
 mod payload;
 mod prepare;
 mod provider;
@@ -2943,7 +2944,11 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.database_id != database_id
         || manifest.features.iter().any(|feature| {
             feature != capture::CAPTURE_FEATURE
+                && feature != capture::IMPACT_FEATURE
+                && feature != owned::OWNED_FEATURE
                 && feature != payload::SOURCE_FEATURE
+                && feature != payload::MODEL_PROTOCOL_FEATURE
+                && feature != payload::REQUEST_TRANSFORM_FEATURE
                 && feature != raw_index::INDEX_FEATURE
                 && feature != assertions::STATE_FEATURE
                 && feature != assertions::CATALOG_FEATURE

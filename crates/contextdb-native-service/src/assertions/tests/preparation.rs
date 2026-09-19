@@ -77,6 +77,7 @@ fn request(input: &CaptureRequest) -> PrepareContextRequest {
             external_processing: false,
         },
         base: OutgoingBase {
+            working: Vec::new(),
             control: Vec::new(),
             hot: Vec::new(),
             current: Vec::new(),

@@ -593,6 +593,9 @@ impl NativeService {
                 continue;
             }
             self.authorized_capture_policy(snapshot, context, work.event_id)?;
+            if !self.capture_affects_scope(snapshot, work.event_id)? {
+                continue;
+            }
             self.authorize_capture_dependencies(snapshot, context, work.event_id)?;
             events.insert(work.event_id);
         }

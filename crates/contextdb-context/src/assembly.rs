@@ -7,6 +7,8 @@ use contextdb_core::{ContentDigest, OriginalSourceSpan, TimestampMicros};
 use contextdb_recall::QueryBudget;
 use serde::{Deserialize, Serialize};
 
+mod replay;
+
 use crate::{BlockId, CompileRequest, CompiledContext, ContextProvider, EvidenceHandle, Result};
 
 /// Version of the ordered layout and source coverage rules.
@@ -64,6 +66,9 @@ pub struct OutgoingMessage {
 #[serde(deny_unknown_fields)]
 pub struct OutgoingBase {
     pub control: Vec<OutgoingMessage>,
+    /// Source-backed active obligations; always retained as data, never control.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub working: Vec<OutgoingMessage>,
     pub hot: Vec<OutgoingMessage>,
     pub current: Vec<OutgoingMessage>,
 }

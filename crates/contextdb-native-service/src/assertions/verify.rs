@@ -114,7 +114,9 @@ impl NativeService {
                     return Err(integrity("accepted input window exceeded its bound"));
                 }
                 let original = self.load_captured_original(snapshot, work.event_id)?;
-                if original.event.scope_ids.contains(&accepted.scope) {
+                if original.event.scope_ids.contains(&accepted.scope)
+                    && self.capture_affects_scope(snapshot, work.event_id)?
+                {
                     required.insert(work.event_id);
                 }
             }

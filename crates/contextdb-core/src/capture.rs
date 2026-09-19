@@ -40,6 +40,16 @@ pub struct OriginalSourceSpan {
 pub enum RequestPart {
     /// Previously captured source bytes, checked under their own current ACL.
     Source { span: OriginalSourceSpan },
+    /// UTF-8 source escaped as JSON string contents (without surrounding quotes).
+    /// Explicit transform identity preserves custody without claiming verbatim wire.
+    JsonStringSource {
+        /// Independently authorized original bytes before escaping.
+        span: OriginalSourceSpan,
+        /// Exact escaped wire size; bounded and verified during replay.
+        byte_length: u64,
+        /// BLAKE3 of the escaped contents.
+        digest: ContentDigest,
+    },
     /// New wire bytes, including exact renderer/protocol delimiters.
     Novel { bytes: Vec<u8> },
     /// Large novel wire bytes retained as a policy-bound durable block.
@@ -50,6 +60,16 @@ impl std::fmt::Debug for RequestPart {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Source { span } => f.debug_tuple("Source").field(span).finish(),
+            Self::JsonStringSource {
+                span,
+                byte_length,
+                digest,
+            } => f
+                .debug_struct("JsonStringSource")
+                .field("span", span)
+                .field("byte_length", byte_length)
+                .field("digest", digest)
+                .finish(),
             Self::Novel { bytes } => f
                 .debug_struct("Novel")
                 .field("byte_length", &bytes.len())
@@ -75,10 +95,45 @@ pub struct ModelRequestManifest {
     pub parts: Vec<RequestPart>,
 }
 
+/// Representation of the adapter-observed model response, excluding hidden thought.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelOutputFormat {
+    /// Incomplete uninterpreted protocol bytes, never executable tool proposals.
+    OpaquePartial,
+    /// Exact visible UTF-8 text.
+    PlainText,
+    /// Canonical visible text plus structured protocol actions from the adapter.
+    ProtocolJson,
+}
+
 /// Adapter-specific attribution, separate from payload and authority.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EventProvenance {
+    /// A visible response or protocol action linked to its captured request.
+    ModelOutput {
+        /// Same stable call identity as the request occurrence.
+        model_call_id: ModelCallId,
+        /// Exact request occurrence, not a new authority grant.
+        request_event_id: ObservationId,
+        /// Explicit response representation; JSON is not a verbatim text quote.
+        format: ModelOutputFormat,
+        /// Fully observed tool calls in this response, in protocol order.
+        tool_calls: Vec<ToolCallId>,
+    },
+    /// Verified disclosure occurrence, without a new independent observation.
+    ModelRequest {
+        /// Must match the exact ordered request manifest.
+        model_call_id: ModelCallId,
+    },
+    /// Native runtime compare-and-publish checkpoint. Capture alone cannot mint it.
+    OwnedCheckpoint {
+        /// Expected prior run revision, zero for initial creation.
+        expected_revision: u64,
+        /// Exact checkpoint state digest, independent of the outer event envelope.
+        state_digest: ContentDigest,
+    },
     /// Tool request/outcome bound to exactly one action's bytes.
     Tool {
         /// Stable invocation ID used by target idempotency/reconciliation.

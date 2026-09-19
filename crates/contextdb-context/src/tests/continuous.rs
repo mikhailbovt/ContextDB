@@ -111,6 +111,7 @@ fn input() -> CompileAssemblyRequest {
     CompileAssemblyRequest {
         context,
         base: OutgoingBase {
+            working: Vec::new(),
             control: Vec::new(),
             hot: Vec::new(),
             current: Vec::new(),

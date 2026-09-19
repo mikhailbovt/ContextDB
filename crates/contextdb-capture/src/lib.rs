@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use contextdb_core::{
     ContentBlockId, ContentDigest, EventKind, EventPayload, EventRole, ModelRequestManifest,
+    RequestPart,
 };
 use contextdb_service::{
     CaptureAcceptance, CaptureRequest, ErrorCode, PayloadPort, ServiceError, ServiceResult,
@@ -79,10 +80,44 @@ impl<S: PayloadPort + ?Sized> CaptureHost<S> {
     pub fn capture_model_request(
         &self,
         mut request: CaptureRequest,
-        manifest: ModelRequestManifest,
+        mut manifest: ModelRequestManifest,
     ) -> ServiceResult<CaptureAcceptance> {
+        request.context.validate_authentication()?;
+        let novel_bytes = manifest
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                RequestPart::Novel { bytes } => Some(bytes.len()),
+                _ => None,
+            })
+            .sum::<usize>();
+        if novel_bytes > INLINE_BYTES {
+            for (index, part) in manifest.parts.iter_mut().enumerate() {
+                if let RequestPart::Novel { bytes } = part {
+                    let key =
+                        serde_json::to_vec(&("request-novel/v1", request.event.event_id, index))
+                            .map_err(|_| invalid("request part identity cannot be encoded"))?;
+                    let hash = blake3::hash(&key);
+                    let mut id = [0_u8; 16];
+                    id.copy_from_slice(&hash.as_bytes()[..16]);
+                    let staged = self.owner.stage_payload(StagePayloadRequest {
+                        context: request.context.clone(),
+                        idempotency_key: format!("request-payload/{hash}"),
+                        block_id: ContentBlockId::from_uuid(uuid::Uuid::from_bytes(id))
+                            .map_err(|_| invalid("request part identity is invalid"))?,
+                        bytes: bytes.clone(),
+                    })?;
+                    *part = RequestPart::StoredNovel {
+                        payload: staged.reference,
+                    };
+                }
+            }
+        }
         request.event.kind = EventKind::ModelRequested;
         request.event.role = EventRole::Host;
+        request.event.provenance = Some(contextdb_core::EventProvenance::ModelRequest {
+            model_call_id: manifest.model_call_id,
+        });
         request.event.payload = EventPayload::Assembly { manifest };
         self.owner.append_event_with_status(request)
     }

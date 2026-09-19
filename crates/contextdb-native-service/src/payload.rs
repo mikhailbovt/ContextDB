@@ -23,6 +23,8 @@ use super::{
 };
 
 pub(super) const SOURCE_FEATURE: &str = "continuous-sources-v1";
+pub(super) const REQUEST_TRANSFORM_FEATURE: &str = "continuous-request-transforms-v1";
+pub(super) const MODEL_PROTOCOL_FEATURE: &str = "continuous-model-protocol-v1";
 /// Maximum complete staged original or reconstructed request.
 pub const CAPTURE_MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 /// Maximum ordered segments in one request occurrence.
@@ -256,6 +258,28 @@ impl NativeService {
         Ok(())
     }
 
+    pub(super) fn enable_request_transform_format<T: WriteTransaction>(
+        &self,
+        tx: &mut T,
+    ) -> ServiceResult<()> {
+        let mut manifest: Manifest = decode(
+            &tx.get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("native manifest absent"))?,
+            "native manifest",
+        )?;
+        if manifest.features.insert(REQUEST_TRANSFORM_FEATURE.into()) {
+            manifest.checksum = manifest_checksum(&manifest)?;
+            tx.put(
+                &self.keyspaces.meta,
+                META_MANIFEST_KEY.to_vec(),
+                encode(&manifest)?,
+            )
+            .map_err(storage_error)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_capture_sources<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -263,6 +287,13 @@ impl NativeService {
         event: &EventEnvelope,
     ) -> ServiceResult<()> {
         match &event.provenance {
+            Some(contextdb_core::EventProvenance::ModelOutput {
+                request_event_id, ..
+            }) => {
+                self.authorized_capture_policy(snapshot, context, *request_event_id)?;
+                self.authorize_capture_dependencies(snapshot, context, *request_event_id)?;
+                self.validate_model_output_origin(snapshot, event)?;
+            }
             Some(contextdb_core::EventProvenance::Tool {
                 call_id,
                 request_event_id,
@@ -532,6 +563,21 @@ impl NativeService {
                     .end
                     .checked_sub(span.start)
                     .ok_or_else(|| invalid("source range is reversed"))?,
+                RequestPart::JsonStringSource {
+                    span, byte_length, ..
+                } => {
+                    if span
+                        .end
+                        .checked_sub(span.start)
+                        .is_none_or(|size| size > 1024 * 1024)
+                        || *byte_length > 6 * 1024 * 1024
+                    {
+                        return Err(exhausted(
+                            "JSON source transform exceeds its bounded profile",
+                        ));
+                    }
+                    *byte_length
+                }
                 RequestPart::Novel { bytes } => u64::try_from(bytes.len())
                     .map_err(|_| exhausted("novel byte length overflow"))?,
                 RequestPart::StoredNovel { payload } => payload.byte_length,
@@ -544,6 +590,24 @@ impl NativeService {
             }
             let part_bytes = match part {
                 RequestPart::Source { span } => self.source_span(snapshot, context, span, true)?,
+                RequestPart::JsonStringSource {
+                    span,
+                    byte_length,
+                    digest,
+                } => {
+                    let original = self.source_span(snapshot, context, span, true)?;
+                    let text = std::str::from_utf8(&original)
+                        .map_err(|_| invalid("JSON source transform requires exact UTF-8"))?;
+                    let encoded = serde_json::to_vec(text)
+                        .map_err(|_| invalid("JSON source transform failed"))?;
+                    let contents = &encoded[1..encoded.len() - 1];
+                    if contents.len() as u64 != *byte_length || raw_digest(contents) != *digest {
+                        return Err(invalid(
+                            "JSON source transform differs from its wire binding",
+                        ));
+                    }
+                    contents.to_vec()
+                }
                 RequestPart::Novel { bytes } => {
                     inline_bytes = inline_bytes
                         .checked_add(bytes.len())
@@ -591,16 +655,60 @@ impl NativeService {
         snapshot: &S,
         event: &EventEnvelope,
     ) -> ServiceResult<()> {
+        self.validate_model_output_origin(snapshot, event)
+            .map_err(|_| integrity("model output differs from its captured request"))?;
         match &event.payload {
             EventPayload::Staged { reference, .. } => {
                 let header = self.checked_payload_header(snapshot, None, reference)?;
                 self.payload_bytes(snapshot, &header)?;
             }
             EventPayload::Assembly { manifest } => {
+                if manifest
+                    .parts
+                    .iter()
+                    .any(|part| matches!(part, RequestPart::JsonStringSource { .. }))
+                {
+                    let format: Manifest = decode(
+                        &snapshot
+                            .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                            .map_err(storage_error)?
+                            .ok_or_else(|| integrity("manifest absent"))?,
+                        "manifest",
+                    )?;
+                    if !format.features.contains(REQUEST_TRANSFORM_FEATURE) {
+                        return Err(integrity("request transform format feature is absent"));
+                    }
+                }
                 self.assemble_request(snapshot, None, manifest)
                     .map_err(|_| integrity("request source/wire closure is invalid"))?;
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn validate_model_output_origin<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event: &EventEnvelope,
+    ) -> ServiceResult<()> {
+        let Some(contextdb_core::EventProvenance::ModelOutput {
+            model_call_id,
+            request_event_id,
+            ..
+        }) = &event.provenance
+        else {
+            return Ok(());
+        };
+        let request = self.load_captured_original(snapshot, *request_event_id)?;
+        if request.event.kind != EventKind::ModelRequested
+            || request.event.run_id != event.run_id
+            || request.event.session_id != event.session_id
+            || !matches!(request.event.payload, EventPayload::Assembly { ref manifest } if manifest.model_call_id == *model_call_id)
+        {
+            return Err(invalid(
+                "model output origin belongs to another request or run",
+            ));
         }
         Ok(())
     }

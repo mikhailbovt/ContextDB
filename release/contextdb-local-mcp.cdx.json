@@ -4627,6 +4627,7 @@
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
         "registry+https://github.com/rust-lang/crates.io-index#chacha20poly1305@0.11.0",
         "pkg:cargo/contextdb-context@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-continuity@0.2.0-alpha.3",
         "pkg:cargo/contextdb-core@0.2.0-alpha.3",
         "pkg:cargo/contextdb-index@0.2.0-alpha.3",
         "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
@@ -5404,7 +5405,7 @@
         },
         {
           "name": "contextdb:dependency-graph-sha256",
-          "value": "470b7a0f8d7beac53b95cf0c12cb3c40f01e3651541375e22fa349e9351336b4"
+          "value": "14e896c31c6fa75e1113a3a9eaa1b6364fce17cfa4d24ef6a5002e867af14d7a"
         }
       ],
       "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.3",
