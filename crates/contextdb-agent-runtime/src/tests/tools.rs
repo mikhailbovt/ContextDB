@@ -178,6 +178,145 @@ fn cancellation_releases_unexecuted_proposals_without_inventing_tool_results() {
 }
 
 #[test]
+fn native_owner_admits_a_real_effect_and_rejects_a_new_constraint_before_dispatch() {
+    for change in ["none", "source", "obligation"] {
+        let directory = tempfile::tempdir().expect("directory");
+        let owner = Arc::new(
+            NativeService::open(directory.path().join("native"), "runtime", [7; 32]).expect("open"),
+        );
+        let (context, identity) = identity();
+        owner
+            .initialize_state_catalog(&context, &mut budget())
+            .expect("catalog");
+        let target = target(directory.path(), false);
+        let reader = reader(&target);
+        let fence = OwnerDispatchFence::new(Arc::clone(&owner));
+        let mut runtime = OwnedAgentRuntime::start(
+            Arc::clone(&owner),
+            context.clone(),
+            StartRun {
+                identity,
+                model_profile: reader.profile(),
+                recorded_at: now(),
+            },
+            settings(),
+            &mut budget(),
+        )
+        .expect("start");
+        let user = runtime
+            .accept_user(
+                "Create the fixture artifact if its decision context is still current.".into(),
+                now(),
+                &mut budget(),
+            )
+            .expect("input");
+        runtime
+            .step(
+                &reader,
+                &fence,
+                &FixturePreparation(Arc::clone(&owner)),
+                &[],
+                now(),
+                &mut budget(),
+            )
+            .expect("native model admission");
+        if change == "source" {
+            let mut event = owner
+                .read_original(ReadOriginalRequest {
+                    context: context.clone(),
+                    event_id: user.event_id,
+                    after_receipt: Some(user),
+                })
+                .expect("input envelope")
+                .event;
+            event.event_id = ObservationId::new();
+            event.source_id = SourceId::new();
+            event.producer_id = StreamId::new();
+            event.producer_sequence = 1;
+            event.run_id = None;
+            let text = "Cancel that action; a new prohibition applies.".to_owned();
+            event.payload = EventPayload::InlineUtf8 {
+                digest: ContentDigest::from_bytes(*blake3::hash(text.as_bytes()).as_bytes()),
+                text,
+            };
+            owner
+                .append_event(CaptureRequest {
+                    context: context.clone(),
+                    idempotency_key: "concurrent-prohibition".into(),
+                    event,
+                })
+                .expect("new source before effect");
+        } else if change == "obligation" {
+            runtime
+                .add_obligation(
+                    ScopedObligation {
+                        id: "new-working-requirement".into(),
+                        scope: *runtime.checkpoint().identity.scopes.first().expect("scope"),
+                        source: runtime.checkpoint().groups[0].messages[0].source.clone(),
+                        status: ObligationStatus::Open,
+                    },
+                    now(),
+                    &mut budget(),
+                )
+                .expect("working set changed after decision");
+        }
+        let outcome = runtime
+            .execute_next_tool(
+                "fixture.create_artifact",
+                &target,
+                &fence,
+                now(),
+                &mut budget(),
+            )
+            .expect("captured admission outcome");
+        if change != "none" {
+            assert_eq!(outcome, ToolOutcome::Failed);
+            assert_eq!(target.effects.load(Ordering::SeqCst), 0);
+            assert!(!target.path.exists());
+            let result = runtime
+                .checkpoint()
+                .groups
+                .last()
+                .expect("group")
+                .messages
+                .last()
+                .expect("result");
+            let bytes = owner
+                .read_original_span(&context, &result.source)
+                .expect("fence result");
+            assert!(
+                String::from_utf8(bytes)
+                    .expect("error JSON")
+                    .contains("context_lease_invalidated")
+            );
+        } else {
+            assert_eq!(outcome, ToolOutcome::Completed);
+            assert_eq!(
+                std::fs::read(&target.path).expect("real effect"),
+                target.action.input
+            );
+            assert_eq!(target.effects.load(Ordering::SeqCst), 1);
+            runtime
+                .step(
+                    &reader,
+                    &fence,
+                    &FixturePreparation(Arc::clone(&owner)),
+                    &[],
+                    now(),
+                    &mut budget(),
+                )
+                .expect("refresh before next model call");
+        }
+        owner
+            .verify(VerifyRequest {
+                context: context.request,
+                deep: true,
+            })
+            .expect("native closure");
+    }
+}
+
+#[test]
 fn owned_tool_recovery_after_real_effect_keeps_protocol_and_does_not_execute_again() {
     let directory = tempfile::tempdir().expect("directory");
     let database = directory.path().join("native");
@@ -471,17 +610,22 @@ fn model_requested_expansion_drives_original_into_next_wire_without_manual_memor
     runtime
         .accept_user("Need more detail.".into(), now(), &mut budget())
         .expect("input");
-    let hook = FixturePreparation(Arc::clone(&owner));
+    let hook = KeepUninterpreted;
+    let fence = OwnerDispatchFence::new(Arc::clone(&owner));
     let adapters = ExecutionAdapters {
         reader: &reader,
-        model_fence: &FixtureFence,
-        tool_fence: &FixtureFence,
+        model_fence: &fence,
+        tool_fence: &fence,
         preparation: &hook,
         tools: &NoExternalTools,
     };
     let answer = runtime
         .drive(&adapters, 2, now(), &mut budget())
         .expect("automatic expansion cycle");
+    assert!(
+        matches!(&answer, InteractionAnswer::Generated(turn) if turn.prepared.pending_interpretation),
+        "raw expansion must not claim natural-language interpretation succeeded"
+    );
     assert!(answer.reply().tool_calls.is_empty());
     let requests = reader.requests.lock().expect("requests");
     assert_eq!(requests.len(), 2);

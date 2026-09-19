@@ -48,6 +48,9 @@ pub struct PrepareContextRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreparedContext {
+    /// Owner seal of this exact assembly and its preparation-time validity.
+    /// It is not a registered lease and cannot authorize a different wire.
+    pub admission_token: String,
     /// Existing canonical ContextPack with exact original spans.
     pub context_pack: ContextPack,
     /// Canonical protobuf payload; manifest binds its BLAKE3 digest.

@@ -84,7 +84,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             return Ok(InteractionAnswer::Recovered(Box::new(recovered)));
         }
         let mut tool_steps = 0_u32;
-        for _ in 0..max_model_calls {
+        for attempt in 0..max_model_calls {
             while let Some(queued) = self.next_tool(budget)? {
                 if tool_steps == 32 {
                     return Err(exhausted("bounded drive tool allowance exhausted"));
@@ -104,10 +104,15 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                         )
                     })?
                 };
-                let result = self.execute_next_tool(
+                let result = self.execute_tool_with_class(
                     operation,
                     target.as_ref(),
                     adapters.tool_fence,
+                    if operation == MEMORY_EXPAND_OPERATION {
+                        ToolAdmissionClass::MemoryExpansion
+                    } else {
+                        ToolAdmissionClass::ExternalEffect
+                    },
                     now,
                     budget,
                 )?;
@@ -120,14 +125,30 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 }
             }
             let routes = self.expansion_routes(budget)?;
-            let step = self.step(
+            let step = match self.step(
                 adapters.reader,
                 adapters.model_fence,
                 adapters.preparation,
                 &routes,
                 now,
                 budget,
-            )?;
+            ) {
+                Ok(step) => step,
+                Err(error)
+                    if attempt + 1 < max_model_calls
+                        && matches!(self.phase, CallPhase::Ready | CallPhase::Planned)
+                        && self.pending_capture.is_none()
+                        && self.pending_checkpoint.is_none()
+                        && (error.code == ErrorCode::IndexTooStale
+                            || matches!(
+                                error.violated_policy.as_deref(),
+                                Some("context_lease_invalidated" | "context_lease_expired")
+                            )) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             if step.reply.tool_calls.is_empty() {
                 return Ok(InteractionAnswer::Generated(Box::new(step)));
             }

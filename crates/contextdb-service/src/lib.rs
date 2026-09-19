@@ -17,6 +17,7 @@ mod continuation;
 mod domain;
 mod error;
 mod high_level;
+mod lease;
 mod owned;
 mod prepare;
 mod raw;
@@ -40,6 +41,7 @@ pub use high_level::{
     HighLevelQueryRequest, HighLevelSemanticStatus, HighLevelTransferRequest,
     HighLevelWriteRequest,
 };
+pub use lease::*;
 pub use owned::*;
 pub use prepare::*;
 pub use raw::*;

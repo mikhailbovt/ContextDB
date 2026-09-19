@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod fence;
 mod model;
 mod rolling;
 mod runtime;
@@ -11,6 +12,7 @@ mod runtime;
 #[cfg(test)]
 mod tests;
 
+pub use fence::*;
 pub use model::*;
 pub use rolling::*;
 pub use runtime::*;

@@ -262,6 +262,45 @@ impl OwnedRunPort for NativeService {
 }
 
 impl NativeService {
+    pub(super) fn current_owned_checkpoint<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        receipt: &CaptureReceipt,
+    ) -> ServiceResult<OwnedRunCheckpoint> {
+        self.authorized_capture_policy(snapshot, context, receipt.event_id)?;
+        let original = self.load_captured_original(snapshot, receipt.event_id)?;
+        let checkpoint = decode_checkpoint(&original.event)?;
+        check_identity(context, &checkpoint.identity)?;
+        let head: RunHead = decode(
+            &snapshot
+                .get(
+                    &self.keyspaces.continuous,
+                    &head_key(&context.request.workspace_id, checkpoint.identity.run_id),
+                )
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("owned run head absent"))?,
+            "run head",
+        )?;
+        if original.receipt != *receipt
+            || head.receipt != *receipt
+            || head.revision != checkpoint.revision
+            || head.identity != checkpoint.identity
+            || checkpoint.status != OwnedRunStatus::Active
+            || head.state_digest
+                != checkpoint
+                    .digest()
+                    .map_err(|_| integrity("run checkpoint invalid"))?
+        {
+            return Err(ServiceError::new(
+                ErrorCode::IndexTooStale,
+                "owned run changed before dispatch admission",
+                true,
+            ));
+        }
+        Ok(checkpoint)
+    }
+
     pub(super) fn validate_checkpoint_publication<S: ReadSnapshot>(
         &self,
         snapshot: &S,

@@ -23,7 +23,7 @@ use super::{
     NativeService, canonical_digest, digest_bytes, invalid, require_capability, storage_error,
 };
 
-const PREPARE_DOMAIN: &[u8] = b"contextdb/prepared-context/v1";
+pub(super) const PREPARE_DOMAIN: &[u8] = b"contextdb/prepared-context/v1";
 
 mod raw;
 
@@ -196,6 +196,7 @@ impl PrepareContextPort for NativeService {
         }
         let workspace = digest_bytes(request.context.request.workspace_id.as_bytes());
         let now = wall_time()?;
+        let issued_tick = self.lease_tick()?;
         let valid_at = request.valid_at.unwrap_or(now);
         let mut fence = PrepareFence {
             principal: request.context.authorization_binding_digest()?,
@@ -453,6 +454,7 @@ impl PrepareContextPort for NativeService {
             require_primary_evidence: true,
             continuation: None,
         };
+        let external_processing = context.model_profile.external_processing;
         let compiled = ContextCompiler::new(*self.token_key)
             .map_err(service_error)?
             .compile_assembly(
@@ -469,6 +471,17 @@ impl PrepareContextPort for NativeService {
             )
             .map_err(service_error)?;
         Ok(PreparedContext {
+            admission_token: self.seal_preparation(
+                &compiled.manifest,
+                &provider.fence,
+                issued_tick,
+                now,
+                request.known_at.is_none() && request.valid_at.is_none(),
+                external_processing,
+                pending_interpretation,
+                compiled.outgoing.wire.len() as u64,
+                canonical_digest(&request.context.capability_grants)?,
+            )?,
             context_pack: compiled.context.pack,
             canonical_bytes: compiled.context.canonical_protobuf,
             messages: compiled.messages,

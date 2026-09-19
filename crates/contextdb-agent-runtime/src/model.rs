@@ -172,6 +172,7 @@ pub trait ToolDispatchFence: std::fmt::Debug + Send + Sync {
         checkpoint: &CaptureReceipt,
         planned: &contextdb_continuity::PendingToolInvocation,
         action: &ToolAction,
+        class: contextdb_service::ToolAdmissionClass,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()>;
 }
