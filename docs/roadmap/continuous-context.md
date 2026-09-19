@@ -13,8 +13,8 @@ native or model acceptance.
 | 03 | Original ID/source/range/lexical recall without promotion | Merged in #5; CI passed on all four native targets |
 | 04 | Persistent authorized indexed provider and exhaustive paging | Merged in #6; CI passed on all four native targets |
 | 05 | Temporal assertions, resolution, negative overlay and coverage | Merged in #7; CI passed on all four native targets |
-| 06 | Evidence compiler, whole-request manifest, R0 and budgets | Implemented; local checks passed, CI pending |
-| 07 | Owned conversation runtime, rolling, checkpoint and resume | Planned |
+| 06 | Evidence compiler, whole-request manifest, R0 and budgets | Merged in #8; all eight CI jobs passed |
+| 07 | Owned conversation runtime, rolling, checkpoint and resume | In progress; native checkpoints and automatic text turns verified |
 | 08 | Atomic lease admission, invalidation and action fences | Planned |
 | 09 | Cache/cost controller and paired runtime evaluation | Planned |
 | 10 | Restore/revocation, retention, custody and bounded publication | Planned |
@@ -108,3 +108,14 @@ rotated backup restore. Python (31) and TypeScript (25) SDK tests, Go tests/vet,
 all-workspace Clippy and governance checks pass. The reference encoder measures
 its full declared request; no actual reader quality, cache savings or vendor
 token accounting is inferred. Owned rolling and lease admission remain next.
+
+Phase 07 currently connects native checkpoints, automatic text-turn preparation,
+chunked rolling, exact request capture and provider outcome reconciliation. A
+14-call scripted-reader scenario crosses multiple resident windows, reopens the
+database and automatically includes an old incidental original in the next wire.
+Other checks cover reader-profile switching, terminal obligation unpinning,
+lost output acknowledgement without repeated dispatch, concurrent checkpoint
+publication, uncheckpointed tail recovery and revoked hot sources. These are
+engine/lifecycle checks; the guard and reader are explicit test fixtures.
+Tool/expansion protocol execution, the native phase-08 dispatch fence, real reader
+quality and measured prefill/cache behavior remain open.

@@ -365,6 +365,24 @@ impl Validate for EventEnvelope {
             ));
         }
         match &self.provenance {
+            Some(crate::EventProvenance::ModelRequest { model_call_id })
+                if self.kind != EventKind::ModelRequested
+                    || self.role != EventRole::Host
+                    || !matches!(&self.payload, EventPayload::Assembly { manifest } if manifest.model_call_id == *model_call_id) =>
+            {
+                return Err(invalid(
+                    "model request provenance differs from its manifest",
+                ));
+            }
+            Some(crate::EventProvenance::OwnedCheckpoint { state_digest, .. })
+                if self.kind != EventKind::RunCheckpointed
+                    || self.role != EventRole::Host
+                    || self.run_id.is_none()
+                    || self.session_id.is_none()
+                    || self.payload.digest() != Some(*state_digest) =>
+            {
+                return Err(invalid("owned checkpoint provenance is inconsistent"));
+            }
             Some(crate::EventProvenance::Tool {
                 request_event_id,
                 action_digest,

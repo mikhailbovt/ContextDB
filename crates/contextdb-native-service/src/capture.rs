@@ -3,13 +3,14 @@
 use std::collections::BTreeMap;
 
 use contextdb_core::{
-    ContentDigest, EventEnvelope, EventPayload, ObservationId, OriginalPayloadRef, RequestPart,
-    ResponseStream, StreamId, Validate,
+    ContentDigest, EventEnvelope, EventPayload, EventProvenance, ObservationId, OriginalPayloadRef,
+    RequestPart, ResponseStream, StreamId, Validate,
 };
 use contextdb_service::{
     AuthenticatedRequestContext, Capability, CaptureAcceptance, CaptureDurability, CaptureGapRange,
     CapturePort, CaptureReceipt, CaptureRequest, CapturedOriginal, ErrorCode,
-    NATIVE_CAPTURE_DOMAIN, ProducerCoverage, ReadOriginalRequest, ServiceError, ServiceResult,
+    NATIVE_CAPTURE_DOMAIN, ProducerCoverage, ReadOriginalRequest, SaveRunCheckpointRequest,
+    ServiceError, ServiceResult,
 };
 use contextdb_storage::{
     Durability, ReadSnapshot, SnapshotSelector, StorageEngine, StorageError, WriteTransaction,
@@ -25,6 +26,7 @@ use super::{
 };
 
 pub(super) const CAPTURE_FEATURE: &str = "continuous-capture-v1";
+pub(super) const IMPACT_FEATURE: &str = "continuous-capture-impact-v1";
 /// Maximum original payload in one synchronized capture transaction.
 pub const CAPTURE_MAX_INLINE_BYTES: usize = 256 * 1024;
 /// Maximum disjoint producer gaps before strict capture applies backpressure.
@@ -40,6 +42,10 @@ struct CaptureRecord {
     idempotency_digest: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     dependencies: Vec<CaptureDependency>,
+    // Older receipts always affected scopes. A verified host request echo may
+    // opt out: recording disclosure is not another semantic observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    affects_scope: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -69,45 +75,7 @@ impl CapturePort for NativeService {
         &self,
         request: CaptureRequest,
     ) -> ServiceResult<CaptureAcceptance> {
-        require_capability(&request.context, Capability::Observe)?;
-        validate_identifier(&request.idempotency_key, "capture idempotency key")?;
-        request
-            .event
-            .validate()
-            .map_err(|_| invalid("event envelope is invalid"))?;
-        let principal = &request.context.request;
-        if principal.workspace_id != request.event.workspace_id.to_string()
-            || !request
-                .event
-                .scope_ids
-                .iter()
-                .all(|scope| principal.scopes.contains(&scope.to_string()))
-        {
-            return Err(permission_denied());
-        }
-        validate_payload(&request.event)?;
-        let producer = producer_key(&request.context, request.event.producer_id)?;
-        let idempotency =
-            canonical_digest(&(NATIVE_CAPTURE_DOMAIN, &producer, &request.idempotency_key))?;
-        let request_digest = canonical_digest(&(
-            &request.event,
-            request_context_binding(principal)?,
-            &request.context.actor_id,
-            &request.context.agent_id,
-        ))?;
-        let _guard = self.lock_writes()?;
-        for _ in 0..MAX_CAPTURE_RETRIES {
-            if let Some(receipt) =
-                self.append_capture_attempt(&request, &producer, &idempotency, &request_digest)?
-            {
-                return Ok(receipt);
-            }
-        }
-        Err(ServiceError::new(
-            ErrorCode::Unavailable,
-            "capture publication remained contended; retry the same idempotency key",
-            true,
-        ))
+        self.append_owned_capture(request, None)
     }
 
     fn read_original(&self, request: ReadOriginalRequest) -> ServiceResult<CapturedOriginal> {
@@ -183,6 +151,93 @@ impl CapturePort for NativeService {
 }
 
 impl NativeService {
+    // Only OwnedRunPort can bind an operational checkpoint to the run head.
+    // Normal capture cannot manufacture this authority through a provenance tag.
+    pub(super) fn append_owned_capture(
+        &self,
+        request: CaptureRequest,
+        checkpoint: Option<&SaveRunCheckpointRequest>,
+    ) -> ServiceResult<CaptureAcceptance> {
+        require_capability(&request.context, Capability::Observe)?;
+        if host_request_echo(&request.event) || checkpoint.is_some() {
+            require_capability(&request.context, Capability::Runtime)?;
+        }
+        match (&request.event.provenance, checkpoint) {
+            (
+                Some(EventProvenance::OwnedCheckpoint {
+                    expected_revision,
+                    state_digest,
+                }),
+                Some(owned),
+            ) if *expected_revision == owned.expected_revision
+                && *state_digest
+                    == owned
+                        .checkpoint
+                        .digest()
+                        .map_err(|_| invalid("invalid checkpoint"))?
+                && request.event.event_id == owned.event_id
+                && request.idempotency_key == owned.idempotency_key
+                && encode(&request.context)? == encode(&owned.context)? => {}
+            (Some(EventProvenance::OwnedCheckpoint { .. }), _) | (_, Some(_)) => {
+                return Err(invalid(
+                    "checkpoint publication requires the owned-run port",
+                ));
+            }
+            _ => {}
+        }
+        validate_identifier(&request.idempotency_key, "capture idempotency key")?;
+        request
+            .event
+            .validate()
+            .map_err(|_| invalid("event envelope is invalid"))?;
+        let principal = &request.context.request;
+        if principal.workspace_id != request.event.workspace_id.to_string()
+            || !request
+                .event
+                .scope_ids
+                .iter()
+                .all(|scope| principal.scopes.contains(&scope.to_string()))
+        {
+            return Err(permission_denied());
+        }
+        validate_payload(&request.event)?;
+        let producer = producer_key(&request.context, request.event.producer_id)?;
+        let idempotency =
+            canonical_digest(&(NATIVE_CAPTURE_DOMAIN, &producer, &request.idempotency_key))?;
+        let request_digest = canonical_digest(&(
+            &request.event,
+            request_context_binding(principal)?,
+            &request.context.actor_id,
+            &request.context.agent_id,
+        ))?;
+        let _guard = self.lock_writes()?;
+        for _ in 0..MAX_CAPTURE_RETRIES {
+            if let Some(receipt) = self.append_capture_attempt(
+                &request,
+                &producer,
+                &idempotency,
+                &request_digest,
+                checkpoint,
+            )? {
+                return Ok(receipt);
+            }
+        }
+        Err(ServiceError::new(
+            ErrorCode::Unavailable,
+            "capture publication remained contended; retry the same idempotency key",
+            true,
+        ))
+    }
+
+    pub(super) fn capture_affects_scope<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+    ) -> ServiceResult<bool> {
+        let record: CaptureRecord = read_required(snapshot, self, &record_key(id))?;
+        Ok(record.affects_scope.unwrap_or(true))
+    }
+
     pub(super) fn captured_authority<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -231,6 +286,7 @@ impl NativeService {
         producer: &str,
         idempotency: &str,
         request_digest: &str,
+        checkpoint: Option<&SaveRunCheckpointRequest>,
     ) -> ServiceResult<Option<CaptureAcceptance>> {
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(receipt) = self.replay::<CaptureReceipt, _>(
@@ -245,6 +301,9 @@ impl NativeService {
                 receipt,
                 newly_accepted: false,
             }));
+        }
+        if let Some(checkpoint) = checkpoint {
+            self.validate_checkpoint_publication(&transaction, checkpoint)?;
         }
         let event = &request.event;
         let position = position_key(producer, event.producer_sequence);
@@ -292,6 +351,15 @@ impl NativeService {
             self.enable_source_format(&mut transaction)?;
         }
         self.enable_capture_format(&mut transaction)?;
+        let affects_scope = !host_request_echo(event);
+        if !affects_scope {
+            self.enable_capture_extension(&mut transaction, IMPACT_FEATURE)?;
+        }
+        if matches!(&event.payload, EventPayload::Assembly { manifest }
+            if manifest.parts.iter().any(|part| matches!(part, RequestPart::JsonStringSource { .. })))
+        {
+            self.enable_request_transform_format(&mut transaction)?;
+        }
         let frame = self.begin_frame(&transaction, &request.context.request.workspace_id, false)?;
         let mut access = trusted_structured_policy(&request.context.request);
         access.scopes = event.scope_ids.iter().map(ToString::to_string).collect();
@@ -365,6 +433,7 @@ impl NativeService {
             producer_sequence: event.producer_sequence,
             idempotency_digest: idempotency.into(),
             dependencies: capture_dependencies(&event.payload),
+            affects_scope: (!affects_scope).then_some(false),
         };
         transaction
             .put(
@@ -398,7 +467,7 @@ impl NativeService {
                 })?,
             )
             .map_err(storage_error)?;
-        for scope in &event.scope_ids {
+        for scope in event.scope_ids.iter().filter(|_| affects_scope) {
             let key = scope_key(&frame.workspace_digest, &scope.to_string());
             transaction
                 .put(
@@ -407,6 +476,9 @@ impl NativeService {
                     encode(&receipt.workspace_commit)?,
                 )
                 .map_err(storage_error)?;
+        }
+        if let Some(checkpoint) = checkpoint {
+            self.publish_checkpoint_head(&mut transaction, checkpoint, &receipt)?;
         }
         self.finish_frame(
             &mut transaction,
@@ -442,6 +514,32 @@ impl NativeService {
         let mut manifest: Manifest = decode(&bytes, "native manifest")?;
         super::validate_manifest(&manifest, &self.database_id)?;
         if manifest.features.insert(CAPTURE_FEATURE.to_owned()) {
+            manifest.checksum = manifest_checksum(&manifest)?;
+            transaction
+                .put(
+                    &self.keyspaces.meta,
+                    META_MANIFEST_KEY.to_vec(),
+                    encode(&manifest)?,
+                )
+                .map_err(storage_error)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn enable_capture_extension<T: WriteTransaction>(
+        &self,
+        transaction: &mut T,
+        feature: &str,
+    ) -> ServiceResult<()> {
+        self.enable_capture_format(transaction)?;
+        let mut manifest: Manifest = decode(
+            &transaction
+                .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("native manifest absent"))?,
+            "native manifest",
+        )?;
+        if manifest.features.insert(feature.into()) {
             manifest.checksum = manifest_checksum(&manifest)?;
             transaction
                 .put(
@@ -539,6 +637,11 @@ impl NativeService {
                 "capture source dependencies differ from its original",
             ));
         }
+        if record.affects_scope != host_request_echo(&event).then_some(false) {
+            return Err(integrity(
+                "a source observation cannot suppress its scope impact",
+            ));
+        }
         let receipt = record.receipt;
         let (global, _) = self.select_snapshot(
             snapshot,
@@ -600,6 +703,16 @@ impl NativeService {
             if entry.key.starts_with(b"receipt/") {
                 let record: CaptureRecord = decode(&entry.value, "capture record")?;
                 let original = self.load_captured_original(snapshot, record.receipt.event_id)?;
+                if record.affects_scope.is_some() && !manifest.features.contains(IMPACT_FEATURE) {
+                    return Err(integrity("capture scope-impact format feature is absent"));
+                }
+                if matches!(
+                    original.event.provenance,
+                    Some(EventProvenance::OwnedCheckpoint { .. })
+                ) && !manifest.features.contains(super::owned::OWNED_FEATURE)
+                {
+                    return Err(integrity("owned checkpoint format feature is absent"));
+                }
                 if (original.event.provenance.is_some()
                     || matches!(
                         original.event.payload,
@@ -663,6 +776,8 @@ impl NativeService {
                 let _: u64 = decode(&entry.value, "capture scope epoch")?;
             } else if entry.key.starts_with(b"stream/") {
                 let _: StreamHead = decode(&entry.value, "capture stream")?;
+            } else if entry.key.starts_with(b"runhead/") {
+                let _: super::owned::RunHead = decode(&entry.value, "run head")?;
             } else {
                 return Err(integrity("unknown continuous capture record family"));
             }
@@ -674,7 +789,9 @@ impl NativeService {
         let mut producers = BTreeMap::<String, ProducerCoverage>::new();
         let mut streams = BTreeMap::<String, StreamHead>::new();
         let mut scopes = BTreeMap::<Vec<u8>, u64>::new();
+        let mut run_heads = BTreeMap::new();
         for (record, event) in accepted {
+            self.replay_checkpoint_head(&event, &record.receipt, &mut run_heads)?;
             let workspace = digest_bytes(event.workspace_id.to_string().as_bytes());
             let work = CaptureWork {
                 event_id: event.event_id,
@@ -706,7 +823,11 @@ impl NativeService {
             expected.insert(work_key(&workspace, work.workspace_commit), encode(&work)?);
             let coverage = producers.entry(record.producer_key.clone()).or_default();
             *coverage = advance_coverage(std::mem::take(coverage), record.producer_sequence)?;
-            for scope in &event.scope_ids {
+            for scope in event
+                .scope_ids
+                .iter()
+                .filter(|_| record.affects_scope.unwrap_or(true))
+            {
                 scopes.insert(
                     scope_key(&workspace, &scope.to_string()),
                     work.workspace_commit,
@@ -732,6 +853,9 @@ impl NativeService {
         }
         for (stream, head) in streams {
             expected.insert(stream.into_bytes(), encode(&head)?);
+        }
+        for (key, head) in run_heads {
+            expected.insert(key, encode(&head)?);
         }
         for (scope, epoch) in self.raw_revocation_scope_epochs(snapshot)? {
             let current = scopes.entry(scope).or_default();
@@ -880,9 +1004,11 @@ fn capture_dependencies(payload: &EventPayload) -> Vec<CaptureDependency> {
             .parts
             .iter()
             .filter_map(|part| match part {
-                RequestPart::Source { span } => Some(CaptureDependency::Source {
-                    event_id: span.event_id,
-                }),
+                RequestPart::Source { span } | RequestPart::JsonStringSource { span, .. } => {
+                    Some(CaptureDependency::Source {
+                        event_id: span.event_id,
+                    })
+                }
                 RequestPart::StoredNovel { payload } => Some(CaptureDependency::Payload {
                     reference: payload.clone(),
                 }),
@@ -891,6 +1017,13 @@ fn capture_dependencies(payload: &EventPayload) -> Vec<CaptureDependency> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+fn host_request_echo(event: &EventEnvelope) -> bool {
+    event.kind == contextdb_core::EventKind::ModelRequested
+        && event.role == contextdb_core::EventRole::Host
+        && matches!(event.payload, EventPayload::Assembly { .. })
+        && matches!(event.provenance, Some(EventProvenance::ModelRequest { .. }))
 }
 
 fn advance_stream(head: &mut StreamHead, stream: &ResponseStream) -> ServiceResult<()> {
@@ -939,7 +1072,7 @@ fn content_digest_of(event: &EventEnvelope) -> ServiceResult<ContentDigest> {
     ))
 }
 
-fn producer_key(
+pub(super) fn producer_key(
     context: &AuthenticatedRequestContext,
     producer: StreamId,
 ) -> ServiceResult<String> {
@@ -956,7 +1089,7 @@ fn producer_key(
 fn record_key(id: ObservationId) -> Vec<u8> {
     format!("receipt/{id}").into_bytes()
 }
-fn position_key(producer: &str, sequence: u64) -> Vec<u8> {
+pub(super) fn position_key(producer: &str, sequence: u64) -> Vec<u8> {
     let mut key = format!("position/{producer}/").into_bytes();
     key.extend_from_slice(&sequence.to_be_bytes());
     key

@@ -62,7 +62,10 @@ impl ContextCompiler {
                 .max_input_tokens
                 .checked_add(request.budget.safety_tokens)
                 .is_none_or(|input| input > context.model_profile.available_input_tokens())
-            || request.base.control.len() + request.base.hot.len() + request.base.current.len()
+            || request.base.control.len()
+                + request.base.working.len()
+                + request.base.hot.len()
+                + request.base.current.len()
                 > 256
         {
             return Err(ContextError::InvalidRequest(
@@ -84,6 +87,18 @@ impl ContextCompiler {
             ) {
                 return Err(ContextError::InvalidRequest(
                     "base control has an invalid zone".into(),
+                ));
+            }
+        }
+        for message in &request.base.working {
+            if message.zone != OutgoingZone::WorkingState
+                || message.role != OutgoingRole::User
+                || message.originals.is_empty()
+                || !message.tool_calls.is_empty()
+                || message.tool_result.is_some()
+            {
+                return Err(ContextError::InvalidRequest(
+                    "working state must be attributed data".into(),
                 ));
             }
         }
@@ -112,6 +127,7 @@ impl ContextCompiler {
             .base
             .control
             .iter()
+            .chain(&request.base.working)
             .chain(&request.base.hot)
             .chain(&request.base.current)
         {
@@ -651,6 +667,7 @@ fn trial(
         tool_calls: Vec::new(),
         tool_result: None,
     });
+    messages.extend(request.base.working.clone());
     messages.extend(memory);
     messages.extend(request.base.hot.clone());
     messages.extend(request.base.current.clone());

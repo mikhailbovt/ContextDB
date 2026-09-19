@@ -224,8 +224,8 @@ The initial embedded profile supports 32 scopes, 256 mandatory slots, eight raw
 routes, 512 candidates, 2,048 supports, 64 complementary pairs and a caller-bounded
 selection work limit. The reference JSON encoder uses its declared reference
 tokenizer; it is not a vendor model protocol or model tokenization claim. Actual
-provider integration, automatic rolling, dispatch fences and transport adapters
-are delivered by the following phases.
+provider integration, dispatch fences and transport adapters are delivered by
+the following phases.
 
 1. Select and freeze the prospective hot layout **after planned eviction**.
    Only completed, durably captured protocol groups can be evicted.
@@ -253,6 +253,44 @@ External effects require the receiver's version/ETag/idempotency support where
 available. The gap between a database check and an external effect is not an
 atomic transaction. A request without a durable outcome becomes outcome unknown;
 resume reconciles it before retrying. Shadow routers cannot execute effects.
+
+## Owned conversation lifecycle
+
+`contextdb-agent-runtime` owns bounded conversational residency independently of
+the database foundation runtime. Its initial text path captures input, selects
+post-eviction hot groups, derives bounded lexical discovery routes, prepares and
+captures the whole request, calls a required dispatch guard, then captures the
+visible response. A missing interpreter retains explicit unknown state; it does
+not certify arbitrary text as understood. Tool and expansion protocol execution
+and the native guard remain delivery gates, as do real reader/cache measurements.
+
+`OwnedRunPort` publishes each source-addressed checkpoint and run head in the
+same native synchronized capture transaction. Revisions use compare-and-publish;
+an old idempotent acknowledgement cannot reset the head. Deep verification
+reconstructs heads from accepted checkpoint originals. Recovery reads at most 64
+ordered events beyond the checkpoint, including input captured immediately before
+a crash. Missing producer positions and larger tails stop with explicit errors.
+The format is fenced by `continuous-owned-runtime-v1`.
+
+Completed captured groups alone may be evicted. Active obligations occupy an
+attributed working-data zone and unpin on completion/cancellation. Checkpoints
+hold at most 64 groups, 256 messages, 32 active obligations and 8 MiB of referenced
+active text. Terminal runs cannot advance; source permissions are rechecked on
+publication and rehydration. The initial text adapter accepts bounded 1 MiB
+messages; larger current groups need an explicit range/media adapter.
+
+A planned model call reserves its request identity before preparation. Its exact
+request is captured before handoff. After a crash, a captured request with no
+result requires provider reconciliation, while an uncaptured planned request
+cannot have been sent through this runtime. Persistence retries retain the same
+bytes/identity and never repeat the provider call.
+
+Request JSON escaping is represented by verified `JsonStringSource` transforms,
+not new original quotations. Large novel protocol bytes are staged durably.
+Explicit host `ModelRequest` provenance binds disclosure-only scope behavior to
+the immutable event; legacy observations retain their original scope impact.
+`continuous-request-transforms-v1` and `continuous-capture-impact-v1` prevent older
+readers from silently accepting these rules.
 
 ## Provenance, migration and evaluation
 

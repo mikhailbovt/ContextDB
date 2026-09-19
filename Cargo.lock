@@ -424,6 +424,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
+name = "contextdb-agent-runtime"
+version = "0.2.0-alpha.3"
+dependencies = [
+ "blake3",
+ "contextdb-capture",
+ "contextdb-context",
+ "contextdb-continuity",
+ "contextdb-core",
+ "contextdb-native-service",
+ "contextdb-recall",
+ "contextdb-service",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "contextdb-bench"
 version = "0.2.0-alpha.3"
 dependencies = [
@@ -452,6 +469,7 @@ dependencies = [
  "contextdb-service",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -731,6 +749,7 @@ dependencies = [
  "contextdb-capture",
  "contextdb-chat",
  "contextdb-context",
+ "contextdb-continuity",
  "contextdb-core",
  "contextdb-index",
  "contextdb-recall",

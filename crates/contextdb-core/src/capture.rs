@@ -40,6 +40,16 @@ pub struct OriginalSourceSpan {
 pub enum RequestPart {
     /// Previously captured source bytes, checked under their own current ACL.
     Source { span: OriginalSourceSpan },
+    /// UTF-8 source escaped as JSON string contents (without surrounding quotes).
+    /// Explicit transform identity preserves custody without claiming verbatim wire.
+    JsonStringSource {
+        /// Independently authorized original bytes before escaping.
+        span: OriginalSourceSpan,
+        /// Exact escaped wire size; bounded and verified during replay.
+        byte_length: u64,
+        /// BLAKE3 of the escaped contents.
+        digest: ContentDigest,
+    },
     /// New wire bytes, including exact renderer/protocol delimiters.
     Novel { bytes: Vec<u8> },
     /// Large novel wire bytes retained as a policy-bound durable block.
@@ -50,6 +60,16 @@ impl std::fmt::Debug for RequestPart {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Source { span } => f.debug_tuple("Source").field(span).finish(),
+            Self::JsonStringSource {
+                span,
+                byte_length,
+                digest,
+            } => f
+                .debug_struct("JsonStringSource")
+                .field("span", span)
+                .field("byte_length", byte_length)
+                .field("digest", digest)
+                .finish(),
             Self::Novel { bytes } => f
                 .debug_struct("Novel")
                 .field("byte_length", &bytes.len())
@@ -79,6 +99,18 @@ pub struct ModelRequestManifest {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EventProvenance {
+    /// Verified disclosure occurrence, without a new independent observation.
+    ModelRequest {
+        /// Must match the exact ordered request manifest.
+        model_call_id: ModelCallId,
+    },
+    /// Native runtime compare-and-publish checkpoint. Capture alone cannot mint it.
+    OwnedCheckpoint {
+        /// Expected prior run revision, zero for initial creation.
+        expected_revision: u64,
+        /// Exact checkpoint state digest, independent of the outer event envelope.
+        state_digest: ContentDigest,
+    },
     /// Tool request/outcome bound to exactly one action's bytes.
     Tool {
         /// Stable invocation ID used by target idempotency/reconciliation.

@@ -23,6 +23,7 @@ use super::{
 };
 
 pub(super) const SOURCE_FEATURE: &str = "continuous-sources-v1";
+pub(super) const REQUEST_TRANSFORM_FEATURE: &str = "continuous-request-transforms-v1";
 /// Maximum complete staged original or reconstructed request.
 pub const CAPTURE_MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 /// Maximum ordered segments in one request occurrence.
@@ -245,6 +246,28 @@ impl NativeService {
             "native manifest",
         )?;
         if manifest.features.insert(SOURCE_FEATURE.into()) {
+            manifest.checksum = manifest_checksum(&manifest)?;
+            tx.put(
+                &self.keyspaces.meta,
+                META_MANIFEST_KEY.to_vec(),
+                encode(&manifest)?,
+            )
+            .map_err(storage_error)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn enable_request_transform_format<T: WriteTransaction>(
+        &self,
+        tx: &mut T,
+    ) -> ServiceResult<()> {
+        let mut manifest: Manifest = decode(
+            &tx.get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("native manifest absent"))?,
+            "native manifest",
+        )?;
+        if manifest.features.insert(REQUEST_TRANSFORM_FEATURE.into()) {
             manifest.checksum = manifest_checksum(&manifest)?;
             tx.put(
                 &self.keyspaces.meta,
@@ -532,6 +555,21 @@ impl NativeService {
                     .end
                     .checked_sub(span.start)
                     .ok_or_else(|| invalid("source range is reversed"))?,
+                RequestPart::JsonStringSource {
+                    span, byte_length, ..
+                } => {
+                    if span
+                        .end
+                        .checked_sub(span.start)
+                        .is_none_or(|size| size > 1024 * 1024)
+                        || *byte_length > 6 * 1024 * 1024
+                    {
+                        return Err(exhausted(
+                            "JSON source transform exceeds its bounded profile",
+                        ));
+                    }
+                    *byte_length
+                }
                 RequestPart::Novel { bytes } => u64::try_from(bytes.len())
                     .map_err(|_| exhausted("novel byte length overflow"))?,
                 RequestPart::StoredNovel { payload } => payload.byte_length,
@@ -544,6 +582,24 @@ impl NativeService {
             }
             let part_bytes = match part {
                 RequestPart::Source { span } => self.source_span(snapshot, context, span, true)?,
+                RequestPart::JsonStringSource {
+                    span,
+                    byte_length,
+                    digest,
+                } => {
+                    let original = self.source_span(snapshot, context, span, true)?;
+                    let text = std::str::from_utf8(&original)
+                        .map_err(|_| invalid("JSON source transform requires exact UTF-8"))?;
+                    let encoded = serde_json::to_vec(text)
+                        .map_err(|_| invalid("JSON source transform failed"))?;
+                    let contents = &encoded[1..encoded.len() - 1];
+                    if contents.len() as u64 != *byte_length || raw_digest(contents) != *digest {
+                        return Err(invalid(
+                            "JSON source transform differs from its wire binding",
+                        ));
+                    }
+                    contents.to_vec()
+                }
                 RequestPart::Novel { bytes } => {
                     inline_bytes = inline_bytes
                         .checked_add(bytes.len())
@@ -597,6 +653,22 @@ impl NativeService {
                 self.payload_bytes(snapshot, &header)?;
             }
             EventPayload::Assembly { manifest } => {
+                if manifest
+                    .parts
+                    .iter()
+                    .any(|part| matches!(part, RequestPart::JsonStringSource { .. }))
+                {
+                    let format: Manifest = decode(
+                        &snapshot
+                            .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                            .map_err(storage_error)?
+                            .ok_or_else(|| integrity("manifest absent"))?,
+                        "manifest",
+                    )?;
+                    if !format.features.contains(REQUEST_TRANSFORM_FEATURE) {
+                        return Err(integrity("request transform format feature is absent"));
+                    }
+                }
                 self.assemble_request(snapshot, None, manifest)
                     .map_err(|_| integrity("request source/wire closure is invalid"))?;
             }

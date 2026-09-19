@@ -1,5 +1,5 @@
 [package]
-name = "contextdb-native-service"
+name = "contextdb-agent-runtime"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,28 +7,21 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Incremental Fjall-backed CognitiveMemoryService for ContextDB"
+description = "Owned conversational lifecycle and captured rolling context"
 
 [dependencies]
 blake3.workspace = true
-chacha20poly1305.workspace = true
-contextdb-core.workspace = true
+contextdb-capture.workspace = true
 contextdb-context.workspace = true
 contextdb-continuity.workspace = true
-contextdb-index.workspace = true
+contextdb-core.workspace = true
 contextdb-recall.workspace = true
 contextdb-service.workspace = true
-contextdb-storage.workspace = true
-contextdb-storage-fjall.workspace = true
-getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-zeroize.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
-contextdb-capture.workspace = true
-contextdb-chat = { workspace = true, features = ["service-adapter"] }
+contextdb-native-service.workspace = true
 tempfile.workspace = true
 
 [lints]
