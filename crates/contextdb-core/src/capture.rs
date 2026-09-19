@@ -95,10 +95,33 @@ pub struct ModelRequestManifest {
     pub parts: Vec<RequestPart>,
 }
 
+/// Representation of the adapter-observed model response, excluding hidden thought.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelOutputFormat {
+    /// Incomplete uninterpreted protocol bytes, never executable tool proposals.
+    OpaquePartial,
+    /// Exact visible UTF-8 text.
+    PlainText,
+    /// Canonical visible text plus structured protocol actions from the adapter.
+    ProtocolJson,
+}
+
 /// Adapter-specific attribution, separate from payload and authority.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EventProvenance {
+    /// A visible response or protocol action linked to its captured request.
+    ModelOutput {
+        /// Same stable call identity as the request occurrence.
+        model_call_id: ModelCallId,
+        /// Exact request occurrence, not a new authority grant.
+        request_event_id: ObservationId,
+        /// Explicit response representation; JSON is not a verbatim text quote.
+        format: ModelOutputFormat,
+        /// Fully observed tool calls in this response, in protocol order.
+        tool_calls: Vec<ToolCallId>,
+    },
     /// Verified disclosure occurrence, without a new independent observation.
     ModelRequest {
         /// Must match the exact ordered request manifest.

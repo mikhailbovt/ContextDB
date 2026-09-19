@@ -94,6 +94,8 @@ fn fixture(service: &NativeService) -> SaveRunCheckpointRequest {
                 status: ObligationStatus::Open,
             }],
             pending_model: None,
+            pending_tool: None,
+            last_model_output: None,
             status: OwnedRunStatus::Active,
         },
     }

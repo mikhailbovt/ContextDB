@@ -16,6 +16,9 @@ use contextdb_service::{Capability, *};
 
 use super::*;
 
+mod partial;
+mod tools;
+
 fn budget() -> QueryBudget {
     QueryBudget::new(
         2_000_000,
@@ -122,6 +125,9 @@ struct ScriptedReader {
     uncertain: AtomicBool,
     requests: Mutex<Vec<Vec<OutgoingMessage>>>,
     model_id: Option<&'static str>,
+    tool_proposal: Option<RequestedTool>,
+    partial: Option<Vec<u8>>,
+    deny_acceptance: AtomicBool,
 }
 impl OutgoingEncoder for ScriptedReader {
     fn id(&self) -> &str {
@@ -144,6 +150,7 @@ impl ReaderAdapter for ScriptedReader {
         if let Some(id) = self.model_id {
             profile.id = id.into();
         }
+        profile.supports_tool_results = self.tool_proposal.is_some();
         profile
     }
     fn capabilities(&self) -> ReaderCapabilities {
@@ -168,12 +175,18 @@ impl ReaderAdapter for ScriptedReader {
             .capture_manifest(call, messages, wire, budget)
             .map_err(context_error)
     }
-    fn complete(&self, _: ModelCallId, wire: &EncodedOutgoing) -> ServiceResult<ReaderReply> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
+    fn complete(&self, _: ModelCallId, wire: &EncodedOutgoing) -> ServiceResult<ReaderOutcome> {
+        let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
         self.requests
             .lock()
             .expect("requests")
             .push(serde_json::from_slice(&wire.wire).expect("exact request JSON"));
+        if let Some(bytes) = &self.partial {
+            return Ok(ReaderOutcome::Interrupted(PartialReaderOutput {
+                bytes: bytes.clone(),
+                media_type: "application/json".into(),
+            }));
+        }
         if self.uncertain.load(Ordering::SeqCst) {
             return Err(ServiceError::new(
                 ErrorCode::ProviderUnavailable,
@@ -181,19 +194,32 @@ impl ReaderAdapter for ScriptedReader {
                 false,
             ));
         }
-        Ok(ReaderReply {
+        if attempt == 0
+            && let Some(tool) = &self.tool_proposal
+        {
+            return Ok(ReaderOutcome::Completed(ReaderReply {
+                text: "Observed tool proposal".into(),
+                tool_calls: vec![tool.clone()],
+            }));
+        }
+        Ok(ReaderOutcome::Completed(ReaderReply {
+            tool_calls: vec![],
             text: "Visible fixture reply: punctuation \"quotes\", backslash \\ and newline\n"
                 .into(),
-        })
+        }))
     }
     fn reconcile(
         &self,
         _: ModelCallId,
         wire_digest: ContentDigest,
     ) -> ServiceResult<ModelReconciliation> {
+        if self.deny_acceptance.load(Ordering::SeqCst) {
+            return Ok(ModelReconciliation::NotAccepted { wire_digest });
+        }
         Ok(ModelReconciliation::Completed {
             wire_digest,
             reply: ReaderReply {
+                tool_calls: vec![],
                 text: "Recovered exact visible reply".into(),
             },
         })
@@ -254,6 +280,18 @@ impl ModelDispatchFence for FixtureFence {
         _: ModelCallId,
         _: &CaptureReceipt,
         _: &PreparedContext,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        charge(budget, 1, 0)
+    }
+}
+impl ToolDispatchFence for FixtureFence {
+    fn before_tool(
+        &self,
+        _: &AuthenticatedRequestContext,
+        _: &CaptureReceipt,
+        _: &PendingToolInvocation,
+        _: &contextdb_capture::ToolAction,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         charge(budget, 1, 0)
@@ -433,6 +471,7 @@ fn restart_reconciles_an_uncertain_model_call_without_duplicate_dispatch() {
             .reconcile_model(&reader, now(), &mut budget())
             .expect("reconcile")
             .expect("result")
+            .reply
             .text,
         "Recovered exact visible reply"
     );
@@ -540,13 +579,14 @@ fn model_switch_preserves_identity_and_terminal_obligation_unpins_its_original()
 struct LostOutputAcknowledgement {
     owner: Arc<NativeService>,
     lose_once: AtomicBool,
+    output_kind: EventKind,
 }
 impl CapturePort for LostOutputAcknowledgement {
     fn append_event_with_status(
         &self,
         request: CaptureRequest,
     ) -> ServiceResult<CaptureAcceptance> {
-        let output = request.event.kind == EventKind::ModelResponseCompleted;
+        let output = request.event.kind == self.output_kind;
         let accepted = self.owner.append_event_with_status(request)?;
         if output && self.lose_once.swap(false, Ordering::SeqCst) {
             return Err(ServiceError::new(
@@ -632,6 +672,7 @@ fn lost_output_acknowledgement_pauses_until_persistence_retry_without_calling_re
     let owner = Arc::new(LostOutputAcknowledgement {
         owner: Arc::clone(&native),
         lose_once: AtomicBool::new(true),
+        output_kind: EventKind::ModelResponseCompleted,
     });
     let (context, identity) = identity();
     native

@@ -159,7 +159,13 @@ impl NativeService {
         checkpoint: Option<&SaveRunCheckpointRequest>,
     ) -> ServiceResult<CaptureAcceptance> {
         require_capability(&request.context, Capability::Observe)?;
-        if host_request_echo(&request.event) || checkpoint.is_some() {
+        if host_request_echo(&request.event)
+            || checkpoint.is_some()
+            || matches!(
+                request.event.provenance,
+                Some(EventProvenance::ModelOutput { .. })
+            )
+        {
             require_capability(&request.context, Capability::Runtime)?;
         }
         match (&request.event.provenance, checkpoint) {
@@ -351,6 +357,12 @@ impl NativeService {
             self.enable_source_format(&mut transaction)?;
         }
         self.enable_capture_format(&mut transaction)?;
+        if matches!(event.provenance, Some(EventProvenance::ModelOutput { .. })) {
+            self.enable_capture_extension(
+                &mut transaction,
+                super::payload::MODEL_PROTOCOL_FEATURE,
+            )?;
+        }
         let affects_scope = !host_request_echo(event);
         if !affects_scope {
             self.enable_capture_extension(&mut transaction, IMPACT_FEATURE)?;
@@ -703,6 +715,15 @@ impl NativeService {
             if entry.key.starts_with(b"receipt/") {
                 let record: CaptureRecord = decode(&entry.value, "capture record")?;
                 let original = self.load_captured_original(snapshot, record.receipt.event_id)?;
+                if matches!(
+                    original.event.provenance,
+                    Some(EventProvenance::ModelOutput { .. })
+                ) && !manifest
+                    .features
+                    .contains(super::payload::MODEL_PROTOCOL_FEATURE)
+                {
+                    return Err(integrity("model protocol format feature is absent"));
+                }
                 if record.affects_scope.is_some() && !manifest.features.contains(IMPACT_FEATURE) {
                     return Err(integrity("capture scope-impact format feature is absent"));
                 }

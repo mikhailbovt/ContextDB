@@ -1,11 +1,13 @@
+use contextdb_capture::ToolAction;
 use contextdb_context::{
     EncodedOutgoing, ModelProfile, OutgoingEncoder, OutgoingMessage, TokenCounter,
 };
-use contextdb_core::{ContentDigest, ModelCallId, ModelRequestManifest};
+use contextdb_core::{ContentDigest, ModelCallId, ModelRequestManifest, ToolCallId};
 use contextdb_recall::QueryBudget;
 use contextdb_service::{
     AuthenticatedRequestContext, CaptureReceipt, PreparedContext, ServiceResult,
 };
+use serde::{Deserialize, Serialize};
 
 /// Host-verified history contract. An opaque persistent conversation is excluded.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,17 +29,69 @@ pub struct ReaderCapabilities {
     pub can_reconcile: bool,
 }
 
-/// Complete visible text. Provider errors with partial bytes must preserve those
-/// bytes separately; an error alone never implies that no request was accepted.
-#[derive(Clone, Eq, PartialEq)]
+/// Complete visible text and fully observed action proposals.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReaderReply {
     /// Exact visible output; hidden reasoning is never part of this type.
     pub text: String,
+    /// Fully observed protocol actions, never tool-execution authority.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<RequestedTool>,
+}
+
+impl ReaderReply {
+    /// A completed plain-text response with no pending protocol action.
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            tool_calls: vec![],
+        }
+    }
+}
+
+/// Model-proposed action. The host registry and dispatch fence decide execution.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestedTool {
+    /// Stable action identity from this reader adapter's protocol mapping.
+    pub call_id: ToolCallId,
+    /// Exact observed operation, arguments and proposed target precondition.
+    pub action: ToolAction,
 }
 impl std::fmt::Debug for ReaderReply {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReaderReply")
             .field("byte_length", &self.text.len())
+            .field("tool_calls", &self.tool_calls.len())
+            .finish()
+    }
+}
+
+/// Buffered reader observation. A provider error is allowed only when it exposed
+/// no output bytes; otherwise return Interrupted. Streaming adapters must persist
+/// chunks before exposing them and require their own incremental capture contract.
+#[derive(Debug)]
+pub enum ReaderOutcome {
+    /// The provider completed this response, including its action protocol.
+    Completed(ReaderReply),
+    /// Exact available output; no action inside these bytes may be dispatched.
+    Interrupted(PartialReaderOutput),
+}
+
+/// Observed incomplete output, retained independently of provider recovery.
+#[derive(Clone)]
+pub struct PartialReaderOutput {
+    /// Exact visible text or protocol bytes; never hidden reasoning.
+    pub bytes: Vec<u8>,
+    /// Source content type, not an instruction to execute or interpret the body.
+    pub media_type: String,
+}
+impl std::fmt::Debug for PartialReaderOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PartialReaderOutput")
+            .field("byte_length", &self.bytes.len())
+            .field("media_type", &self.media_type)
             .finish()
     }
 }
@@ -78,8 +132,13 @@ pub trait ReaderAdapter: OutgoingEncoder {
         wire: &EncodedOutgoing,
         budget: &mut QueryBudget,
     ) -> ServiceResult<ModelRequestManifest>;
-    /// Send only these already-captured bytes. Errors leave the outcome unknown.
-    fn complete(&self, call: ModelCallId, request: &EncodedOutgoing) -> ServiceResult<ReaderReply>;
+    /// Send only these captured bytes. Errors leave the outcome unknown and must
+    /// never discard exposed output; use Interrupted when bytes were received.
+    fn complete(
+        &self,
+        call: ModelCallId,
+        request: &EncodedOutgoing,
+    ) -> ServiceResult<ReaderOutcome>;
     /// Recover an uncertain attempt without dispatching it again.
     fn reconcile(
         &self,
@@ -99,6 +158,20 @@ pub trait ModelDispatchFence: std::fmt::Debug + Send + Sync {
         call: ModelCallId,
         request: &CaptureReceipt,
         prepared: &PreparedContext,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()>;
+}
+
+/// Required owner check immediately before an external target is invoked.
+pub trait ToolDispatchFence: std::fmt::Debug + Send + Sync {
+    /// Compare fresh constraints, source permissions, run revision and action bytes.
+    /// A rejection is a known failed dispatch, never an unknown external effect.
+    fn before_tool(
+        &self,
+        context: &AuthenticatedRequestContext,
+        checkpoint: &CaptureReceipt,
+        planned: &contextdb_continuity::PendingToolInvocation,
+        action: &ToolAction,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()>;
 }

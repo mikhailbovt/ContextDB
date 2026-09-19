@@ -60,15 +60,28 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         let receipt = match request.event.payload.clone() {
             EventPayload::InlineUtf8 { text, .. } => {
                 charge(budget, 1, text.len() as u64)?;
-                host.capture_bytes(
-                    request,
-                    text.into_bytes(),
-                    "text/plain; charset=utf-8".into(),
-                )?
-                .receipt
+                let media_type = if matches!(
+                    request.event.provenance,
+                    Some(EventProvenance::ModelOutput {
+                        format: ModelOutputFormat::ProtocolJson,
+                        ..
+                    })
+                ) {
+                    "application/json"
+                } else {
+                    "text/plain; charset=utf-8"
+                };
+                host.capture_bytes(request, text.into_bytes(), media_type.into())?
+                    .receipt
             }
             EventPayload::Assembly { manifest } => {
                 host.capture_model_request(request, manifest)?.receipt
+            }
+            EventPayload::InlineBytes {
+                bytes, media_type, ..
+            } => {
+                charge(budget, 1, bytes.len() as u64)?;
+                host.capture_bytes(request, bytes, media_type)?.receipt
             }
             _ => return Err(invalid("unsupported owned capture payload")),
         };
@@ -151,19 +164,58 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 {
                     return Err(invalid("response has no matching captured request"));
                 }
+                let Some(EventProvenance::ModelOutput {
+                    model_call_id,
+                    request_event_id,
+                    tool_calls,
+                    ..
+                }) = &event.provenance
+                else {
+                    return Err(invalid("owned response lacks protocol provenance"));
+                };
+                if *model_call_id != pending.call_id || *request_event_id != pending.request_event {
+                    return Err(invalid("owned model output refers to another attempt"));
+                }
                 let group = self
                     .state
                     .groups
                     .last_mut()
                     .ok_or_else(|| invalid("response has no interaction group"))?;
                 if metadata.byte_length != Some(0) {
-                    group
-                        .messages
-                        .push(captured_message(&metadata, OutgoingRole::Assistant)?);
+                    let mut message = captured_message(&metadata, OutgoingRole::Assistant)?;
+                    message.tool_calls = tool_calls.iter().map(ToString::to_string).collect();
+                    group.messages.push(message);
                 }
-                group.complete = true;
+                group.complete = tool_calls.is_empty();
                 self.state.pending_model = None;
+                self.state.last_model_output = Some(event.event_id);
                 self.phase = CallPhase::Ready;
+            }
+            (EventKind::ModelResponseAborted, EventRole::Assistant) => {
+                let pending = self
+                    .state
+                    .pending_model
+                    .as_mut()
+                    .ok_or_else(|| invalid("interrupted output has no model intent"))?;
+                if pending.wire_digest.is_none()
+                    || !matches!(&event.provenance, Some(EventProvenance::ModelOutput {
+                        model_call_id, request_event_id, tool_calls, ..
+                    }) if *model_call_id == pending.call_id
+                        && *request_event_id == pending.request_event && tool_calls.is_empty())
+                {
+                    return Err(invalid(
+                        "interrupted output belongs to another model attempt",
+                    ));
+                }
+                pending.interrupted_output = Some(event.event_id);
+                self.phase = CallPhase::Unknown;
+            }
+            (EventKind::ToolRequested, EventRole::Host)
+            | (
+                EventKind::ToolCompleted | EventKind::ToolFailed | EventKind::ToolOutcomeUnknown,
+                EventRole::Tool,
+            ) => {
+                self.apply_tool_event(event, &metadata)?;
             }
             _ => {
                 return Err(ServiceError::new(
@@ -185,6 +237,11 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         now: TimestampMicros,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
+        if !self.checkpoint_position_available() {
+            return Err(invalid(
+                "pending tool outcome owns the next producer position",
+            ));
+        }
         if self.pending_checkpoint.is_none() {
             let mut checkpoint = self.state.clone();
             checkpoint.revision = checkpoint
@@ -220,7 +277,10 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
     }
 }
 
-fn captured_message(source: &RawSource, role: OutgoingRole) -> ServiceResult<CapturedMessage> {
+pub(super) fn captured_message(
+    source: &RawSource,
+    role: OutgoingRole,
+) -> ServiceResult<CapturedMessage> {
     let size = source
         .byte_length
         .ok_or_else(|| invalid("original bytes are unavailable"))?;

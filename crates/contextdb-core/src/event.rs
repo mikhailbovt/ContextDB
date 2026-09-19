@@ -365,6 +365,32 @@ impl Validate for EventEnvelope {
             ));
         }
         match &self.provenance {
+            Some(crate::EventProvenance::ModelOutput {
+                request_event_id,
+                format,
+                tool_calls,
+                ..
+            }) => {
+                if !matches!(
+                    self.kind,
+                    EventKind::ModelResponseCompleted | EventKind::ModelResponseAborted
+                ) || self.role != EventRole::Assistant
+                    || self.run_id.is_none()
+                    || self.session_id.is_none()
+                    || !self.parent_event_ids.contains(request_event_id)
+                    || (*format == crate::ModelOutputFormat::OpaquePartial
+                        && self.kind != EventKind::ModelResponseAborted)
+                    || tool_calls.len() > 32
+                    || tool_calls.iter().collect::<BTreeSet<_>>().len() != tool_calls.len()
+                    || (!tool_calls.is_empty()
+                        && (*format != crate::ModelOutputFormat::ProtocolJson
+                            || self.kind != EventKind::ModelResponseCompleted))
+                {
+                    return Err(invalid(
+                        "model output provenance or protocol is inconsistent",
+                    ));
+                }
+            }
             Some(crate::EventProvenance::ModelRequest { model_call_id })
                 if self.kind != EventKind::ModelRequested
                     || self.role != EventRole::Host

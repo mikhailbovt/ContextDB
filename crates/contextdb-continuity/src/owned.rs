@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use contextdb_context::{BlockId, ModelProfile, OutgoingRole};
 use contextdb_core::{
     AgentRunId, ContentDigest, ModelCallId, ObservationId, OriginalSourceSpan, ScopeId, SessionId,
-    StreamId, TimestampMicros, WorkspaceId,
+    StreamId, TimestampMicros, ToolCallId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +97,34 @@ pub struct PendingModelCall {
     pub request_event: ObservationId,
     /// Exact wire binding once known; absence means preparation was still pending.
     pub wire_digest: Option<ContentDigest>,
+    /// Captured interrupted output prevents claiming this attempt was never accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupted_output: Option<ObservationId>,
+}
+
+/// Sequential external action with stable intent and outcome capture positions.
+/// Unknown outcomes reserve a new result slot only after reconciliation is needed.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PendingToolInvocation {
+    /// Immutable model proposal; it grants no execution authority.
+    pub proposal: OriginalSourceSpan,
+    /// Stable target invocation identity.
+    pub call_id: ToolCallId,
+    /// Digest of the exact canonical ToolAction.
+    pub action_digest: ContentDigest,
+    /// Reserved intent occurrence.
+    pub request_event: ObservationId,
+    /// Reserved producer position, retained on reconciliation.
+    pub request_sequence: u64,
+    /// Fixed host intent time for idempotent capture.
+    pub request_recorded_at: TimestampMicros,
+    /// Current immutable result slot; an unknown result is never overwritten.
+    pub outcome_event: ObservationId,
+    /// Current result's producer position.
+    pub outcome_sequence: u64,
+    /// Fixed host slot time, retained on uncertain acknowledgement.
+    pub outcome_recorded_at: TimestampMicros,
 }
 
 /// Terminal runs cannot dispatch more model or tool work.
@@ -136,6 +164,12 @@ pub struct OwnedRunCheckpoint {
     pub obligations: Vec<ScopedObligation>,
     /// Unreconciled model attempt, if any.
     pub pending_model: Option<PendingModelCall>,
+    /// At most one executing/reconciling tool; remaining calls stay in their group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_tool: Option<PendingToolInvocation>,
+    /// Last complete model output, including a valid empty response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_model_output: Option<ObservationId>,
     /// Run lifecycle, independent of semantic assertion authority.
     pub status: OwnedRunStatus,
 }
@@ -239,6 +273,7 @@ impl OwnedRunCheckpoint {
         }
         if self.status != OwnedRunStatus::Active
             && (self.pending_model.is_some()
+                || self.pending_tool.is_some()
                 || self
                     .obligations
                     .iter()
@@ -246,12 +281,40 @@ impl OwnedRunCheckpoint {
         {
             return Err(invalid("terminal run retains pending work"));
         }
+        if let Some(tool) = &self.pending_tool {
+            validate_span(&tool.proposal)?;
+            crate::ensure_digest_nonzero(tool.action_digest, "tool action")?;
+            if self.pending_model.is_some()
+                || tool.request_sequence == 0
+                || tool.request_sequence > self.next_sequence
+                || tool.outcome_sequence <= tool.request_sequence
+                || tool.outcome_sequence < self.next_sequence
+                || !self.groups.last().is_some_and(|group| {
+                    !group.complete
+                        && group.messages.iter().any(|message| {
+                            message.source == tool.proposal
+                                && message.tool_calls.contains(&tool.call_id.to_string())
+                        })
+                })
+            {
+                return Err(invalid(
+                    "pending tool differs from the current captured protocol",
+                ));
+            }
+        }
         if let Some(digest) = self
             .pending_model
             .as_ref()
             .and_then(|call| call.wire_digest)
         {
             crate::ensure_digest_nonzero(digest, "model request wire")?;
+        }
+        if self
+            .pending_model
+            .as_ref()
+            .is_some_and(|call| call.interrupted_output.is_some() && call.wire_digest.is_none())
+        {
+            return Err(invalid("interrupted output requires a captured request"));
         }
         Ok(())
     }

@@ -162,6 +162,7 @@ impl OwnedRunPort for NativeService {
         {
             return Err(integrity("run head differs from its captured checkpoint"));
         }
+        self.validate_pending_model(&snapshot, context, &checkpoint)?;
         Ok(Some(SavedRunCheckpoint {
             checkpoint,
             receipt: head.receipt,
@@ -302,6 +303,23 @@ impl NativeService {
         for source in request.checkpoint.required_sources() {
             self.source_span(snapshot, Some(&request.context), source, true)?;
         }
+        self.validate_pending_model(snapshot, &request.context, &request.checkpoint)?;
+        if let Some(id) = request.checkpoint.last_model_output {
+            self.authorized_capture_policy(snapshot, &request.context, id)?;
+            let original = self.load_captured_original(snapshot, id)?;
+            if original.event.kind != EventKind::ModelResponseCompleted
+                || original.event.run_id != Some(request.checkpoint.identity.run_id)
+                || original.event.session_id != Some(request.checkpoint.identity.session_id)
+                || !matches!(
+                    original.event.provenance,
+                    Some(EventProvenance::ModelOutput { .. })
+                )
+            {
+                return Err(invalid(
+                    "last model result belongs to another run or protocol",
+                ));
+            }
+        }
         for message in request
             .checkpoint
             .groups
@@ -325,6 +343,69 @@ impl NativeService {
             {
                 return Err(invalid(
                     "checkpoint message role or run differs from its original",
+                ));
+            }
+            let calls = match &original.event.provenance {
+                Some(EventProvenance::ModelOutput { tool_calls, .. }) => tool_calls
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                _ => vec![],
+            };
+            let result = match &original.event.provenance {
+                Some(EventProvenance::Tool { call_id, .. })
+                    if original.event.role == EventRole::Tool =>
+                {
+                    Some(call_id.to_string())
+                }
+                _ => None,
+            };
+            if message.tool_calls != calls || message.tool_result != result {
+                return Err(invalid(
+                    "checkpoint tool protocol differs from its captured source",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_pending_model<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        checkpoint: &OwnedRunCheckpoint,
+    ) -> ServiceResult<()> {
+        let Some(call) = &checkpoint.pending_model else {
+            return Ok(());
+        };
+        if let Some(wire) = call.wire_digest {
+            self.authorized_capture_policy(snapshot, context, call.request_event)?;
+            self.authorize_capture_dependencies(snapshot, context, call.request_event)?;
+            let original = self.load_captured_original(snapshot, call.request_event)?;
+            if original.event.run_id != Some(checkpoint.identity.run_id)
+                || original.event.session_id != Some(checkpoint.identity.session_id)
+                || !matches!(&original.event.payload, EventPayload::Assembly { manifest }
+                    if manifest.model_call_id == call.call_id && manifest.wire_digest == wire)
+            {
+                return Err(invalid(
+                    "pending model wire differs from its captured request",
+                ));
+            }
+        }
+        if let Some(id) = call.interrupted_output {
+            self.authorized_capture_policy(snapshot, context, id)?;
+            self.authorize_capture_dependencies(snapshot, context, id)?;
+            let original = self.load_captured_original(snapshot, id)?;
+            if original.event.kind != EventKind::ModelResponseAborted
+                || original.event.run_id != Some(checkpoint.identity.run_id)
+                || original.event.session_id != Some(checkpoint.identity.session_id)
+                || !matches!(&original.event.provenance, Some(EventProvenance::ModelOutput {
+                    model_call_id, request_event_id, tool_calls, ..
+                }) if *model_call_id == call.call_id
+                    && *request_event_id == call.request_event && tool_calls.is_empty())
+            {
+                return Err(invalid(
+                    "interrupted output differs from the pending model attempt",
                 ));
             }
         }

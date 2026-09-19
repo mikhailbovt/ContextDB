@@ -257,12 +257,13 @@ resume reconciles it before retrying. Shadow routers cannot execute effects.
 ## Owned conversation lifecycle
 
 `contextdb-agent-runtime` owns bounded conversational residency independently of
-the database foundation runtime. Its initial text path captures input, selects
+the database foundation runtime. Its buffered text/protocol path captures input, selects
 post-eviction hot groups, derives bounded lexical discovery routes, prepares and
 captures the whole request, calls a required dispatch guard, then captures the
-visible response. A missing interpreter retains explicit unknown state; it does
-not certify arbitrary text as understood. Tool and expansion protocol execution
-and the native guard remain delivery gates, as do real reader/cache measurements.
+visible response. A bounded `drive` loop executes registered tools and source-bound
+memory expansion between model calls. A missing interpreter retains explicit
+unknown state; it does not certify arbitrary text as understood. Native guards
+and real reader/cache measurements remain delivery gates.
 
 `OwnedRunPort` publishes each source-addressed checkpoint and run head in the
 same native synchronized capture transaction. Revisions use compare-and-publish;
@@ -284,6 +285,25 @@ request is captured before handoff. After a crash, a captured request with no
 result requires provider reconciliation, while an uncaptured planned request
 cannot have been sent through this runtime. Persistence retries retain the same
 bytes/identity and never repeat the provider call.
+
+Model-output provenance binds the exact request and fully observed action IDs.
+Structured proposals are explicitly protocol JSON; model text does not grant
+execution authority. The host registry resolves operation names, and a required
+tool guard runs after intent capture and immediately before dispatch. Intent and
+outcome positions remain reserved across restart. Unknown outcomes reconcile
+through the target; lost outcome receipts retry capture alone. A successful
+`contextdb.memory.expand` schedules bounded original queries for the next
+preparation; its acknowledgement does not claim retrieval has already succeeded.
+
+Interrupted buffered output is preserved as opaque partial bytes with no
+executable actions. Recovery cannot claim the request was never accepted after
+output was observed. Malformed or unsupported proposals are also retained without
+dispatch. An historical capture gap remains explicit until a supported coverage
+repair proves closure; a later answer alone cannot erase it. Live streaming and
+oversized/non-text protocol groups require explicit adapter profiles. The initial
+hot-message profile is 1 MiB per source and 32 messages per interaction group;
+captured overflow remains durable and returns a typed error. The
+`continuous-model-protocol-v1` feature fences these new provenance contracts.
 
 Request JSON escaping is represented by verified `JsonStringSource` transforms,
 not new original quotations. Large novel protocol bytes are staged durably.

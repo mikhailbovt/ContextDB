@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, sync::Arc};
 
-use contextdb_capture::CaptureHost;
+use contextdb_capture::{CaptureHost, PendingToolCapture};
 use contextdb_context::*;
 use contextdb_continuity::*;
 use contextdb_core::*;
@@ -8,11 +8,17 @@ use contextdb_recall::{IndexedQuery, QueryBudget};
 use contextdb_service::*;
 
 use super::{
-    ModelDispatchFence, ModelReconciliation, PreparationHook, ReaderAdapter, ReaderReply,
-    RollingPolicy, charge, context_error, conversation_routes, exhausted, invalid, rolling,
+    ModelDispatchFence, ModelReconciliation, PreparationHook, ReaderAdapter, ReaderOutcome,
+    ReaderReply, RollingPolicy, charge, context_error, conversation_routes, exhausted, invalid,
+    rolling,
 };
 
+mod drive;
+mod model_output;
 mod persistence;
+mod tools;
+pub use drive::*;
+pub use tools::QueuedTool;
 
 /// Host configuration. Changing control text changes the next complete request.
 #[derive(Clone, Debug)]
@@ -96,7 +102,8 @@ enum CallPhase {
     Unknown,
 }
 
-/// A visible answer is returned only after output capture and checkpoint receipt.
+/// A model step is returned only after output capture and checkpoint receipt.
+/// Tool calls, when present, leave the interaction open until their results arrive.
 #[derive(Debug)]
 pub struct CompletedTurn {
     /// Exact captured visible model text.
@@ -107,6 +114,15 @@ pub struct CompletedTurn {
     pub prepared: PreparedContext,
     /// Number of completed groups removed from resident history in this step.
     pub evicted_groups: usize,
+}
+
+/// A recovered response retains its own receipt; no fresh preparation is invented.
+#[derive(Debug)]
+pub struct RecoveredReply {
+    /// Actual recovered and captured output.
+    pub reply: ReaderReply,
+    /// Durable result occurrence.
+    pub output_receipt: CaptureReceipt,
 }
 
 /// Owns mutable message residency and operational state; the native owner remains
@@ -120,6 +136,7 @@ pub struct OwnedAgentRuntime<S: ?Sized> {
     settings: RuntimeSettings,
     pending_capture: Option<PendingCapture>,
     pending_checkpoint: Option<SaveRunCheckpointRequest>,
+    pending_tool_capture: Option<Box<PendingToolCapture>>,
     phase: CallPhase,
 }
 impl<S: ?Sized> std::fmt::Debug for OwnedAgentRuntime<S> {
@@ -157,6 +174,8 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             groups: vec![],
             obligations: vec![],
             pending_model: None,
+            pending_tool: None,
+            last_model_output: None,
             status: OwnedRunStatus::Active,
         };
         let saved = owner.save_run_checkpoint(
@@ -178,6 +197,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             settings,
             pending_capture: None,
             pending_checkpoint: None,
+            pending_tool_capture: None,
             phase: CallPhase::Ready,
         })
     }
@@ -212,6 +232,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             settings,
             pending_capture: None,
             pending_checkpoint: None,
+            pending_tool_capture: None,
             phase: CallPhase::Ready,
         };
         if let Some(pending) = &runtime.state.pending_model {
@@ -230,7 +251,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             runtime.state.pending_model = None;
             runtime.phase = CallPhase::Ready;
             runtime.save_checkpoint(now, budget)?;
-        } else if changed {
+        } else if changed && runtime.checkpoint_position_available() {
             runtime.save_checkpoint(now, budget)?;
         }
         rolling::rehydrate(
@@ -303,6 +324,13 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         now: TimestampMicros,
         budget: &mut QueryBudget,
     ) -> ServiceResult<CaptureReceipt> {
+        if self.pending_tool_capture.is_some() {
+            self.retry_tool_persistence(now, budget)?;
+            return Ok(self.checkpoint_receipt.clone());
+        }
+        if self.pending_capture.is_none() && self.pending_checkpoint.is_none() {
+            return Ok(self.checkpoint_receipt.clone());
+        }
         if self.pending_capture.is_some() {
             self.flush_capture(budget)?;
         }
@@ -322,13 +350,14 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         self.ensure_active()?;
-        if !matches!(self.phase, CallPhase::Ready) {
+        if !matches!(self.phase, CallPhase::Ready) || self.state.pending_tool.is_some() {
             return Err(invalid(
                 "reconcile pending model work before switching readers",
             ));
         }
         validate_reader(reader)?;
         settings.validate(&reader.profile())?;
+        self.validate_reader_protocol(&reader.profile())?;
         self.state.model_profile = reader.profile();
         self.settings = settings;
         self.save_checkpoint(now, budget)
@@ -342,7 +371,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         self.ensure_active()?;
-        if !matches!(self.phase, CallPhase::Ready) {
+        if !matches!(self.phase, CallPhase::Ready) || self.state.pending_tool.is_some() {
             return Err(invalid("pending call freezes working state"));
         }
         let mut next = self.state.clone();
@@ -362,7 +391,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         self.ensure_active()?;
-        if !matches!(self.phase, CallPhase::Ready) {
+        if !matches!(self.phase, CallPhase::Ready) || self.state.pending_tool.is_some() {
             return Err(invalid("pending call freezes working state"));
         }
         self.state
@@ -391,7 +420,10 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         self.ensure_active()?;
-        if status == OwnedRunStatus::Active || !matches!(self.phase, CallPhase::Ready) {
+        if status == OwnedRunStatus::Active
+            || !matches!(self.phase, CallPhase::Ready)
+            || self.state.pending_tool.is_some()
+        {
             return Err(invalid(
                 "terminal transition requires a known model boundary",
             ));
@@ -430,6 +462,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
     ) -> ServiceResult<CompletedTurn> {
         self.ensure_active()?;
         validate_reader(reader)?;
+        self.validate_reader_protocol(&reader.profile())?;
         if reader.profile() != self.state.model_profile {
             return Err(invalid("reader switch requires an explicit checkpoint"));
         }
@@ -438,6 +471,11 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         }
         if matches!(self.phase, CallPhase::Unknown) {
             return Err(unknown());
+        }
+        if self.state.pending_tool.is_some() || self.has_outstanding_tools() {
+            return Err(invalid(
+                "complete or reconcile the pending tool protocol before the next model call",
+            ));
         }
         if self.state.groups.last().is_none_or(|group| group.complete) {
             return Err(invalid("no current interaction awaits a model response"));
@@ -449,6 +487,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     call_id: ModelCallId::new(),
                     request_event: ObservationId::new(),
                     wire_digest: None,
+                    interrupted_output: None,
                 });
                 self.phase = CallPhase::Planned;
                 self.save_checkpoint(now, budget)?;
@@ -579,7 +618,11 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         // From this point an error or process loss is an uncertain provider outcome.
         self.phase = CallPhase::Unknown;
         let reply = match reader.complete(call.call_id, &prepared.outgoing) {
-            Ok(reply) => reply,
+            Ok(ReaderOutcome::Completed(reply)) => reply,
+            Ok(ReaderOutcome::Interrupted(output)) => {
+                self.capture_interruption(&call, output, now, budget)?;
+                return Err(unknown());
+            }
             Err(_) => {
                 self.save_checkpoint(now, budget)?;
                 return Err(unknown());
@@ -600,7 +643,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         reader: &dyn ReaderAdapter,
         now: TimestampMicros,
         budget: &mut QueryBudget,
-    ) -> ServiceResult<Option<ReaderReply>> {
+    ) -> ServiceResult<Option<RecoveredReply>> {
         self.ensure_active()?;
         if !matches!(self.phase, CallPhase::Unknown) || reader.profile() != self.state.model_profile
         {
@@ -620,10 +663,18 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             .ok_or_else(|| invalid("captured model wire absent"))?;
         match reader.reconcile(call.call_id, wire)? {
             ModelReconciliation::Completed { wire_digest, reply } if wire_digest == wire => {
-                self.capture_reply(&call, &reply, now, budget)?;
-                Ok(Some(reply))
+                let output_receipt = self.capture_reply(&call, &reply, now, budget)?;
+                Ok(Some(RecoveredReply {
+                    reply,
+                    output_receipt,
+                }))
             }
             ModelReconciliation::NotAccepted { wire_digest } if wire_digest == wire => {
+                if call.interrupted_output.is_some() {
+                    return Err(invalid(
+                        "provider denied acceptance despite captured output",
+                    ));
+                }
                 self.state.pending_model = None;
                 self.phase = CallPhase::Ready;
                 self.save_checkpoint(now, budget)?;
@@ -636,29 +687,11 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         }
     }
 
-    fn capture_reply(
-        &mut self,
-        call: &PendingModelCall,
-        reply: &ReaderReply,
-        now: TimestampMicros,
-        budget: &mut QueryBudget,
-    ) -> ServiceResult<CaptureReceipt> {
-        let mut request = self.event(
-            EventKind::ModelResponseCompleted,
-            EventRole::Assistant,
-            reply.text.clone(),
-            now,
-            ObservationId::new(),
-        )?;
-        request.event.parent_event_ids.insert(call.request_event);
-        self.pending_capture = Some(PendingCapture::Conversation(request));
-        let receipt = self.flush_capture(budget)?;
-        self.save_checkpoint(now, budget)?;
-        Ok(receipt)
-    }
-
     fn ensure_active(&self) -> ServiceResult<()> {
-        if self.pending_capture.is_some() || self.pending_checkpoint.is_some() {
+        if self.pending_capture.is_some()
+            || self.pending_checkpoint.is_some()
+            || self.pending_tool_capture.is_some()
+        {
             return Err(ServiceError::new(
                 ErrorCode::Unavailable,
                 "retry retained persistence before further work",

@@ -24,6 +24,7 @@ use super::{
 
 pub(super) const SOURCE_FEATURE: &str = "continuous-sources-v1";
 pub(super) const REQUEST_TRANSFORM_FEATURE: &str = "continuous-request-transforms-v1";
+pub(super) const MODEL_PROTOCOL_FEATURE: &str = "continuous-model-protocol-v1";
 /// Maximum complete staged original or reconstructed request.
 pub const CAPTURE_MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 /// Maximum ordered segments in one request occurrence.
@@ -286,6 +287,13 @@ impl NativeService {
         event: &EventEnvelope,
     ) -> ServiceResult<()> {
         match &event.provenance {
+            Some(contextdb_core::EventProvenance::ModelOutput {
+                request_event_id, ..
+            }) => {
+                self.authorized_capture_policy(snapshot, context, *request_event_id)?;
+                self.authorize_capture_dependencies(snapshot, context, *request_event_id)?;
+                self.validate_model_output_origin(snapshot, event)?;
+            }
             Some(contextdb_core::EventProvenance::Tool {
                 call_id,
                 request_event_id,
@@ -647,6 +655,8 @@ impl NativeService {
         snapshot: &S,
         event: &EventEnvelope,
     ) -> ServiceResult<()> {
+        self.validate_model_output_origin(snapshot, event)
+            .map_err(|_| integrity("model output differs from its captured request"))?;
         match &event.payload {
             EventPayload::Staged { reference, .. } => {
                 let header = self.checked_payload_header(snapshot, None, reference)?;
@@ -673,6 +683,32 @@ impl NativeService {
                     .map_err(|_| integrity("request source/wire closure is invalid"))?;
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn validate_model_output_origin<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event: &EventEnvelope,
+    ) -> ServiceResult<()> {
+        let Some(contextdb_core::EventProvenance::ModelOutput {
+            model_call_id,
+            request_event_id,
+            ..
+        }) = &event.provenance
+        else {
+            return Ok(());
+        };
+        let request = self.load_captured_original(snapshot, *request_event_id)?;
+        if request.event.kind != EventKind::ModelRequested
+            || request.event.run_id != event.run_id
+            || request.event.session_id != event.session_id
+            || !matches!(request.event.payload, EventPayload::Assembly { ref manifest } if manifest.model_call_id == *model_call_id)
+        {
+            return Err(invalid(
+                "model output origin belongs to another request or run",
+            ));
         }
         Ok(())
     }
