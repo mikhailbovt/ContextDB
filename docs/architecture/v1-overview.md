@@ -110,6 +110,11 @@ for that complete binding.
 
 ## Current implementation profile
 
+The accepted [continuous-context extension](continuous-context.md) adds native
+raw capture and indexed retrieval, current-state leases and an owned rolling
+agent adapter. Its [delivery ledger](../roadmap/continuous-context.md) records
+implementation and evidence separately from the existing alpha release.
+
 The repository contains executable reference slices through M17, including the
 conversation, knowledge and coding verticals, three HTTP SDKs, MCP, conformance,
 security and benchmark harnesses. The standalone persistent composition is

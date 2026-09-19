@@ -1,14 +1,14 @@
 {
   "artifacts": [
     {
-      "bytes": 219209,
+      "bytes": 219439,
       "path": "release/THIRD_PARTY_NOTICES.txt",
-      "sha256": "37abca0c83908b043dffdda5b2d8de88864ce5cc1a3f78cc6c9dffa5605295e2"
+      "sha256": "b11a03513a8ca48e395db0fddd7dae46eadae39b6e1552ae0388f04f27e27970"
     },
     {
-      "bytes": 171784,
+      "bytes": 172888,
       "path": "release/contextdb-local-mcp.cdx.json",
-      "sha256": "d92b868e54d6e38bd18eb6ed3f63c558e51f4ebb0f0c27582800032a99c867d8"
+      "sha256": "4f7e5a425b1f592af12af3f720fe6718ece73afcf9c452c84549e817b9978034"
     },
     {
       "bytes": 279302,
@@ -28,7 +28,7 @@
   ],
   "canonical_repository": "https://github.com/mikhailbovt/ContextDB",
   "cargo": {
-    "cargo_lock_sha256": "5cbe71bb10596b6f6c2c35898085c6ff810ebeef8757039bc20af1ed4ac01aba",
+    "cargo_lock_sha256": "a8ba44ad39aafb9f96a3d9e03b7063046bf188e63392de6f2f70e400dc856e83",
     "default_features": false,
     "dependency_kinds": [
       "normal",
@@ -227,7 +227,7 @@
         "Apache-2.0"
       ],
       "source": "registry+https://github.com/rust-lang/crates.io-index",
-      "version": "0.10.1"
+      "version": "0.10.2"
     },
     {
       "declared_license": "Apache-2.0 OR MIT",
@@ -488,6 +488,16 @@
       ],
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "0.1.5"
+    },
+    {
+      "declared_license": "MIT OR Apache-2.0",
+      "name": "getrandom",
+      "repository": "https://github.com/rust-random/getrandom",
+      "selected_licenses": [
+        "Apache-2.0"
+      ],
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "0.3.4"
     },
     {
       "declared_license": "MIT OR Apache-2.0",
@@ -1372,9 +1382,9 @@
     }
   ],
   "graph": {
-    "component_count": 146,
-    "sha256": "8424f65437fb0c64ace6e6264af9a25692adad6db8a318ee24abb92fd83ecec9",
-    "third_party_component_count": 132
+    "component_count": 147,
+    "sha256": "606f3b7cd3fcd1d340ea52918ed40714759cbe99052aa6bd88e96da738c6172c",
+    "third_party_component_count": 133
   },
   "profile_id": "contextdb-local-mcp-windows-x86_64",
   "release_class": "developer-preview",
