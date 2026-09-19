@@ -629,6 +629,12 @@ fn negative_overlay_checks_current_evidence_acl_before_reading_denied_content() 
             &mut budget(),
         )
         .expect("native assertion fixture");
+    assert!(
+        service
+            .maintain_custody(&input.context, 64, &mut budget())
+            .expect("complete current custody before state resolution")
+            .caught_up
+    );
     assert_eq!(
         query(&service, &input, 0, None).resolution.state,
         ResolvedState::Incomplete

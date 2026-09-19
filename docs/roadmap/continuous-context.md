@@ -16,8 +16,8 @@ native or model acceptance.
 | 06 | Evidence compiler, whole-request manifest, R0 and budgets | Merged in #8; all eight CI jobs passed |
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Merged in #9; all eight CI jobs passed; reader/cache acceptance remains open |
 | 08 | Atomic lease admission, invalidation and action fences | Merged in #10; all eight CI jobs passed; strict transport handoff remains open |
-| 09 | Cache/cost controller and paired runtime evaluation | Measured usage/controller and local reader comparison implemented; R0 quality and total monetary benefit remain open |
-| 10 | Restore/revocation, retention, custody and bounded publication | Planned |
+| 09 | Cache/cost controller and paired runtime evaluation | Merged in #11; all eight CI jobs passed; R0 quality and total monetary benefit remain open |
+| 10 | Restore/revocation, retention, custody and bounded publication | Inherited custody, bounded migration/revocation and FIFO publication implemented; deletion, encrypted domains, external restore ledger and generation GC remain open |
 | 11 | Migration, integrations, demo and release evidence | Planned |
 | 12 | Router replay corpus, contracts and training lineage | Planned |
 | 13 | Measured R1 scorer and optional bounded R2 cascade | Planned |
@@ -153,3 +153,13 @@ rendering and downstream evaluation. The report includes failed-task cost,
 summary-generation/embedding overhead and an illustrative losing token-price
 case. Real monetary/energy cost, adaptive-controller benefit, multimodal/streaming
 quality and multi-step task acceptance are not established by this text replay.
+
+The first phase 10 slice propagates access restrictions through model responses,
+tool results and checkpoints. Native fixtures cover a 520-edge conversation,
+restricted scopes, historical index reads, restart and restore during revocation,
+legacy custody migration, concurrent capture/revocation and bounded cancellation.
+FIFO queue fixtures cover ordering, capacity, cancellation and publisher failure.
+The capability manifest separates these Rust executors from unresolved encryption,
+physical deletion, external suppression-ledger restore and generation reclamation.
+The 181 affected runtime/native/service/server tests, workspace Clippy and
+governance validation pass locally; cross-platform CI remains a separate gate.

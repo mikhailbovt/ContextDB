@@ -46,6 +46,8 @@ struct CaptureRecord {
     // opt out: recording disclosure is not another semantic observation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     affects_scope: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    custody_version: Option<u16>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -151,6 +153,21 @@ impl CapturePort for NativeService {
 }
 
 impl NativeService {
+    pub(super) fn captured_receipt_metadata<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+    ) -> ServiceResult<CaptureReceipt> {
+        let record: CaptureRecord = read_required(snapshot, self, &record_key(id))?;
+        if record.receipt.event_id != id
+            || record.receipt.database_id != self.database_id
+            || record.receipt.domain != NATIVE_CAPTURE_DOMAIN
+        {
+            return Err(integrity("capture metadata receipt binding differs"));
+        }
+        Ok(record.receipt)
+    }
+
     /// Check an already-verified immutable version without decoding its original
     /// body while a dispatch admission holds publication authority.
     pub(super) fn check_captured_payload_version<S: ReadSnapshot>(
@@ -479,6 +496,7 @@ impl NativeService {
             idempotency_digest: idempotency.into(),
             dependencies: capture_dependencies(&event.payload),
             affects_scope: (!affects_scope).then_some(false),
+            custody_version: Some(super::custody::CUSTODY_VERSION),
         };
         transaction
             .put(
@@ -501,6 +519,12 @@ impl NativeService {
                 encode(&coverage)?,
             )
             .map_err(storage_error)?;
+        self.publish_capture_custody(
+            &mut transaction,
+            &request.context,
+            event,
+            receipt.workspace_commit,
+        )?;
         transaction
             .put(
                 &self.keyspaces.continuous,
@@ -722,6 +746,7 @@ impl NativeService {
                     && !entry.key.starts_with(b"state/")
                     && !entry.key.starts_with(b"semantic/")
                     && !entry.key.starts_with(b"catalog/")
+                    && !entry.key.starts_with(b"custody/")
             })
             .collect::<Vec<_>>();
         if entries.is_empty() {
@@ -748,6 +773,16 @@ impl NativeService {
             if entry.key.starts_with(b"receipt/") {
                 let record: CaptureRecord = decode(&entry.value, "capture record")?;
                 let original = self.load_captured_original(snapshot, record.receipt.event_id)?;
+                if let Some(version) = record.custody_version {
+                    if version != super::custody::CUSTODY_VERSION
+                        || !manifest.features.contains(super::custody::CUSTODY_FEATURE)
+                    {
+                        return Err(integrity(
+                            "capture custody format is absent or incompatible",
+                        ));
+                    }
+                    self.require_capture_custody_metadata(snapshot, &original.event)?;
+                }
                 if matches!(
                     original.event.provenance,
                     Some(EventProvenance::ModelOutput { .. })
@@ -944,85 +979,16 @@ impl NativeService {
         context: &AuthenticatedRequestContext,
         event_id: ObservationId,
     ) -> ServiceResult<()> {
-        let record: CaptureRecord = read_required(snapshot, self, &record_key(event_id))?;
-        if record.dependencies.len() > super::CAPTURE_MAX_REQUEST_PARTS {
-            return Err(integrity("capture dependency budget exceeded"));
-        }
-        for dependency in record.dependencies {
-            match dependency {
-                CaptureDependency::Payload { reference } => {
-                    self.authorized_payload(snapshot, context, &reference)?
-                }
-                CaptureDependency::Source { event_id: source } => {
-                    if source == event_id {
-                        return Err(integrity("capture cannot depend on itself"));
-                    }
-                    self.authorized_capture_policy(snapshot, context, source)?;
-                    let source_record: CaptureRecord =
-                        read_required(snapshot, self, &record_key(source))?;
-                    for dependency in source_record.dependencies {
-                        let CaptureDependency::Payload { reference } = dependency else {
-                            return Err(integrity(
-                                "request echo is not an independent source root",
-                            ));
-                        };
-                        self.authorized_payload(snapshot, context, &reference)?;
-                    }
-                }
-            }
-        }
-        Ok(())
+        self.authorize_derived_custody(snapshot, context, event_id)
     }
 
-    /// Closure labels for a homogeneous persistent index domain. Maintenance
-    /// calls this before indexing; query routes check every label before search.
+    /// Materialized intersection of every input's disclosure restrictions.
     pub(super) fn capture_index_policies<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         event_id: ObservationId,
     ) -> ServiceResult<Vec<contextdb_service::AccessPolicy>> {
-        let mut policies = Vec::new();
-        let policy: StoredObservationPolicy = decode(
-            &snapshot
-                .get(
-                    &self.keyspaces.observations_policy,
-                    digest_bytes(event_id.to_string().as_bytes()).as_bytes(),
-                )
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("index source policy absent"))?,
-            "index source policy",
-        )?;
-        policies.push(policy.access);
-        let record: CaptureRecord = read_required(snapshot, self, &record_key(event_id))?;
-        for dependency in record.dependencies {
-            match dependency {
-                CaptureDependency::Payload { reference } => {
-                    policies.push(self.payload_index_policy(snapshot, &reference)?)
-                }
-                CaptureDependency::Source { event_id: source } => {
-                    let policy: StoredObservationPolicy = decode(
-                        &snapshot
-                            .get(
-                                &self.keyspaces.observations_policy,
-                                digest_bytes(source.to_string().as_bytes()).as_bytes(),
-                            )
-                            .map_err(storage_error)?
-                            .ok_or_else(|| integrity("index evidence policy absent"))?,
-                        "index evidence policy",
-                    )?;
-                    policies.push(policy.access);
-                    let source_record: CaptureRecord =
-                        read_required(snapshot, self, &record_key(source))?;
-                    for dependency in source_record.dependencies {
-                        let CaptureDependency::Payload { reference } = dependency else {
-                            return Err(integrity("index source closure contains an echo"));
-                        };
-                        policies.push(self.payload_index_policy(snapshot, &reference)?);
-                    }
-                }
-            }
-        }
-        Ok(policies)
+        self.derived_custody_policies(snapshot, event_id)
     }
 
     pub(super) fn verify_capture_journal_reference<S: ReadSnapshot>(
@@ -1120,7 +1086,7 @@ fn validate_payload(event: &EventEnvelope) -> ServiceResult<()> {
     Ok(())
 }
 
-fn content_digest_of(event: &EventEnvelope) -> ServiceResult<ContentDigest> {
+pub(super) fn content_digest_of(event: &EventEnvelope) -> ServiceResult<ContentDigest> {
     Ok(ContentDigest::from_bytes(
         *blake3::hash(&encode(event)?).as_bytes(),
     ))

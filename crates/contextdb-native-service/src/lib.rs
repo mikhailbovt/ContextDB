@@ -16,18 +16,21 @@ mod adapter_tests;
 mod assertions;
 mod backup;
 mod capture;
+mod custody;
 mod indexed_provider;
 mod lease;
 mod owned;
 mod payload;
 mod prepare;
 mod provider;
+mod publication;
 mod raw;
 mod raw_index;
 mod record_journal;
 
 pub use backup::{NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT};
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
+pub use custody::CustodyProgress;
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress};
@@ -87,7 +90,10 @@ fn native_capability_manifest() -> contextdb_service::CapabilityManifestV1 {
         &[
             "admin_native_logical_backup",
             "admin_native_pristine_restore",
+            "bounded_publication_admission",
             "candidate_hierarchy_dag",
+            "capture_custody_migration",
+            "capture_custody_propagation",
             "compact",
             "context_pack_recall",
             "durable_fjall_storage",
@@ -322,7 +328,7 @@ pub struct NativeService {
     keyspaces: Keyspaces,
     database_id: String,
     token_key: Zeroizing<[u8; 32]>,
-    writes: Mutex<()>,
+    writes: publication::PublicationQueue,
     index_views: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     leases: Mutex<lease::LeaseRegistry>,
     lease_started: std::time::Instant,
@@ -358,7 +364,7 @@ impl NativeService {
             keyspaces,
             database_id,
             token_key: Zeroizing::new(token_key),
-            writes: Mutex::new(()),
+            writes: publication::PublicationQueue::default(),
             index_views: std::sync::Arc::default(),
             leases: Mutex::new(lease::LeaseRegistry::default()),
             lease_started: std::time::Instant::now(),
@@ -424,10 +430,8 @@ impl NativeService {
         require_sync(receipt.durability)
     }
 
-    fn lock_writes(&self) -> ServiceResult<MutexGuard<'_, ()>> {
-        self.writes
-            .lock()
-            .map_err(|_| unavailable("native write lock is poisoned", true))
+    fn lock_writes(&self) -> ServiceResult<publication::PublicationGuard<'_>> {
+        self.writes.enter(|| Ok(()))
     }
 
     fn global_head<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<u64> {
@@ -1048,6 +1052,7 @@ impl NativeService {
         }
         self.verify_active_graph_invariants(snapshot)?;
         self.verify_capture_records(snapshot)?;
+        self.verify_custody_records(snapshot)?;
         self.verify_payload_records(snapshot)?;
         self.verify_raw_index_records(snapshot)?;
         self.verify_assertion_records(snapshot)?;
@@ -2952,6 +2957,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.features.iter().any(|feature| {
             feature != capture::CAPTURE_FEATURE
                 && feature != capture::IMPACT_FEATURE
+                && feature != custody::CUSTODY_FEATURE
                 && feature != owned::OWNED_FEATURE
                 && feature != payload::SOURCE_FEATURE
                 && feature != payload::MODEL_PROTOCOL_FEATURE

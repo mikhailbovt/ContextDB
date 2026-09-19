@@ -284,6 +284,12 @@ fn revocation_invalidates_old_views_until_a_separate_generation_catches_up() {
             .code,
         ErrorCode::IndexTooStale
     );
+    assert!(
+        service
+            .maintain_custody(&input.context, 64, &mut budget())
+            .expect("propagate current disclosure restrictions")
+            .caught_up
+    );
     let partial = service
         .project_originals(&input.context, true, 1, &mut budget())
         .expect("new staging generation");

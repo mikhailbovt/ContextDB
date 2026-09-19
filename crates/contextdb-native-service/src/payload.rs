@@ -300,6 +300,7 @@ impl NativeService {
                 action_digest,
             }) if event.kind != EventKind::ToolRequested => {
                 self.authorized_capture_policy(snapshot, context, *request_event_id)?;
+                self.authorize_capture_dependencies(snapshot, context, *request_event_id)?;
                 let intent = self.load_captured_original(snapshot, *request_event_id)?;
                 if intent.event.kind != EventKind::ToolRequested
                     || intent.event.provenance.as_ref()
@@ -355,16 +356,6 @@ impl NativeService {
             _ => {}
         }
         Ok(())
-    }
-
-    pub(super) fn authorized_payload<S: ReadSnapshot>(
-        &self,
-        snapshot: &S,
-        context: &AuthenticatedRequestContext,
-        reference: &OriginalPayloadRef,
-    ) -> ServiceResult<()> {
-        self.authorized_payload_header(snapshot, context, reference)
-            .map(|_| ())
     }
 
     fn authorized_payload_header<S: ReadSnapshot>(

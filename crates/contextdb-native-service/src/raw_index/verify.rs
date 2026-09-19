@@ -143,6 +143,11 @@ impl NativeService {
                     .raw_value(snapshot, &generation_key(workspace, number))?
                     .ok_or_else(|| integrity("retained raw generation missing"))?;
                 if generation.number != number
+                    || generation.custody_version > super::super::custody::CUSTODY_VERSION
+                    || (generation.custody_version != 0
+                        && !manifest
+                            .features
+                            .contains(super::super::custody::CUSTODY_FEATURE))
                     || generation.analyzer != RAW_ANALYZER
                     || generation.authorization_epoch
                         > self.raw_authorization_epoch(snapshot, workspace)?
@@ -198,8 +203,9 @@ impl NativeService {
                     {
                         return Err(integrity("raw domain identity invalid"));
                     }
-                    if generation.authorization_epoch
-                        == self.raw_authorization_epoch(snapshot, workspace)?
+                    if generation.custody_version == super::super::custody::CUSTODY_VERSION
+                        && generation.authorization_epoch
+                            == self.raw_authorization_epoch(snapshot, workspace)?
                         && labels.policies
                             != self.capture_index_policies(snapshot, work.event_id)?
                     {
