@@ -49,6 +49,25 @@ Legacy import retains original identities and receipts with an explicit mapping.
 Native audit hashes are not a replay log: reconstruction needs the accepted
 mutation bytes and source history as well.
 
+The first native capture implementation exposes `CapturePort` and the
+`NativeConversationCapture` host adapter (`contextdb-chat/service-adapter`).
+It preserves UTF-8 or binary originals, explicit omissions, immutable edits,
+producer gaps and ordered response chunks. Each capture journal entry references
+its accepted original and digest; the durable outbox carries the same reference.
+Raw reads require current `ReadEvidence` and `RawEvidence` authorization.
+
+The initial profile uses strict pause: retain the input and retry the same key
+until a synchronized receipt arrives. It admits at most 256 KiB per inline
+payload and 128 disjoint producer gaps. Overflow is an explicit
+`ResourceExhausted`, with no partial publication. No disk spool is claimed.
+
+First capture atomically enables the `continuous-capture-v1` format feature.
+Older binaries reject this extended manifest. New code still reads legacy
+databases and v1 backups; backups containing capture use the explicit v2 format.
+Restore verifies original/receipt/outbox/producer/scope/stream closure before
+writing a pristine target. A restored receipt remains usable after host-key
+rotation, with fresh authorization and exact stored-receipt equality.
+
 ## Retrieval and current state
 
 Interactive retrieval queries persistent indexes within an authorized domain;

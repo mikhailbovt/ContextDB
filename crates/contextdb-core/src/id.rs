@@ -103,6 +103,8 @@ stable_id!(
     SelfModelId,
     ContinuityProfileId,
     SessionId,
+    AgentRunId,
+    TaskId,
     CheckpointId,
     RecallRunId,
     ContextPackId,

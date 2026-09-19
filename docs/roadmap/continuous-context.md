@@ -8,7 +8,7 @@ native or model acceptance.
 | Phase | Deliverable | Status |
 | --- | --- | --- |
 | 00 | Native ownership contract, shared histories, finite Rust oracle, baseline | Implemented; local checks passed, CI pending |
-| 01 | Native conversation capture, receipts, streams and recovery | Planned |
+| 01 | Native conversation capture, receipts, streams and recovery | Implemented; local checks passed, CI pending |
 | 02 | Tool/artifact capture, request provenance and reconciliation | Planned |
 | 03 | Original ID/source/range/lexical recall without promotion | Planned |
 | 04 | Persistent authorized indexed provider and exhaustive paging | Planned |
@@ -48,3 +48,11 @@ shared-corpus isolation) and two benchmark contract checks. Targeted Clippy with
 warnings denied and repository governance/schema validation pass. The finite
 oracle includes 12,960 overlay comparisons and 64 hot-visibility combinations;
 these counts do not describe native storage or real concurrent execution.
+
+Phase 01 passes 113 tests across core, service, native service and chat, plus
+Clippy with warnings denied. Capture checks use the real Fjall owner: exact
+Unicode/raw bytes, restart, eight concurrent retries, lost response, edits,
+producer-gap backpressure, aborted chunks, authority binding and backup restore.
+Three abrupt subprocess exits exercise staged payload, pre-commit and post-sync
+recovery. Deep verification detects missing outbox data. The profile pauses on
+overflow; large-payload adapters, extraction and the owned runtime follow later.

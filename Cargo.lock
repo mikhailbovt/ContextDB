@@ -716,6 +716,7 @@ name = "contextdb-native-service"
 version = "0.2.0-alpha.3"
 dependencies = [
  "blake3",
+ "contextdb-chat",
  "contextdb-context",
  "contextdb-core",
  "contextdb-recall",

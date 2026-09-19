@@ -10,6 +10,7 @@
 
 mod authenticated;
 mod capability_manifest;
+mod capture;
 mod context_pack;
 mod continuation;
 mod domain;
@@ -25,6 +26,7 @@ use authenticated::require_capability;
 
 pub use authenticated::*;
 pub use capability_manifest::*;
+pub use capture::*;
 pub use context_pack::*;
 pub use domain::*;
 pub use error::{ErrorCode, ServiceError, ServiceResult};

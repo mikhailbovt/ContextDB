@@ -29,7 +29,7 @@ fn request_context(request_id: &str, workspace: &str, subject: &str) -> RequestC
     }
 }
 
-fn authenticated(
+pub(super) fn authenticated(
     request_id: &str,
     workspace: &str,
     subject: &str,

@@ -233,7 +233,7 @@ fn authority_binding(
     }
 }
 
-fn validate_authority(
+pub(crate) fn validate_authority(
     binding: &ConversationAuthorityBinding,
     context: &AuthenticatedRequestContext,
 ) -> Result<()> {

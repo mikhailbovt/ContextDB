@@ -12,9 +12,11 @@
 #![warn(missing_docs)]
 
 mod backup;
+mod capture;
 mod provider;
 
-pub use backup::NATIVE_BACKUP_FORMAT;
+pub use backup::{NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT};
+pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -100,6 +102,7 @@ struct Keyspaces {
     observations_content: Keyspace,
     idempotency: Keyspace,
     events: Keyspace,
+    continuous: Keyspace,
 }
 
 impl Keyspaces {
@@ -116,10 +119,11 @@ impl Keyspaces {
             observations_content: keyspace("contextdb_native_observation_content")?,
             idempotency: keyspace("contextdb_native_idempotency")?,
             events: keyspace("contextdb_native_events")?,
+            continuous: keyspace("contextdb_native_continuous")?,
         })
     }
 
-    fn all(&self) -> [&Keyspace; 11] {
+    fn all(&self) -> [&Keyspace; 12] {
         [
             &self.meta,
             &self.workspace,
@@ -132,6 +136,7 @@ impl Keyspaces {
             &self.observations_content,
             &self.idempotency,
             &self.events,
+            &self.continuous,
         ]
     }
 }
@@ -143,6 +148,8 @@ struct Manifest {
     format: String,
     database_id: String,
     checksum: String,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    features: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -251,6 +258,8 @@ struct StoredEvent {
     operation: String,
     request_digest: String,
     response_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_original: Option<capture::CaptureWork>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -359,6 +368,7 @@ impl NativeService {
             format: FORMAT_NAME.to_owned(),
             database_id: self.database_id.clone(),
             checksum: String::new(),
+            features: BTreeSet::new(),
         };
         manifest.checksum = manifest_checksum(&manifest)?;
         transaction
@@ -508,6 +518,17 @@ impl NativeService {
             operation: operation.to_owned(),
             request_digest: request_digest.to_owned(),
             response_digest: response_digest.clone(),
+            accepted_original: if operation == "capture" {
+                let receipt: contextdb_service::CaptureReceipt =
+                    decode(&response_bytes, "capture response")?;
+                Some(capture::CaptureWork {
+                    event_id: receipt.event_id,
+                    workspace_commit: receipt.workspace_commit,
+                    event_digest: receipt.event_digest,
+                })
+            } else {
+                None
+            },
             previous_event_digest: frame.previous_event_digest.clone(),
             event_digest: String::new(),
         };
@@ -919,6 +940,18 @@ impl NativeService {
                 .map_err(storage_error)?
                 .ok_or_else(|| integrity("native observation content is absent"))?;
             let content: StoredObservationContent = decode(&bytes, "native observation content")?;
+            if content.metadata.get("capture_format")
+                == Some(&serde_json::json!(contextdb_service::NATIVE_CAPTURE_DOMAIN))
+                && snapshot
+                    .get(
+                        &self.keyspaces.continuous,
+                        format!("receipt/{}", content.observation_id).as_bytes(),
+                    )
+                    .map_err(storage_error)?
+                    .is_none()
+            {
+                return Err(integrity("captured observation lacks its native receipt"));
+            }
             if content.schema_version != SCHEMA_VERSION
                 || digest_bytes(content.observation_id.as_bytes()) != policy.observation_digest
                 || content.digest != policy.content_digest
@@ -957,12 +990,17 @@ impl NativeService {
             validate_workspace_state(&state, digest)?;
         }
         self.verify_active_graph_invariants(snapshot)?;
+        self.verify_capture_records(snapshot)?;
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"contextdb/native-service/deep-verification/v1\0");
         for keyspace in self.keyspaces.all() {
+            let entries = snapshot.scan_prefix(keyspace, b"").map_err(storage_error)?;
+            // Empty optional extensions retain the exact legacy verification digest.
+            if keyspace == &self.keyspaces.continuous && entries.is_empty() {
+                continue;
+            }
             hasher.update(keyspace.as_str().as_bytes());
             hasher.update(&[0]);
-            let entries = snapshot.scan_prefix(keyspace, b"").map_err(storage_error)?;
             for entry in entries {
                 hasher.update(&(entry.key.len() as u64).to_be_bytes());
                 hasher.update(&entry.key);
@@ -2842,6 +2880,10 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
     if manifest.schema_version != SCHEMA_VERSION
         || manifest.format != FORMAT_NAME
         || manifest.database_id != database_id
+        || manifest
+            .features
+            .iter()
+            .any(|feature| feature != capture::CAPTURE_FEATURE)
         || manifest.checksum != manifest_checksum(manifest)?
     {
         return Err(ServiceError::new(

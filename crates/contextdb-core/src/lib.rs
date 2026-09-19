@@ -9,6 +9,7 @@
 mod capability;
 mod collections;
 mod error;
+mod event;
 mod evidence;
 mod id;
 mod identity;
@@ -24,6 +25,7 @@ mod time;
 pub use capability::*;
 pub use collections::NonEmptyVec;
 pub use error::{ValidationError, ValidationResult};
+pub use event::*;
 pub use evidence::*;
 pub use id::*;
 pub use identity::*;
