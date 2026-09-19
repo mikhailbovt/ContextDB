@@ -552,6 +552,7 @@ fn evidence() -> ProviderEvidence {
         access: access(AccessConsent::Granted),
         external_model_use: PolicyDecision::Allow,
         evidence: PackEvidence {
+            original_span: None,
             id: open_loop_evidence(),
             source: must(SourceHandle::new("source:shared-history")),
             selector: EvidenceSelector::Whole,
@@ -1501,6 +1502,7 @@ fn action_pack() -> contextdb_context::ContextPack {
         access: access(AccessConsent::Granted),
         external_model_use: PolicyDecision::Allow,
         evidence: PackEvidence {
+            original_span: None,
             id: evidence_id,
             source: must(SourceHandle::new("source:boundary")),
             selector: EvidenceSelector::Whole,

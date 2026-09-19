@@ -706,6 +706,7 @@ fn context_provider(
                     access: access.clone(),
                     external_model_use: PolicyDecision::Allow,
                     evidence: PackEvidence {
+                        original_span: None,
                         id: EvidenceHandle::new(&entry.evidence.id).map_err(map_context_error)?,
                         source: SourceHandle::new(
                             entry

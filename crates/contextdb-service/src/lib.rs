@@ -17,6 +17,7 @@ mod continuation;
 mod domain;
 mod error;
 mod high_level;
+mod prepare;
 mod raw;
 mod reference;
 mod runtime;
@@ -38,6 +39,7 @@ pub use high_level::{
     HighLevelQueryRequest, HighLevelSemanticStatus, HighLevelTransferRequest,
     HighLevelWriteRequest,
 };
+pub use prepare::*;
 pub use raw::*;
 pub use reference::{HostArchiveAuthority, ReferenceService};
 pub use runtime::{

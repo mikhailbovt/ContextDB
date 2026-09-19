@@ -1,5 +1,6 @@
 //! Native assertion publication. Originals, policies, and semantics share one writer.
 
+mod catalog;
 mod query;
 #[cfg(test)]
 mod tests;
@@ -30,6 +31,7 @@ use super::{
 };
 
 pub(super) const STATE_FEATURE: &str = "continuous-assertions-v1";
+pub(super) use catalog::CATALOG_FEATURE;
 const DOMAIN: &str = "contextdb.native-assertions/v1";
 const MAX_WINDOW: usize = 128;
 const MAX_SLOT_ROWS: usize = 512;
@@ -469,6 +471,7 @@ impl AssertionPort for NativeService {
             tx.put(&self.keyspaces.continuous, key, value)
                 .map_err(storage_error)?;
         }
+        self.update_state_catalog(&mut tx, &accepted)?;
         tx.put(
             &self.keyspaces.continuous,
             super::capture::scope_key(&workspace, &accepted.scope.to_string()),
@@ -502,7 +505,7 @@ impl AssertionPort for NativeService {
 }
 
 impl NativeService {
-    fn scope_epoch<S: ReadSnapshot>(
+    pub(super) fn scope_epoch<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,

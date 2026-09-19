@@ -28,7 +28,7 @@ export type StopReason =
 export type PackBlockKind =
   | "situation" | "self_context" | "participant" | "shared_history" | "episode"
   | "fact" | "relationship" | "preference" | "boundary" | "goal" | "decision"
-  | "timeline" | "procedure" | "constraint" | "open_loop" | "conflict" | "unknown";
+  | "timeline" | "procedure" | "constraint" | "open_loop" | "conflict" | "unknown" | "raw_observation";
 export type CompressionLevel = "l0_orientation" | "l1_summary" | "l2_structured" | "l3_evidence" | "l4_raw";
 export type ContentTrust = "trusted_source" | "mixed" | "untrusted" | "unknown";
 export type InstructionCapability = "none" | "host_trusted";
@@ -254,12 +254,20 @@ export interface PackSections {
   readonly open_loops: readonly ContextBlock[];
   readonly conflicts: readonly ContextBlock[];
   readonly unknowns: readonly ContextBlock[];
+  readonly raw_observations?: readonly ContextBlock[];
 }
 
 export type EvidenceSelector =
   | { readonly kind: "text_bytes" | "lines" | "time_micros"; readonly start: number; readonly end: number }
   | { readonly kind: "json_pointer"; readonly pointer: string }
   | { readonly kind: "whole" };
+export interface OriginalSourceSpan {
+  readonly event_id: string;
+  readonly payload_digest: string;
+  readonly start: number;
+  readonly end: number;
+  readonly span_digest: string;
+}
 export interface PackEvidence {
   readonly id: string;
   readonly source: string;
@@ -272,6 +280,7 @@ export interface PackEvidence {
   readonly source_class: SourceClass;
   readonly taints: readonly ContentTaint[];
   readonly lineage: readonly string[];
+  readonly original_span?: OriginalSourceSpan;
 }
 export interface UseDirective { readonly block_id: string; readonly action: UseAction; readonly reason_code: DirectiveReason }
 export interface ScopeManifest {
@@ -496,7 +505,7 @@ const instructionHierarchies = ["separated_channels", "single_prompt_delimited"]
 const packStatuses = ["sufficient", "partial", "no_memory"] as const;
 const recallStatuses = ["skipped", "complete", "partial", "unknown"] as const;
 const stopReasons = ["gate_skipped", "sufficient", "node_budget", "graph_budget", "hop_budget", "token_budget", "deadline", "no_useful_candidates", "unknown_or_conflicted", "continuation_boundary"] as const;
-const blockKinds = ["situation", "self_context", "participant", "shared_history", "episode", "fact", "relationship", "preference", "boundary", "goal", "decision", "timeline", "procedure", "constraint", "open_loop", "conflict", "unknown"] as const;
+const blockKinds = ["situation", "self_context", "participant", "shared_history", "episode", "fact", "relationship", "preference", "boundary", "goal", "decision", "timeline", "procedure", "constraint", "open_loop", "conflict", "unknown", "raw_observation"] as const;
 const compressionLevels = ["l0_orientation", "l1_summary", "l2_structured", "l3_evidence", "l4_raw"] as const;
 const contentTrust = ["trusted_source", "mixed", "untrusted", "unknown"] as const;
 const interpretations = ["factual_data", "historical_data", "constraint_data", "style_signal", "hypothesis_only", "unknown_marker", "conflict_alternatives"] as const;
@@ -682,6 +691,11 @@ function parseContextBlock(value: unknown): ContextBlock {
   exact(parsed, ["id", "kind", "representation", "exact_fragments", "memory_refs", "claim_ids", "evidence_handles", "facets", "scopes", "valid_time", "known_at_commit", "perspective", "epistemic", "confidence_micros", "trust", "instruction_capability", "source_class", "taints", "interpretation", "support", "conflict", "unknown"], "context block");
   const capability = enumValue(parsed.instruction_capability, "instruction capability", ["none", "host_trusted"]);
   if (capability !== "none") throw new ProtocolError("recalled ContextPack data gained instruction capability");
+  if (parsed.kind === "raw_observation" && (strings(parsed.claim_ids, "claim ids").length !== 0 ||
+    strings(parsed.evidence_handles, "evidence handles").length === 0 || parsed.interpretation !== "historical_data" ||
+    parseSupport(parsed.support).state !== "supported")) {
+    throw new ProtocolError("raw observation must retain evidence without asserting current claims");
+  }
   return {
     id: text(parsed.id, "block id"),
     kind: enumValue(parsed.kind, "block kind", blockKinds),
@@ -712,10 +726,10 @@ const sectionKeys = ["situation", "self_context", "participants", "shared_histor
 
 function parseSections(value: unknown): PackSections {
   const parsed = object(value, "ContextPack sections");
-  exact(parsed, sectionKeys, "ContextPack sections");
+  exact(parsed, "raw_observations" in parsed ? [...sectionKeys, "raw_observations"] : sectionKeys, "ContextPack sections");
   const result = {} as Record<(typeof sectionKeys)[number], readonly ContextBlock[]>;
   for (const key of sectionKeys) result[key] = array(parsed[key], `sections.${key}`, parseContextBlock);
-  return result;
+  return "raw_observations" in parsed ? { ...result, raw_observations: array(parsed.raw_observations, "sections.raw_observations", parseContextBlock) } : result;
 }
 
 function parseEvidenceSelector(value: unknown): EvidenceSelector {
@@ -738,12 +752,24 @@ function parseEvidenceSelector(value: unknown): EvidenceSelector {
 
 function parsePackEvidence(value: unknown): PackEvidence {
   const parsed = object(value, "pack evidence");
-  exact(parsed, ["id", "source", "selector", "excerpt", "claim_ids", "provenance_family", "primary", "trust_micros", "source_class", "taints", "lineage"], "pack evidence");
+  const keys = ["id", "source", "selector", "excerpt", "claim_ids", "provenance_family", "primary", "trust_micros", "source_class", "taints", "lineage"];
+  if ("original_span" in parsed) keys.push("original_span");
+  exact(parsed, keys, "pack evidence");
+  const selector = parseEvidenceSelector(parsed.selector);
+  const excerpt = nullableText(parsed.excerpt, "evidence excerpt");
+  const span = "original_span" in parsed ? parseOriginalSpan(parsed.original_span) : undefined;
+  if (span !== undefined) {
+    const bytes = new TextEncoder().encode(excerpt ?? "");
+    if (excerpt === null || bytes.length !== span.end - span.start || bytesToHex(blake3(bytes)) !== span.span_digest ||
+      (selector.kind !== "text_bytes" || selector.start !== span.start || selector.end !== span.end)) {
+      throw new ProtocolError("original span differs from exact evidence bytes/selector");
+    }
+  }
   return {
     id: text(parsed.id, "evidence id"),
     source: text(parsed.source, "evidence source"),
-    selector: parseEvidenceSelector(parsed.selector),
-    excerpt: nullableText(parsed.excerpt, "evidence excerpt"),
+    selector,
+    excerpt,
     claim_ids: strings(parsed.claim_ids, "evidence claim ids"),
     provenance_family: text(parsed.provenance_family, "provenance family"),
     primary: bool(parsed.primary, "primary"),
@@ -751,7 +777,19 @@ function parsePackEvidence(value: unknown): PackEvidence {
     source_class: other(parsed.source_class, "source class", sourceClasses) as SourceClass,
     taints: array(parsed.taints, "evidence taints", (item) => other(item, "content taint", taintKinds) as ContentTaint),
     lineage: strings(parsed.lineage, "evidence lineage"),
+    ...(span === undefined ? {} : { original_span: span }),
   };
+}
+
+function parseOriginalSpan(value: unknown): OriginalSourceSpan {
+  const parsed = object(value, "original span");
+  exact(parsed, ["event_id", "payload_digest", "start", "end", "span_digest"], "original span");
+  const span = { event_id: text(parsed.event_id, "event id"), payload_digest: text(parsed.payload_digest, "payload digest"),
+    start: uint(parsed.start, "span start"), end: uint(parsed.end, "span end"), span_digest: text(parsed.span_digest, "span digest") };
+  if (span.end <= span.start || !/^[0-9a-f]{64}$/.test(span.payload_digest) || !/^[0-9a-f]{64}$/.test(span.span_digest)) {
+    throw new ProtocolError("invalid exact original span");
+  }
+  return span;
 }
 
 function parseUseDirective(value: unknown): UseDirective {

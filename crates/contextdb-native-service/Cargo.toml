@@ -13,6 +13,7 @@ description = "Incremental Fjall-backed CognitiveMemoryService for ContextDB"
 blake3.workspace = true
 chacha20poly1305.workspace = true
 contextdb-core.workspace = true
+contextdb-context.workspace = true
 contextdb-index.workspace = true
 contextdb-recall.workspace = true
 contextdb-service.workspace = true
@@ -22,13 +23,12 @@ getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 zeroize.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 contextdb-capture.workspace = true
 contextdb-chat = { workspace = true, features = ["service-adapter"] }
-contextdb-context.workspace = true
 tempfile.workspace = true
-uuid.workspace = true
 
 [lints]
 workspace = true

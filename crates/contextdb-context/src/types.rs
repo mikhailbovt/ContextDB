@@ -117,6 +117,8 @@ pub enum PackBlockKind {
     OpenLoop,
     Conflict,
     Unknown,
+    /// Attributed original bytes, without an asserted world-state claim.
+    RawObservation,
 }
 
 impl PackBlockKind {
@@ -144,7 +146,10 @@ impl PackBlockKind {
     /// Whether the category consumes the dedicated history budget.
     #[must_use]
     pub const fn is_history(self) -> bool {
-        matches!(self, Self::SharedHistory | Self::Episode | Self::Timeline)
+        matches!(
+            self,
+            Self::SharedHistory | Self::Episode | Self::Timeline | Self::RawObservation
+        )
     }
 }
 
@@ -401,6 +406,16 @@ impl PackCandidate {
                 self.id
             )));
         }
+        if self.kind == PackBlockKind::RawObservation
+            && (!self.claim_ids.is_empty()
+                || self.evidence_handles.is_empty()
+                || self.interpretation != InterpretationRule::HistoricalData
+                || self.support != SupportState::Supported)
+        {
+            return Err(ContextError::InvalidRequest(
+                "raw observations require original support and cannot assert current claims".into(),
+            ));
+        }
         if self.instruction_capability != InstructionCapability::None {
             return Err(ContextError::InvalidRequest(format!(
                 "retrieved candidate {} attempted to gain instruction capability",
@@ -601,6 +616,9 @@ pub struct PackEvidence {
     pub source_class: SourceClass,
     pub taints: BTreeSet<ContentTaint>,
     pub lineage: Vec<SourceHandle>,
+    /// Exact immutable original, independently authorized and verified by the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_span: Option<contextdb_core::OriginalSourceSpan>,
 }
 
 impl PackEvidence {
@@ -619,11 +637,31 @@ impl PackEvidence {
                 self.id
             )));
         }
-        if self.claim_ids.is_empty() {
+        if self.claim_ids.is_empty() && self.original_span.is_none() {
             return Err(ContextError::InvalidRequest(format!(
                 "evidence {} supports no claim",
                 self.id
             )));
+        }
+        if let Some(span) = &self.original_span {
+            let Some(excerpt) = &self.excerpt else {
+                return Err(ContextError::InvalidRequest(
+                    "exact evidence requires original text".into(),
+                ));
+            };
+            if span.end <= span.start
+                || span.end - span.start != excerpt.len() as u64
+                || blake3::hash(excerpt.as_bytes()).as_bytes() != span.span_digest.as_bytes()
+                || self.selector
+                    != (EvidenceSelector::TextBytes {
+                        start: span.start,
+                        end: span.end,
+                    })
+            {
+                return Err(ContextError::InvalidRequest(
+                    "original span and exact excerpt disagree".into(),
+                ));
+            }
         }
         validate_non_blank(&self.provenance_family, "provenance family")?;
         if self.trust_micros > 1_000_000 {
@@ -930,6 +968,16 @@ pub struct ContextBlock {
 impl ContextBlock {
     fn validate(&self) -> Result<()> {
         self.representation.validate()?;
+        if self.kind == PackBlockKind::RawObservation
+            && (!self.claim_ids.is_empty()
+                || self.evidence_handles.is_empty()
+                || self.interpretation != InterpretationRule::HistoricalData
+                || self.support != SupportState::Supported)
+        {
+            return Err(ContextError::InvalidRequest(
+                "raw observations require original support and cannot assert current claims".into(),
+            ));
+        }
         for exact in &self.exact_fragments {
             exact.validate()?;
         }
@@ -1053,6 +1101,8 @@ pub struct PackSections {
     pub open_loops: Vec<ContextBlock>,
     pub conflicts: Vec<ContextBlock>,
     pub unknowns: Vec<ContextBlock>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_observations: Vec<ContextBlock>,
 }
 
 impl PackSections {
@@ -1075,6 +1125,7 @@ impl PackSections {
             PackBlockKind::OpenLoop => self.open_loops.push(block),
             PackBlockKind::Conflict => self.conflicts.push(block),
             PackBlockKind::Unknown => self.unknowns.push(block),
+            PackBlockKind::RawObservation => self.raw_observations.push(block),
         }
     }
 
@@ -1098,6 +1149,7 @@ impl PackSections {
             .chain(&self.open_loops)
             .chain(&self.conflicts)
             .chain(&self.unknowns)
+            .chain(&self.raw_observations)
     }
 
     /// Number of complete, non-truncated blocks.
@@ -1131,6 +1183,10 @@ impl PackSections {
             (PackBlockKind::OpenLoop, self.open_loops.as_slice()),
             (PackBlockKind::Conflict, self.conflicts.as_slice()),
             (PackBlockKind::Unknown, self.unknowns.as_slice()),
+            (
+                PackBlockKind::RawObservation,
+                self.raw_observations.as_slice(),
+            ),
         ] {
             if blocks.iter().any(|block| block.kind != kind) {
                 return Err(ContextError::InvalidRequest(format!(
@@ -1446,6 +1502,15 @@ impl ContextPack {
                 )));
             }
             for handle in &block.evidence_handles {
+                if block.kind == PackBlockKind::RawObservation
+                    && evidence_by_id
+                        .get(handle)
+                        .is_none_or(|evidence| evidence.original_span.is_none())
+                {
+                    return Err(ContextError::InvalidRequest(
+                        "raw observation evidence lacks original attribution".into(),
+                    ));
+                }
                 if let Some(evidence) = evidence_by_id.get(handle)
                     && evidence.claim_ids.is_disjoint(&block.claim_ids)
                     && block.kind.is_factual()

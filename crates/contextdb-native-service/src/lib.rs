@@ -18,6 +18,7 @@ mod backup;
 mod capture;
 mod indexed_provider;
 mod payload;
+mod prepare;
 mod provider;
 mod raw;
 mod raw_index;
@@ -161,6 +162,8 @@ struct Manifest {
     checksum: String,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     features: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    state_catalogs: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -390,6 +393,7 @@ impl NativeService {
             database_id: self.database_id.clone(),
             checksum: String::new(),
             features: BTreeSet::new(),
+            state_catalogs: BTreeSet::new(),
         };
         manifest.checksum = manifest_checksum(&manifest)?;
         transaction
@@ -2942,8 +2946,16 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != payload::SOURCE_FEATURE
                 && feature != raw_index::INDEX_FEATURE
                 && feature != assertions::STATE_FEATURE
+                && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
         })
+        || manifest.state_catalogs.len() > 1024
+        || manifest
+            .state_catalogs
+            .iter()
+            .any(|workspace| workspace.len() != 64 || blake3::Hash::from_hex(workspace).is_err())
+        || manifest.features.contains(assertions::CATALOG_FEATURE)
+            == manifest.state_catalogs.is_empty()
         || manifest.checksum != manifest_checksum(manifest)?
     {
         return Err(ServiceError::new(

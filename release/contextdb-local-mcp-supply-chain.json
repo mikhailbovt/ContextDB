@@ -3,12 +3,12 @@
     {
       "bytes": 219439,
       "path": "release/THIRD_PARTY_NOTICES.txt",
-      "sha256": "4534c3f2b1e4846b07a65329c71b39260f216319767c362a7c19315d40245850"
+      "sha256": "2c738d996ed63ad0e53dca447c6934307b26e97f642c85bdea21c6ed245e0935"
     },
     {
-      "bytes": 174335,
+      "bytes": 174465,
       "path": "release/contextdb-local-mcp.cdx.json",
-      "sha256": "66770fd09a8ecd4417e1c916953c6b95fd80e521d0da94ec285e2e58e882856a"
+      "sha256": "85315d4f7936211b1d674b7d758db96b6752cc906b5980dabdf5d2e7261c6cf8"
     },
     {
       "bytes": 279302,
@@ -1383,7 +1383,7 @@
   ],
   "graph": {
     "component_count": 148,
-    "sha256": "38a6c7ef150c3ae164d42a5c2d64ee7594f9bf086ce667c0a65713b86aae9331",
+    "sha256": "470b7a0f8d7beac53b95cf0c12cb3c40f01e3651541375e22fa349e9351336b4",
     "third_party_component_count": 133
   },
   "profile_id": "contextdb-local-mcp-windows-x86_64",

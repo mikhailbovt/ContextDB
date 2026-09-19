@@ -573,6 +573,7 @@ impl NativeService {
                     && !entry.key.starts_with(b"raw/")
                     && !entry.key.starts_with(b"state/")
                     && !entry.key.starts_with(b"semantic/")
+                    && !entry.key.starts_with(b"catalog/")
             })
             .collect::<Vec<_>>();
         if entries.is_empty() {

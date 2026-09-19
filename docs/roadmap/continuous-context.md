@@ -12,8 +12,8 @@ native or model acceptance.
 | 02 | Tool/artifact capture, request provenance and reconciliation | Merged in #4; CI passed on all four native targets |
 | 03 | Original ID/source/range/lexical recall without promotion | Merged in #5; CI passed on all four native targets |
 | 04 | Persistent authorized indexed provider and exhaustive paging | Merged in #6; CI passed on all four native targets |
-| 05 | Temporal assertions, resolution, negative overlay and coverage | Implemented; local checks passed, CI pending |
-| 06 | Evidence compiler, whole-request manifest, R0 and budgets | Planned |
+| 05 | Temporal assertions, resolution, negative overlay and coverage | Merged in #7; CI passed on all four native targets |
+| 06 | Evidence compiler, whole-request manifest, R0 and budgets | Implemented; local checks passed, CI pending |
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Planned |
 | 08 | Atomic lease admission, invalidation and action fences | Planned |
 | 09 | Cache/cost controller and paired runtime evaluation | Planned |
@@ -96,4 +96,15 @@ natural-language truth. Accepted assertion batches and new writes through the
 existing native record/edge API retain replayable payloads and atomic scope
 epochs. Deep verification reconstructs their derived rows. Host interpretation
 remains an explicit pipeline claim; a capture/index watermark cannot certify it.
-Context assembly and lease admission are the next connected acceptance gates.
+Full CI passed on all four native targets. Composite backups preserve native v2;
+broker shutdown removes its socket before releasing durable writer authority.
+
+Phase 06 connects native state/raw discovery to complete request assembly. The
+187 affected Rust tests pass, including seven compiler and six native preparation
+scenarios. They cover mandatory STOP, support alternatives, shared/complementary
+closure cost, source ACLs, post-eviction coverage, UTF-8 spans, protocol groups,
+pending interpretation, concurrent scope changes, catalog loss, restart and
+rotated backup restore. Python (31) and TypeScript (25) SDK tests, Go tests/vet,
+all-workspace Clippy and governance checks pass. The reference encoder measures
+its full declared request; no actual reader quality, cache savings or vendor
+token accounting is inferred. Owned rolling and lease admission remain next.

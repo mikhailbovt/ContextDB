@@ -67,56 +67,15 @@ impl NativeService {
             }
         }
         let authority = stored_authority.policy;
-        let coverage = self.coverage_at(&snapshot, &workspace, request.key.scope, known, budget)?;
-        let mut gaps = Vec::new();
-        let mut pending = BTreeSet::new();
-        let raw_window = if coverage.complete_prefix && scope_epoch <= coverage.publication {
-            Ok((BTreeSet::new(), known, false))
-        } else {
-            self.scope_raw_window(
-                &snapshot,
-                &request.context,
-                request.key.scope,
-                RawWindow {
-                    from: coverage.through,
-                    through: known,
-                    limit: MAX_WINDOW,
-                },
-                budget,
-            )
-        };
-        match raw_window {
-            Ok((events, _, more)) => {
-                if more {
-                    return Err(stale("state raw overlay exceeds its bounded window"));
-                }
-                pending.extend(events);
-            }
-            Err(error) if unavailable(&error) => gaps.push(StateCoverageGap::SupportUnavailable),
-            Err(error) => return Err(error),
-        }
-        for id in &coverage.pending {
-            match self
-                .authorized_capture_policy(&snapshot, &request.context, *id)
-                .and_then(|_| self.authorize_capture_dependencies(&snapshot, &request.context, *id))
-            {
-                Ok(()) => {
-                    pending.insert(*id);
-                }
-                Err(error) if unavailable(&error) => {
-                    if !gaps.contains(&StateCoverageGap::SupportUnavailable) {
-                        gaps.push(StateCoverageGap::SupportUnavailable);
-                    }
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        if !pending.is_empty() {
-            gaps.push(StateCoverageGap::PendingInterpretation);
-        }
-        if !coverage.gaps.is_empty() {
-            gaps.push(StateCoverageGap::CaptureGap);
-        }
+        let (mut gaps, pending) = self.assembly_scope_coverage(
+            &snapshot,
+            &request.context,
+            &workspace,
+            request.key.scope,
+            known,
+            scope_epoch,
+            budget,
+        )?;
         let prefix = slot_prefix(&workspace, &canonical_digest(&request.key)?);
         let page = snapshot
             .scan_prefix_page(
@@ -225,6 +184,73 @@ impl NativeService {
             pending_events: pending.into_iter().collect(),
             binding: self.seal_private_cursor(b"contextdb/state-view/v1", &binding)?,
         })
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "coverage shares the caller snapshot and scoped fence"
+    )]
+    pub(in super::super) fn assembly_scope_coverage<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        workspace: &str,
+        scope: ScopeId,
+        known: u64,
+        scope_epoch: u64,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(Vec<StateCoverageGap>, BTreeSet<ObservationId>)> {
+        let coverage = self.coverage_at(snapshot, workspace, scope, known, budget)?;
+        let mut gaps = Vec::new();
+        let mut pending = BTreeSet::new();
+        let raw_window = if coverage.complete_prefix && scope_epoch <= coverage.publication {
+            Ok((BTreeSet::new(), known, false))
+        } else {
+            self.scope_raw_window(
+                snapshot,
+                context,
+                scope,
+                RawWindow {
+                    from: coverage.through,
+                    through: known,
+                    limit: MAX_WINDOW,
+                },
+                budget,
+            )
+        };
+        match raw_window {
+            Ok((events, _, more)) => {
+                if more {
+                    return Err(stale("state raw overlay exceeds its bounded window"));
+                }
+                pending.extend(events);
+            }
+            Err(error) if unavailable(&error) => gaps.push(StateCoverageGap::SupportUnavailable),
+            Err(error) => return Err(error),
+        }
+        for id in &coverage.pending {
+            match self
+                .authorized_capture_policy(snapshot, context, *id)
+                .and_then(|_| self.authorize_capture_dependencies(snapshot, context, *id))
+            {
+                Ok(()) => {
+                    pending.insert(*id);
+                }
+                Err(error) if unavailable(&error) => {
+                    if !gaps.contains(&StateCoverageGap::SupportUnavailable) {
+                        gaps.push(StateCoverageGap::SupportUnavailable);
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        if !pending.is_empty() {
+            gaps.push(StateCoverageGap::PendingInterpretation);
+        }
+        if !coverage.gaps.is_empty() {
+            gaps.push(StateCoverageGap::CaptureGap);
+        }
+        Ok((gaps, pending))
     }
 
     fn coverage_at<S: ReadSnapshot>(

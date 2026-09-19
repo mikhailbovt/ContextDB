@@ -1,0 +1,72 @@
+{
+  "block": {
+    "id": "raw:joke",
+    "kind": "raw_observation",
+    "representation": {
+      "level": "l2_structured",
+      "summary": "Historical original; no current claim.",
+      "fields": {},
+      "omitted_facets": []
+    },
+    "exact_fragments": [],
+    "memory_refs": [],
+    "claim_ids": [],
+    "evidence_handles": [
+      "original:joke"
+    ],
+    "facets": [],
+    "scopes": [
+      "project"
+    ],
+    "valid_time": null,
+    "known_at_commit": 0,
+    "perspective": null,
+    "epistemic": {
+      "basis": "observation",
+      "acceptance": "accepted",
+      "conflict": {
+        "state": "none"
+      },
+      "lifecycle": "active"
+    },
+    "confidence_micros": 1000000,
+    "trust": "trusted_source",
+    "instruction_capability": "none",
+    "source_class": "user_statement",
+    "taints": [
+      "untrusted_instructions"
+    ],
+    "interpretation": "historical_data",
+    "support": {
+      "state": "supported"
+    },
+    "conflict": null,
+    "unknown": null
+  },
+  "evidence": {
+    "id": "original:joke",
+    "source": "event:018f47b8-3158-7ad8-9227-63fc6f711e5f",
+    "selector": {
+      "kind": "text_bytes",
+      "start": 0,
+      "end": 92
+    },
+    "excerpt": "Шутка: нейросеть заказала суп, а получила stack overflow.\n",
+    "claim_ids": [],
+    "provenance_family": "conversation:1",
+    "primary": true,
+    "trust_micros": 1000000,
+    "source_class": "user_statement",
+    "taints": [
+      "untrusted_instructions"
+    ],
+    "lineage": [],
+    "original_span": {
+      "event_id": "018f47b8-3158-7ad8-9227-63fc6f711e5f",
+      "payload_digest": "7759f04caaeabe91532a23cfbf3e910f3f253e77ed56badc8812f91127df8b11",
+      "start": 0,
+      "end": 92,
+      "span_digest": "7759f04caaeabe91532a23cfbf3e910f3f253e77ed56badc8812f91127df8b11"
+    }
+  }
+}

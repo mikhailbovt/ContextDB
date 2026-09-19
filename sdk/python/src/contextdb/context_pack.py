@@ -127,6 +127,7 @@ class PackBlockKind(StrEnum):
     OPEN_LOOP = "open_loop"
     CONFLICT = "conflict"
     UNKNOWN = "unknown"
+    RAW_OBSERVATION = "raw_observation"
 
 
 class CompressionLevel(StrEnum):
@@ -750,6 +751,15 @@ class ContextBlock:
         )
         if capability is not InstructionCapability.NONE:
             raise ProtocolError("recalled ContextPack data gained instruction capability")
+        if obj["kind"] == "raw_observation" and (
+            obj["claim_ids"] != []
+            or not obj["evidence_handles"]
+            or obj["interpretation"] != "historical_data"
+            or obj["support"] != {"state": "supported"}
+        ):
+            raise ProtocolError(
+                "raw observation must retain evidence without asserting current claims"
+            )
         return cls(
             id=_string(obj["id"], "block id"),
             kind=_enum(PackBlockKind, obj["kind"], "block kind"),
@@ -832,6 +842,7 @@ class PackSections:
     open_loops: tuple[ContextBlock, ...]
     conflicts: tuple[ContextBlock, ...]
     unknowns: tuple[ContextBlock, ...]
+    raw_observations: tuple[ContextBlock, ...] = ()
 
     @classmethod
     def from_wire(cls, value: Any) -> PackSections:
@@ -854,12 +865,20 @@ class PackSections:
             "conflicts",
             "unknowns",
         }
-        obj = _mapping(value, "ContextPack sections", keys)
+        optional = (
+            {"raw_observations"}
+            if isinstance(value, Mapping) and "raw_observations" in value
+            else set()
+        )
+        obj = _mapping(value, "ContextPack sections", keys | optional)
         return cls(
             **{
                 key: _parsed_tuple(obj[key], f"sections.{key}", ContextBlock.from_wire)
                 for key in keys
-            }
+            },
+            raw_observations=_parsed_tuple(
+                obj.get("raw_observations", []), "sections.raw_observations", ContextBlock.from_wire
+            ),
         )
 
 
@@ -891,6 +910,36 @@ class EvidenceSelector:
 
 
 @dataclass(frozen=True, slots=True)
+class OriginalSourceSpan:
+    """Exact original version and UTF-8 byte range, independent of claim promotion."""
+
+    event_id: str
+    payload_digest: str
+    start: int
+    end: int
+    span_digest: str
+
+    @classmethod
+    def from_wire(cls, value: Any) -> OriginalSourceSpan:
+        obj = _mapping(
+            value, "original span", {"event_id", "payload_digest", "start", "end", "span_digest"}
+        )
+        span = cls(
+            _string(obj["event_id"], "event id"),
+            _string(obj["payload_digest"], "payload digest"),
+            _uint(obj["start"], "span start"),
+            _uint(obj["end"], "span end"),
+            _string(obj["span_digest"], "span digest"),
+        )
+        if span.end <= span.start or any(
+            len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)
+            for digest in (span.payload_digest, span.span_digest)
+        ):
+            raise ProtocolError("invalid exact original span")
+        return span
+
+
+@dataclass(frozen=True, slots=True)
 class PackEvidence:
     id: str
     source: str
@@ -903,6 +952,7 @@ class PackEvidence:
     source_class: StringOrOther
     taints: tuple[StringOrOther, ...]
     lineage: tuple[str, ...]
+    original_span: OriginalSourceSpan | None = None
 
     @classmethod
     def from_wire(cls, value: Any) -> PackEvidence:
@@ -921,13 +971,34 @@ class PackEvidence:
                 "source_class",
                 "taints",
                 "lineage",
-            },
+            }
+            | (
+                {"original_span"}
+                if isinstance(value, Mapping) and "original_span" in value
+                else set()
+            ),
         )
         excerpt = obj["excerpt"]
+        selector = EvidenceSelector.from_wire(obj["selector"])
+        span = (
+            OriginalSourceSpan.from_wire(obj["original_span"]) if "original_span" in obj else None
+        )
+        if span is not None:
+            if (
+                not isinstance(excerpt, str)
+                or len(excerpt.encode("utf-8")) != span.end - span.start
+                or blake3(excerpt.encode("utf-8")).hexdigest() != span.span_digest
+            ):
+                raise ProtocolError("original span differs from exact evidence bytes")
+            if selector.kind != "text_bytes" or (selector.start, selector.end) != (
+                span.start,
+                span.end,
+            ):
+                raise ProtocolError("original span differs from evidence selector")
         return cls(
             _string(obj["id"], "evidence id"),
             _string(obj["source"], "evidence source"),
-            EvidenceSelector.from_wire(obj["selector"]),
+            selector,
             None if excerpt is None else _string(excerpt, "evidence excerpt"),
             _string_tuple(obj["claim_ids"], "evidence claim ids"),
             _string(obj["provenance_family"], "provenance family"),
@@ -965,6 +1036,7 @@ class PackEvidence:
                 ),
             ),
             _string_tuple(obj["lineage"], "evidence lineage"),
+            span,
         )
 
 
@@ -1642,6 +1714,7 @@ __all__ = [
     "Omission",
     "OmissionReason",
     "OtherVariant",
+    "OriginalSourceSpan",
     "PackBlockKind",
     "PackEvidence",
     "PackFacetRequirement",

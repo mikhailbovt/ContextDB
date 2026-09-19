@@ -365,7 +365,7 @@ fn relation(
     }))
 }
 
-fn access_rule(policy: &AccessPolicy) -> AccessRule {
+pub(super) fn access_rule(policy: &AccessPolicy) -> AccessRule {
     let mut grants = policy.audience_purpose_grants.clone();
     if grants.is_empty() {
         let purposes = if policy.purposes.is_empty() {

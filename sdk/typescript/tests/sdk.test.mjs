@@ -226,6 +226,24 @@ test("typed ContextPack request, response, and fail-closed parser", async () => 
   );
 });
 
+test("raw original contract retains UTF-8 bytes and rejects forged spans", async () => {
+  const fixture = JSON.parse(await readFile(new URL("../../fixtures/context_pack_v1.json", import.meta.url), "utf8"));
+  const original = JSON.parse(await readFile(new URL("../../fixtures/original_evidence_v1.json", import.meta.url), "utf8"));
+  fixture.response.context_pack.sections.raw_observations = [original.block];
+  fixture.response.context_pack.evidence = [original.evidence];
+  const parse = (wire) => new ContextDbClient("http://contextdb.test", { fetch: async () => jsonResponse(wire) }).compileContext(fixture.request);
+  const result = await parse(fixture.response);
+  assert.equal(result.context_pack.sections.raw_observations.length, 1);
+  assert.equal(result.context_pack.evidence[0].excerpt, original.evidence.excerpt);
+  for (const [field, value] of [["end", 1], ["span_digest", "0".repeat(64)], ["unexpected", true]]) {
+    const bad = structuredClone(fixture.response);
+    bad.context_pack.evidence[0].original_span[field] = value;
+    await assert.rejects(parse(bad), ProtocolError);
+  }
+  fixture.response.context_pack.sections.raw_observations[0].claim_ids = ["invented-fact"];
+  await assert.rejects(parse(fixture.response), ProtocolError);
+});
+
 test("all canonical routes, types, headers, and archive octets", async () => {
   const calls = [];
   const fetch = async (url, init) => {

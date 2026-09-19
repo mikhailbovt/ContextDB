@@ -21,6 +21,8 @@ use crate::{
 
 const MIN_MARGINAL_DENSITY_MICROS_PER_TOKEN: u128 = 100;
 
+mod continuous;
+
 #[derive(Clone, Debug)]
 struct PreparedCandidate {
     candidate: PackCandidate,
@@ -535,11 +537,25 @@ fn prepare_candidate(
     tokenizer: &dyn TokenCounter,
 ) -> Result<Option<PreparedCandidate>> {
     candidate.evidence_handles.retain(|handle| {
-        authorized_evidence
-            .get(handle)
-            .is_some_and(|evidence| !evidence.claim_ids.is_disjoint(&candidate.claim_ids))
+        authorized_evidence.get(handle).is_some_and(|evidence| {
+            candidate.kind == PackBlockKind::RawObservation
+                || !evidence.claim_ids.is_disjoint(&candidate.claim_ids)
+        })
     });
     let evidence = match &candidate.support {
+        SupportState::Supported if candidate.kind == PackBlockKind::RawObservation => {
+            let selected: Vec<_> = candidate
+                .evidence_handles
+                .iter()
+                .filter_map(|id| authorized_evidence.get(id))
+                .filter(|evidence| evidence.original_span.is_some())
+                .cloned()
+                .collect();
+            if selected.is_empty() {
+                return Ok(None);
+            }
+            selected
+        }
         SupportState::Supported if candidate.kind.is_factual() => {
             let selected = minimal_evidence(
                 &candidate,
@@ -1082,6 +1098,14 @@ fn fit_pack(
     pack.compilation.usage.evidence_blocks = u32::try_from(pack.evidence.len()).unwrap_or(u32::MAX);
     let rendered = ContextRenderer::render_unchecked(&pack, &request.model_profile, tokenizer)
         .map_err(|_| OmissionReason::TokenBudget)?;
+    finalize_pack(request, pack, rendered)
+}
+
+fn finalize_pack(
+    request: &CompileRequest,
+    mut pack: ContextPack,
+    rendered: crate::RenderedContext,
+) -> std::result::Result<FitOutput, OmissionReason> {
     if rendered.total_tokens > request.budgets.hard_tokens {
         return Err(OmissionReason::TokenBudget);
     }
@@ -1385,5 +1409,8 @@ fn sort_sections(sections: &mut PackSections) {
         .sort_by(|left, right| left.id.cmp(&right.id));
     sections
         .unknowns
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    sections
+        .raw_observations
         .sort_by(|left, right| left.id.cmp(&right.id));
 }

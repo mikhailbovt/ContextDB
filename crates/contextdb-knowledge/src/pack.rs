@@ -590,6 +590,7 @@ fn add_evidence(
                     external_decision(source_policy),
                 ]),
                 evidence: PackEvidence {
+                    original_span: None,
                     id: handle,
                     source,
                     selector: selector(&citation.selector),

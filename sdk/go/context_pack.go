@@ -276,23 +276,24 @@ const (
 	StopUnknownOrConflicted  ContextStopReason = "unknown_or_conflicted"
 	StopContinuationBoundary ContextStopReason = "continuation_boundary"
 
-	BlockSituation     PackBlockKind = "situation"
-	BlockSelfContext   PackBlockKind = "self_context"
-	BlockParticipant   PackBlockKind = "participant"
-	BlockSharedHistory PackBlockKind = "shared_history"
-	BlockEpisode       PackBlockKind = "episode"
-	BlockFact          PackBlockKind = "fact"
-	BlockRelationship  PackBlockKind = "relationship"
-	BlockPreference    PackBlockKind = "preference"
-	BlockBoundary      PackBlockKind = "boundary"
-	BlockGoal          PackBlockKind = "goal"
-	BlockDecision      PackBlockKind = "decision"
-	BlockTimeline      PackBlockKind = "timeline"
-	BlockProcedure     PackBlockKind = "procedure"
-	BlockConstraint    PackBlockKind = "constraint"
-	BlockOpenLoop      PackBlockKind = "open_loop"
-	BlockConflict      PackBlockKind = "conflict"
-	BlockUnknown       PackBlockKind = "unknown"
+	BlockSituation      PackBlockKind = "situation"
+	BlockSelfContext    PackBlockKind = "self_context"
+	BlockParticipant    PackBlockKind = "participant"
+	BlockSharedHistory  PackBlockKind = "shared_history"
+	BlockEpisode        PackBlockKind = "episode"
+	BlockFact           PackBlockKind = "fact"
+	BlockRelationship   PackBlockKind = "relationship"
+	BlockPreference     PackBlockKind = "preference"
+	BlockBoundary       PackBlockKind = "boundary"
+	BlockGoal           PackBlockKind = "goal"
+	BlockDecision       PackBlockKind = "decision"
+	BlockTimeline       PackBlockKind = "timeline"
+	BlockProcedure      PackBlockKind = "procedure"
+	BlockConstraint     PackBlockKind = "constraint"
+	BlockOpenLoop       PackBlockKind = "open_loop"
+	BlockConflict       PackBlockKind = "conflict"
+	BlockUnknown        PackBlockKind = "unknown"
+	BlockRawObservation PackBlockKind = "raw_observation"
 
 	CompressionL0Orientation CompressionLevel = "l0_orientation"
 	CompressionL1Summary     CompressionLevel = "l1_summary"
@@ -464,23 +465,24 @@ type ContextBlock struct {
 }
 
 type PackSections struct {
-	Situation     []ContextBlock `json:"situation"`
-	SelfContext   []ContextBlock `json:"self_context"`
-	Participants  []ContextBlock `json:"participants"`
-	SharedHistory []ContextBlock `json:"shared_history"`
-	Episodes      []ContextBlock `json:"episodes"`
-	Facts         []ContextBlock `json:"facts"`
-	Relationships []ContextBlock `json:"relationships"`
-	Preferences   []ContextBlock `json:"preferences"`
-	Boundaries    []ContextBlock `json:"boundaries"`
-	Goals         []ContextBlock `json:"goals"`
-	Decisions     []ContextBlock `json:"decisions"`
-	Timeline      []ContextBlock `json:"timeline"`
-	Procedures    []ContextBlock `json:"procedures"`
-	Constraints   []ContextBlock `json:"constraints"`
-	OpenLoops     []ContextBlock `json:"open_loops"`
-	Conflicts     []ContextBlock `json:"conflicts"`
-	Unknowns      []ContextBlock `json:"unknowns"`
+	Situation       []ContextBlock `json:"situation"`
+	SelfContext     []ContextBlock `json:"self_context"`
+	Participants    []ContextBlock `json:"participants"`
+	SharedHistory   []ContextBlock `json:"shared_history"`
+	Episodes        []ContextBlock `json:"episodes"`
+	Facts           []ContextBlock `json:"facts"`
+	Relationships   []ContextBlock `json:"relationships"`
+	Preferences     []ContextBlock `json:"preferences"`
+	Boundaries      []ContextBlock `json:"boundaries"`
+	Goals           []ContextBlock `json:"goals"`
+	Decisions       []ContextBlock `json:"decisions"`
+	Timeline        []ContextBlock `json:"timeline"`
+	Procedures      []ContextBlock `json:"procedures"`
+	Constraints     []ContextBlock `json:"constraints"`
+	OpenLoops       []ContextBlock `json:"open_loops"`
+	Conflicts       []ContextBlock `json:"conflicts"`
+	Unknowns        []ContextBlock `json:"unknowns"`
+	RawObservations []ContextBlock `json:"raw_observations,omitempty"`
 }
 
 type EvidenceSelector struct {
@@ -490,18 +492,27 @@ type EvidenceSelector struct {
 	Pointer *string `json:"pointer,omitempty"`
 }
 
+type OriginalSourceSpan struct {
+	EventID       string `json:"event_id"`
+	PayloadDigest string `json:"payload_digest"`
+	Start         uint64 `json:"start"`
+	End           uint64 `json:"end"`
+	SpanDigest    string `json:"span_digest"`
+}
+
 type PackEvidence struct {
-	ID               string           `json:"id"`
-	Source           string           `json:"source"`
-	Selector         EvidenceSelector `json:"selector"`
-	Excerpt          *string          `json:"excerpt"`
-	ClaimIDs         []string         `json:"claim_ids"`
-	ProvenanceFamily string           `json:"provenance_family"`
-	Primary          bool             `json:"primary"`
-	TrustMicros      uint32           `json:"trust_micros"`
-	SourceClass      StringOrOther    `json:"source_class"`
-	Taints           []StringOrOther  `json:"taints"`
-	Lineage          []string         `json:"lineage"`
+	ID               string              `json:"id"`
+	Source           string              `json:"source"`
+	Selector         EvidenceSelector    `json:"selector"`
+	Excerpt          *string             `json:"excerpt"`
+	ClaimIDs         []string            `json:"claim_ids"`
+	ProvenanceFamily string              `json:"provenance_family"`
+	Primary          bool                `json:"primary"`
+	TrustMicros      uint32              `json:"trust_micros"`
+	SourceClass      StringOrOther       `json:"source_class"`
+	Taints           []StringOrOther     `json:"taints"`
+	Lineage          []string            `json:"lineage"`
+	OriginalSpan     *OriginalSourceSpan `json:"original_span,omitempty"`
 }
 
 type UseDirective struct {
@@ -750,10 +761,13 @@ func validateCompileContextResponse(object map[string]any) error {
 	}
 	for _, blocks := range contextPackSections(response.ContextPack.Sections) {
 		for _, block := range blocks {
+			if block.Kind == BlockRawObservation && (len(block.ClaimIDs) != 0 || len(block.EvidenceHandles) == 0 || block.Interpretation != InterpretationHistoricalData || block.Support.State != "supported") {
+				return errors.New("raw observation must retain evidence without asserting current claims")
+			}
 			if block.InstructionCapability != InstructionCapabilityNone {
 				return errors.New("recalled ContextPack data gained instruction capability")
 			}
-			if !oneOf(block.Kind, BlockSituation, BlockSelfContext, BlockParticipant, BlockSharedHistory, BlockEpisode, BlockFact, BlockRelationship, BlockPreference, BlockBoundary, BlockGoal, BlockDecision, BlockTimeline, BlockProcedure, BlockConstraint, BlockOpenLoop, BlockConflict, BlockUnknown) ||
+			if !oneOf(block.Kind, BlockSituation, BlockSelfContext, BlockParticipant, BlockSharedHistory, BlockEpisode, BlockFact, BlockRelationship, BlockPreference, BlockBoundary, BlockGoal, BlockDecision, BlockTimeline, BlockProcedure, BlockConstraint, BlockOpenLoop, BlockConflict, BlockUnknown, BlockRawObservation) ||
 				!oneOf(block.Representation.Level, CompressionL0Orientation, CompressionL1Summary, CompressionL2Structured, CompressionL3Evidence, CompressionL4Raw) ||
 				!oneOf(block.Trust, ContentTrustedSource, ContentMixed, ContentUntrusted, ContentUnknown) ||
 				!oneOf(block.Interpretation, InterpretationFactualData, InterpretationHistoricalData, InterpretationConstraintData, InterpretationStyleSignal, InterpretationHypothesisOnly, InterpretationUnknownMarker, InterpretationConflictAlternatives) {
@@ -770,6 +784,16 @@ func validateCompileContextResponse(object map[string]any) error {
 		}
 	}
 	for _, evidence := range response.ContextPack.Evidence {
+		if span := evidence.OriginalSpan; span != nil {
+			payload, err := hex.DecodeString(span.PayloadDigest)
+			if err != nil || len(payload) != 32 || hex.EncodeToString(payload) != span.PayloadDigest || span.EventID == "" || span.End <= span.Start || evidence.Excerpt == nil || uint64(len(*evidence.Excerpt)) != span.End-span.Start {
+				return errors.New("invalid exact original span")
+			}
+			digest := blake3.Sum256([]byte(*evidence.Excerpt))
+			if hex.EncodeToString(digest[:]) != span.SpanDigest || evidence.Selector.Kind != "text_bytes" || evidence.Selector.Start == nil || evidence.Selector.End == nil || *evidence.Selector.Start != span.Start || *evidence.Selector.End != span.End {
+				return errors.New("original span differs from exact evidence bytes/selector")
+			}
+		}
 		if !validStringOrOther(evidence.SourceClass, "user_statement", "shared_conversation", "repository", "tool_output", "external_document", "sensor", "deterministic_derivation", "model_generated", "imported") {
 			return errors.New("ContextPack evidence contains an unknown source class")
 		}
@@ -834,7 +858,7 @@ func contextPackSections(sections PackSections) [][]ContextBlock {
 		sections.Episodes, sections.Facts, sections.Relationships, sections.Preferences,
 		sections.Boundaries, sections.Goals, sections.Decisions, sections.Timeline,
 		sections.Procedures, sections.Constraints, sections.OpenLoops, sections.Conflicts,
-		sections.Unknowns,
+		sections.Unknowns, sections.RawObservations,
 	}
 }
 
@@ -1020,6 +1044,9 @@ func validateSectionsWire(value any) error {
 	if err != nil {
 		return err
 	}
+	if _, present := sections["raw_observations"]; present {
+		keys = append(keys, "raw_observations")
+	}
 	if err := requireKeys(sections, keys...); err != nil {
 		return err
 	}
@@ -1095,8 +1122,18 @@ func validateBlockWire(value any) error {
 }
 
 func validateEvidenceWire(value any) error {
-	evidence, err := exactObject(value, "evidence", "id", "source", "selector", "excerpt", "claim_ids", "provenance_family", "primary", "trust_micros", "source_class", "taints", "lineage")
+	evidence, err := requiredObject(value, "evidence")
 	if err != nil {
+		return err
+	}
+	keys := []string{"id", "source", "selector", "excerpt", "claim_ids", "provenance_family", "primary", "trust_micros", "source_class", "taints", "lineage"}
+	if span, present := evidence["original_span"]; present {
+		keys = append(keys, "original_span")
+		if _, err := exactObject(span, "original span", "event_id", "payload_digest", "start", "end", "span_digest"); err != nil {
+			return err
+		}
+	}
+	if err := requireKeys(evidence, keys...); err != nil {
 		return err
 	}
 	for _, key := range []string{"claim_ids", "taints", "lineage"} {
