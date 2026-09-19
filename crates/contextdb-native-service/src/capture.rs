@@ -183,6 +183,48 @@ impl CapturePort for NativeService {
 }
 
 impl NativeService {
+    pub(super) fn captured_authority<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event: &EventEnvelope,
+    ) -> ServiceResult<contextdb_core::SourceAuthority> {
+        let content: StoredObservationContent = decode(
+            &snapshot
+                .get(
+                    &self.keyspaces.observations_content,
+                    digest_bytes(event.event_id.to_string().as_bytes()).as_bytes(),
+                )
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("source authority is absent"))?,
+            "captured authority",
+        )?;
+        let actor = content
+            .metadata
+            .get("actor_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| integrity("captured actor is absent"))?;
+        Ok(contextdb_core::SourceAuthority {
+            adapter_id: event.adapter_id.clone(),
+            actor_id: actor.into(),
+            role: event.role,
+        })
+    }
+
+    pub(super) fn captured_producer_incomplete<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event_id: ObservationId,
+    ) -> ServiceResult<bool> {
+        let record: CaptureRecord = read_required(snapshot, self, &record_key(event_id))?;
+        let coverage: ProducerCoverage = read_required(
+            snapshot,
+            self,
+            format!("producer/{}", record.producer_key).as_bytes(),
+        )?;
+        validate_coverage(&coverage)?;
+        Ok(!coverage.gaps.is_empty())
+    }
+
     fn append_capture_attempt(
         &self,
         request: &CaptureRequest,
@@ -526,7 +568,12 @@ impl NativeService {
             .scan_prefix(&self.keyspaces.continuous, b"")
             .map_err(storage_error)?
             .into_iter()
-            .filter(|entry| !entry.key.starts_with(b"payload/") && !entry.key.starts_with(b"raw/"))
+            .filter(|entry| {
+                !entry.key.starts_with(b"payload/")
+                    && !entry.key.starts_with(b"raw/")
+                    && !entry.key.starts_with(b"state/")
+                    && !entry.key.starts_with(b"semantic/")
+            })
             .collect::<Vec<_>>();
         if entries.is_empty() {
             return Ok(());
@@ -538,7 +585,11 @@ impl NativeService {
                 .ok_or_else(|| integrity("native manifest is absent"))?,
             "native manifest",
         )?;
-        if !manifest.features.contains(CAPTURE_FEATURE) {
+        if !manifest.features.contains(CAPTURE_FEATURE)
+            && !manifest
+                .features
+                .contains(super::record_journal::RECORD_FEATURE)
+        {
             return Err(integrity(
                 "continuous data is not declared by the native format",
             ));
@@ -682,6 +733,14 @@ impl NativeService {
             expected.insert(stream.into_bytes(), encode(&head)?);
         }
         for (scope, epoch) in self.raw_revocation_scope_epochs(snapshot)? {
+            let current = scopes.entry(scope).or_default();
+            *current = (*current).max(epoch);
+        }
+        for (scope, epoch) in self.assertion_scope_epochs(snapshot)? {
+            let current = scopes.entry(scope).or_default();
+            *current = (*current).max(epoch);
+        }
+        for (scope, epoch) in self.record_scope_epochs(snapshot)? {
             let current = scopes.entry(scope).or_default();
             *current = (*current).max(epoch);
         }

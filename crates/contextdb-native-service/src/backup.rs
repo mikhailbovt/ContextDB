@@ -823,11 +823,6 @@ fn push_len_prefixed(output: &mut Vec<u8>, value: &[u8]) -> ServiceResult<()> {
 }
 
 #[cfg(test)]
-pub(super) fn native_backup_format() -> &'static str {
-    NATIVE_BACKUP_FORMAT
-}
-
-#[cfg(test)]
 pub(super) fn maximum_native_backup_bytes() -> usize {
     MAX_BACKUP_BYTES
 }

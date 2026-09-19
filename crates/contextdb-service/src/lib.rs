@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod assertion;
 mod authenticated;
 mod capability_manifest;
 mod capture;
@@ -25,6 +26,7 @@ mod types;
 
 use authenticated::require_capability;
 
+pub use assertion::*;
 pub use authenticated::*;
 pub use capability_manifest::*;
 pub use capture::*;
