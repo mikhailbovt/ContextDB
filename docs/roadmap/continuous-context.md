@@ -15,8 +15,8 @@ native or model acceptance.
 | 05 | Temporal assertions, resolution, negative overlay and coverage | Merged in #7; CI passed on all four native targets |
 | 06 | Evidence compiler, whole-request manifest, R0 and budgets | Merged in #8; all eight CI jobs passed |
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Merged in #9; all eight CI jobs passed; reader/cache acceptance remains open |
-| 08 | Atomic lease admission, invalidation and action fences | Embedded owner checks implemented; strict transport handoff remains open |
-| 09 | Cache/cost controller and paired runtime evaluation | Planned |
+| 08 | Atomic lease admission, invalidation and action fences | Merged in #10; all eight CI jobs passed; strict transport handoff remains open |
+| 09 | Cache/cost controller and paired runtime evaluation | Measured usage/controller and local reader comparison implemented; R0 quality and total monetary benefit remain open |
 | 10 | Restore/revocation, retention, custody and bounded publication | Planned |
 | 11 | Migration, integrations, demo and release evidence | Planned |
 | 12 | Router replay corpus, contracts and training lineage | Planned |
@@ -41,7 +41,8 @@ It describes the original engine, not the new continuous runtime.
 The supplied design's four schemas, eight positive examples, 36 negative checks
 and 23 finite Python tests also pass. Its 80 engine/model scenarios remain
 requirements until corresponding implementation evidence is recorded here.
-No provider calls, trained-router benefit, latency SLO or savings are claimed.
+The bounded phase 09 local reader run is described below. Trained-router benefit,
+production latency SLOs and total-cost savings remain unverified.
 
 Phase 00 adds 24 Rust conformance checks (the 23 finite specification cases plus
 shared-corpus isolation) and two benchmark contract checks. Targeted Clippy with
@@ -134,3 +135,21 @@ Built-in expansion works with the native guard and interpretation left pending.
 The affected 157 Rust tests, all-workspace Clippy and governance checks pass.
 Strict transport handoff/cancellation, real provider measurements and later
 retention/custody hardening remain separate gates.
+
+Phase 09 adds measured disjoint reader usage, explicit tariffs, optional cache
+residency hysteresis and bounded process-local tracing. It fixes additional-memory
+accounting to use the actual provider protocol and keeps raw recall available
+when interpretation exceeds its bounded window, without establishing current
+state or allowing external effects. The 162 affected Rust tests, three Python
+accounting checks, Clippy and governance validation pass. Windows/Linux supply
+receipts retain the same 148-component dependency graphs.
+
+The [release-build reader comparison](../../benchmarks/continuous-context/README.md#measured-development-result)
+executes all five treatments with pinned Qwen reader/embedding weights, verified
+query-time partitions, exact captured native requests and actual cache/prefill
+counters. R0 answers 24/32 correctly versus raw hybrid's 32/32; only 20 R0 answers
+also receive all required originals. These failures stay open for retrieval,
+rendering and downstream evaluation. The report includes failed-task cost,
+summary-generation/embedding overhead and an illustrative losing token-price
+case. Real monetary/energy cost, adaptive-controller benefit, multimodal/streaming
+quality and multi-step task acceptance are not established by this text replay.

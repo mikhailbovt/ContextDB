@@ -445,10 +445,17 @@ name = "contextdb-bench"
 version = "0.2.0-alpha.3"
 dependencies = [
  "blake3",
+ "contextdb-agent-runtime",
+ "contextdb-capture",
+ "contextdb-context",
+ "contextdb-continuity",
  "contextdb-core",
  "contextdb-graph",
  "contextdb-index",
  "contextdb-journal",
+ "contextdb-native-service",
+ "contextdb-recall",
+ "contextdb-service",
  "contextdb-storage",
  "contextdb-storage-fjall",
  "contextdb-storage-memory",

@@ -471,6 +471,7 @@ impl PrepareContextPort for NativeService {
             )
             .map_err(service_error)?;
         Ok(PreparedContext {
+            scorer_micros: compiled.scorer_micros,
             admission_token: self.seal_preparation(
                 &compiled.manifest,
                 &provider.fence,

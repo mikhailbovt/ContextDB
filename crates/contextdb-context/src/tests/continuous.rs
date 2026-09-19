@@ -186,6 +186,114 @@ impl ContextScorer for Stop {
     }
 }
 
+#[derive(Debug)]
+struct TextProtocol {
+    upper_bound: bool,
+}
+impl OutgoingEncoder for TextProtocol {
+    fn id(&self) -> &str {
+        "text-protocol-fixture"
+    }
+    fn tokenizer_id(&self) -> &str {
+        ReferenceTokenizer::ID
+    }
+    fn encode(
+        &self,
+        messages: &[OutgoingMessage],
+        budget: &mut QueryBudget,
+    ) -> Result<EncodedOutgoing> {
+        let wire = serde_json::to_vec(
+            &messages
+                .iter()
+                .map(|m| (m.role, &m.text))
+                .collect::<Vec<_>>(),
+        )
+        .expect("wire");
+        charge(budget, 1, wire.len() as u64)?;
+        Ok(EncodedOutgoing {
+            protocol: self.id().into(),
+            tokenizer: ReferenceTokenizer::ID.into(),
+            count_kind: if self.upper_bound {
+                RequestCountKind::ConservativeUpperBound
+            } else {
+                RequestCountKind::Exact
+            },
+            input_tokens: ReferenceTokenizer
+                .count_tokens(std::str::from_utf8(&wire).expect("text"))?,
+            wire,
+        })
+    }
+}
+
+#[test]
+fn additional_memory_uses_actual_protocol_and_never_subtracts_two_upper_bounds() {
+    let original = source(
+        "original",
+        claim(1),
+        "An exact incidental phrase survives without its internal JSON transport wrapper.",
+    );
+    let mut raw = fact("raw", "original", true);
+    raw.candidate.kind = PackBlockKind::RawObservation;
+    raw.candidate.claim_ids.clear();
+    raw.candidate.interpretation = InterpretationRule::HistoricalData;
+    let fixture = fixture(vec![situation_candidate(), raw], vec![original]);
+    let mut input = input();
+    input.base.control.push(OutgoingMessage {
+        id: must(BlockId::new("control")),
+        zone: OutgoingZone::Control,
+        role: OutgoingRole::System,
+        text: "Stable host instructions. ".repeat(100),
+        originals: vec![],
+        tool_calls: vec![],
+        tool_result: None,
+    });
+    let exact = TextProtocol { upper_bound: false };
+    let compile_actual = |input: &CompileAssemblyRequest, encoder: &dyn OutgoingEncoder| {
+        ContextCompiler::new([7; 32])
+            .expect("compiler")
+            .compile_assembly(
+                input,
+                &fixture,
+                &ReferenceTokenizer,
+                encoder,
+                &Stop,
+                &mut allowance(),
+            )
+    };
+    let initial = compile_actual(&input, &exact).expect("initial");
+    let actual = initial.outgoing.input_tokens
+        - exact
+            .encode(&input.base.control, &mut allowance())
+            .expect("base")
+            .input_tokens;
+    assert_eq!(
+        initial.context.pack.compilation.usage.rendered_tokens,
+        actual
+    );
+    input.context.budgets.hard_tokens = actual;
+    input.context.budgets.soft_tokens = actual;
+    let fitted = compile_actual(&input, &exact).expect("actual additional budget fits");
+    assert!(
+        fitted
+            .messages
+            .iter()
+            .any(|m| m.zone == OutgoingZone::Evidence && m.text.contains("incidental phrase"))
+    );
+    assert!(
+        matches!(
+            compile_actual(&input, &TextProtocol { upper_bound: true }),
+            Err(ContextError::BudgetExceeded(_))
+        ),
+        "an upper bound minus an upper bound is not safe"
+    );
+    input.context.budgets.hard_tokens -= 1;
+    input.context.budgets.soft_tokens -= 1;
+    assert!(matches!(
+        compile_actual(&input, &exact),
+        Err(ContextError::BudgetExceeded(_))
+    ));
+}
+
 #[test]
 fn stop_keeps_mandatory_closure_and_counts_the_complete_request() {
     let original = source(

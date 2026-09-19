@@ -15,10 +15,17 @@ path = "src/main.rs"
 
 [dependencies]
 blake3.workspace = true
+contextdb-agent-runtime.workspace = true
+contextdb-capture.workspace = true
+contextdb-context.workspace = true
+contextdb-continuity.workspace = true
 contextdb-core.workspace = true
 contextdb-graph.workspace = true
 contextdb-index = { workspace = true, features = ["ann-hnsw"] }
 contextdb-journal.workspace = true
+contextdb-native-service.workspace = true
+contextdb-recall.workspace = true
+contextdb-service.workspace = true
 contextdb-storage.workspace = true
 contextdb-storage-fjall.workspace = true
 contextdb-storage-memory.workspace = true

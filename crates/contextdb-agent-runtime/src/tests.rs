@@ -16,6 +16,7 @@ use contextdb_service::{Capability, *};
 
 use super::*;
 
+mod economy;
 mod fences;
 mod partial;
 mod tools;
@@ -76,6 +77,8 @@ fn settings() -> RuntimeSettings {
             chunk_groups: 2,
             max_prepare_attempts: 3,
         },
+        cache_residency: None,
+        automatic_recall_filter: RawFilter::default(),
     }
 }
 fn identity() -> (AuthenticatedRequestContext, OwnedRunIdentity) {
