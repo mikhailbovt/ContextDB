@@ -10,6 +10,7 @@
 mod aggregate;
 mod bench_e;
 mod compare;
+mod continuous;
 mod digest;
 mod error;
 mod journal_ops;
@@ -23,6 +24,7 @@ mod workload;
 pub use aggregate::{NativeRunMetadata, build_native_report};
 pub use bench_e::*;
 pub use compare::*;
+pub use continuous::*;
 pub use digest::{hex, sha256, sha256_hex};
 pub use error::{BenchError, Result};
 pub use journal_ops::JournalOperationsOutcome;

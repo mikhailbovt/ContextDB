@@ -516,6 +516,7 @@ version = "0.2.0-alpha.3"
 dependencies = [
  "axum",
  "blake3",
+ "contextdb-bench",
  "contextdb-mcp",
  "contextdb-proto",
  "contextdb-reference",

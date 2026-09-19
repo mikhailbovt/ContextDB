@@ -1,0 +1,23 @@
+{
+  "schema_version": "contextdb.continuous-baseline/v1",
+  "source_commit": "3b38f24d30703a6a32e31b6d45b3205d6cea0cff",
+  "design_archive_sha256": "d885fc4b7f9772eb56b8ce5d7caf0082b4e2bb5d22709e9bbb255f09ae9c91d5",
+  "date": "2026-09-19",
+  "command": "cargo test --workspace --all-features --locked",
+  "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+  "cargo": "1.97.1 (c980f4866 2026-06-30)",
+  "profile": "test (debug)",
+  "target": "x86_64-pc-windows-msvc",
+  "os": "10.0.26200",
+  "cpu": "Intel(R) Core(TM) Ultra 9 275HX",
+  "logical_processors": 24,
+  "memory_bytes": 68044750848,
+  "filesystem": "NTFS",
+  "passed": 711,
+  "ignored": 0,
+  "failed": 0,
+  "exit_code": 0,
+  "log_sha256": "85779bfcad91eca75ad13b38dfa1ec429babf3f8f55383699114817b6fac70ad",
+  "model_calls": 0,
+  "continuous_engine_acceptance": "not-yet-implemented"
+}
