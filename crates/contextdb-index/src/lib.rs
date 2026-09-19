@@ -14,6 +14,7 @@ mod ann_v2_source;
 mod artifact;
 mod error;
 mod lexical;
+mod raw;
 mod vector;
 
 pub use ann_v2::*;
@@ -24,6 +25,7 @@ pub use ann_v2_source::*;
 pub use artifact::*;
 pub use error::{IndexError, Result};
 pub use lexical::*;
+pub use raw::*;
 pub use vector::*;
 
 use std::collections::BTreeSet;

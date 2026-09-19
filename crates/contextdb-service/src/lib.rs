@@ -16,6 +16,7 @@ mod continuation;
 mod domain;
 mod error;
 mod high_level;
+mod raw;
 mod reference;
 mod runtime;
 mod streaming;
@@ -35,6 +36,7 @@ pub use high_level::{
     HighLevelQueryRequest, HighLevelSemanticStatus, HighLevelTransferRequest,
     HighLevelWriteRequest,
 };
+pub use raw::*;
 pub use reference::{HostArchiveAuthority, ReferenceService};
 pub use runtime::{
     ValidatedPostflightSubmission, canonical_postflight_record_digest, canonical_preflight_report,

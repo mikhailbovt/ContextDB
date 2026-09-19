@@ -169,6 +169,38 @@ impl PayloadPort for NativeService {
 }
 
 impl NativeService {
+    /// The caller authorizes the event and its complete dependency closure first.
+    pub(super) fn original_range<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        event: &EventEnvelope,
+        start: u64,
+        end: u64,
+    ) -> ServiceResult<Vec<u8>> {
+        match &event.payload {
+            EventPayload::InlineUtf8 { text, .. } => {
+                Ok(text.as_bytes()[source_range(start, end, text.len())?].to_vec())
+            }
+            EventPayload::InlineBytes { bytes, .. } => {
+                Ok(bytes[source_range(start, end, bytes.len())?].to_vec())
+            }
+            EventPayload::Staged { reference, .. } => {
+                let header = self.checked_payload_header(snapshot, Some(context), reference)?;
+                self.payload_range(snapshot, &header, start, end)
+            }
+            EventPayload::Assembly { manifest } => {
+                let bytes = self.assemble_request(snapshot, Some(context), manifest)?;
+                Ok(bytes[source_range(start, end, bytes.len())?].to_vec())
+            }
+            EventPayload::Omitted { .. } => Err(ServiceError::new(
+                ErrorCode::EvidenceRequired,
+                "original bytes are explicitly unavailable",
+                false,
+            )),
+        }
+    }
+
     pub(super) fn enable_source_format<T: WriteTransaction>(
         &self,
         tx: &mut T,

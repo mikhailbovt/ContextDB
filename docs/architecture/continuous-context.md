@@ -96,6 +96,22 @@ The existing exact corpus provider remains a reference oracle. ID, source,
 time/range and lexical routes work with extraction and embeddings disabled.
 Analyzer versions, index coverage, outbox progress and query work are explicit.
 
+`RawRecallPort` currently exposes the bounded native oracle and original-span
+materialization. It finds accepted events by ID, source, session, recorded time,
+all lexical terms or an exact UTF-8 phrase without semantic publication. Results
+carry role, source version, omission/partial status and immutable payload/span
+digests. Equal text in separate events stays separate. Model-request occurrences
+require explicit audit selection and retain their dependent-source label.
+
+The analyzer lowercases Unicode alphanumeric/underscore terms while retaining
+original byte offsets; exact phrases preserve case, punctuation, whitespace and
+Unicode normalization form. Binary originals remain addressable without invented
+text. Encrypted cursors bind the database, query, current principal and logical
+knowledge position. Every resumed page rechecks current source permissions.
+Work/byte exhaustion returns an explicit partial status and continuation; it is
+not a negative answer. The oracle scans bounded outbox pages on non-ID routes.
+Persistent indexed routing and interactive latency proof belong to phase 04.
+
 Reconcile an index generation with a bounded revision overlay that includes
 updates, retractions, supersession, deletion and permission changes. Mask old
 heads and refill candidate pages within the remaining work budget. An exhausted
