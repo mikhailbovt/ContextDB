@@ -1,6 +1,7 @@
 package contextdb
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -163,6 +164,49 @@ func TestCompileContextRejectsUnknownNestedFields(t *testing.T) {
 	var protocol *ProtocolError
 	if !errors.As(err, &protocol) {
 		t.Fatalf("expected strict nested ProtocolError, got %T %v", err, err)
+	}
+}
+
+func TestRawOriginalContractRetainsUTF8AndRejectsForgery(t *testing.T) {
+	fixture := loadContextPackFixture(t)
+	var wire map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(fixture.Response))
+	decoder.UseNumber()
+	if err := decoder.Decode(&wire); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("../fixtures/original_evidence_v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original map[string]any
+	decoder = json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&original); err != nil {
+		t.Fatal(err)
+	}
+	pack := wire["context_pack"].(map[string]any)
+	pack["sections"].(map[string]any)["raw_observations"] = []any{original["block"]}
+	pack["evidence"] = []any{original["evidence"]}
+	if err := validateCompileContextResponse(wire); err != nil {
+		t.Fatal(err)
+	}
+	span := original["evidence"].(map[string]any)["original_span"].(map[string]any)
+	for field, value := range map[string]any{"end": 1, "span_digest": "00", "unexpected": true} {
+		previous, present := span[field]
+		span[field] = value
+		if err := validateCompileContextResponse(wire); err == nil {
+			t.Fatalf("forged %s accepted", field)
+		}
+		if present {
+			span[field] = previous
+		} else {
+			delete(span, field)
+		}
+	}
+	original["block"].(map[string]any)["claim_ids"] = []any{"invented-fact"}
+	if err := validateCompileContextResponse(wire); err == nil {
+		t.Fatal("raw claim forgery accepted")
 	}
 }
 

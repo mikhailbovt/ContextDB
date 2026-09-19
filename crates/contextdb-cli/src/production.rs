@@ -10676,6 +10676,7 @@ mod tests {
             access: continuity_access(AccessConsent::Granted),
             external_model_use: PolicyDecision::Allow,
             evidence: PackEvidence {
+                original_span: None,
                 id: continuity_evidence_handle(),
                 source: continuity_must(SourceHandle::new("source:runtime-history")),
                 selector: EvidenceSelector::Whole,

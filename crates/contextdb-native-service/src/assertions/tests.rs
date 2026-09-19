@@ -8,6 +8,8 @@ use contextdb_service::{CaptureRequest, EventInterpretation, StateCoverageGap};
 
 use super::*;
 
+mod preparation;
+
 fn budget() -> QueryBudget {
     QueryBudget::new(
         20_000,

@@ -22,6 +22,12 @@ summary of the accumulated history. Summaries remain optional search aids or
 requested outputs. This extends the engine through adapters without placing
 provider, conversation or coding types in the universal semantic core.
 
+This applies to ordinary conversation, jokes, incidental details, rejected ideas,
+documents, images and action results as well as project work. Retention does not
+require predicted importance. A retained detail that is not retrieved when needed
+still counts as forgetting; automatic preparation and measured reader continuity
+are product gates, not consequences of having an archive.
+
 The deterministic R0 router is the initial implementation and fallback. Learned
 utility estimates may choose optional context, but never truth, authorization,
 retention or mandatory obligations. Training defaults to off. Trained scoring
@@ -187,6 +193,39 @@ Current-state reads return resolution, conflict or unknown with provenance.
 STOP, top-k and a missing hit do not certify an exhaustive negative answer.
 
 ## Compilation and dispatch
+
+`PrepareContextPort` connects the native owner to `ContextCompiler::compile_assembly`.
+It discovers applicable authority keys from a scoped catalog, resolves mandatory
+state, and combines it with a bounded indexed raw frontier. Administrative
+`initialize_state_catalog` builds existing keys explicitly; later policy writes
+maintain the directory in the same synchronized publication. Queries never rebuild
+it. Activation uses `continuous-state-catalog-v1`; restore and deep verification
+check the directory against accepted authority history.
+
+`RawObservation` carries historical originals without inventing claim IDs.
+`PackEvidence.original_span` binds the event, payload version, byte range and
+BLAKE3 digest. Small text originals are included whole; larger lexical hits add
+bounded surrounding context. Binary, unavailable or oversized unqualified sources
+produce explicit mandatory unknown markers and source addresses. They are not
+represented as exact quotations. Existing canonical packs keep their byte format
+when these additive fields are absent; Rust, Python, Go and TypeScript share an
+original-evidence fixture.
+
+The assembly manifest binds the layout, model profile, canonical pack, ordered
+occurrences, full request wire, exact source read-set and opaque scope/policy view.
+The compiler verifies hot/current sources before deduplication, includes hard
+dependencies and sufficient support alternatives before admission, and measures
+each optional singleton or bounded complementary pair against the complete
+rendered request. Shared source ranges count once. R0 can stop without removing
+mandatory state; it cannot confer authority. Preparation rechecks scope/policy
+epochs and temporal expiry after rendering, but does not yet register a lease.
+
+The initial embedded profile supports 32 scopes, 256 mandatory slots, eight raw
+routes, 512 candidates, 2,048 supports, 64 complementary pairs and a caller-bounded
+selection work limit. The reference JSON encoder uses its declared reference
+tokenizer; it is not a vendor model protocol or model tokenization claim. Actual
+provider integration, automatic rolling, dispatch fences and transport adapters
+are delivered by the following phases.
 
 1. Select and freeze the prospective hot layout **after planned eviction**.
    Only completed, durably captured protocol groups can be evicted.

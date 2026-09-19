@@ -177,6 +177,7 @@ enum WireBlockKind {
     Goal = 16,
     Constraint = 17,
     OpenLoop = 18,
+    RawObservation = 19,
 }
 
 impl WireContextPackV1 {
@@ -297,7 +298,7 @@ fn parse_json<T: serde::de::DeserializeOwned>(value: &str) -> Result<T> {
     serde_json::from_str(value).map_err(|error| ContextError::Serialization(error.to_string()))
 }
 
-fn section_slices(pack: &ContextPack) -> [(PackBlockKind, &[ContextBlock]); 17] {
+fn section_slices(pack: &ContextPack) -> [(PackBlockKind, &[ContextBlock]); 18] {
     [
         (PackBlockKind::Situation, &pack.sections.situation),
         (PackBlockKind::SelfContext, &pack.sections.self_context),
@@ -316,6 +317,10 @@ fn section_slices(pack: &ContextPack) -> [(PackBlockKind, &[ContextBlock]); 17] 
         (PackBlockKind::OpenLoop, &pack.sections.open_loops),
         (PackBlockKind::Conflict, &pack.sections.conflicts),
         (PackBlockKind::Unknown, &pack.sections.unknowns),
+        (
+            PackBlockKind::RawObservation,
+            &pack.sections.raw_observations,
+        ),
     ]
 }
 
@@ -388,6 +393,7 @@ const fn wire_kind(value: PackBlockKind) -> WireBlockKind {
         PackBlockKind::OpenLoop => WireBlockKind::OpenLoop,
         PackBlockKind::Conflict => WireBlockKind::Conflict,
         PackBlockKind::Unknown => WireBlockKind::Unknown,
+        PackBlockKind::RawObservation => WireBlockKind::RawObservation,
     }
 }
 
@@ -410,6 +416,7 @@ fn domain_kind(value: i32) -> Result<PackBlockKind> {
         Ok(WireBlockKind::OpenLoop) => Ok(PackBlockKind::OpenLoop),
         Ok(WireBlockKind::Conflict) => Ok(PackBlockKind::Conflict),
         Ok(WireBlockKind::Unknown) => Ok(PackBlockKind::Unknown),
+        Ok(WireBlockKind::RawObservation) => Ok(PackBlockKind::RawObservation),
         Ok(WireBlockKind::UnknownValue | WireBlockKind::LegacyGoalOrOpenLoop) | Err(_) => Err(
             ContextError::Serialization("unknown ContextPack block kind enum".to_owned()),
         ),
@@ -435,6 +442,7 @@ const fn kind_rank(value: PackBlockKind) -> u8 {
         PackBlockKind::OpenLoop => 15,
         PackBlockKind::Conflict => 16,
         PackBlockKind::Unknown => 17,
+        PackBlockKind::RawObservation => 18,
     }
 }
 

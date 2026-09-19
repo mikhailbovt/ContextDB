@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod adapter;
+mod assembly;
 mod compiler;
 mod continuation;
 mod error;
@@ -16,6 +17,7 @@ mod token;
 mod types;
 mod wire;
 
+pub use assembly::*;
 pub use compiler::ContextCompiler;
 pub use error::{ContextError, Result};
 pub use provider::{

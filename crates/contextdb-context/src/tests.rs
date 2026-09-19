@@ -19,6 +19,8 @@ use serde::Serialize;
 
 use crate::*;
 
+mod continuous;
+
 const WORKSPACE: &str = "ws:test";
 const SUBJECT: &str = "subject:alice";
 const SCOPE: &str = "project:japan-bar";
@@ -262,6 +264,7 @@ fn evidence_for(id: &str, claims: BTreeSet<ClaimId>, excerpt: &str) -> ProviderE
         access: access(AccessConsent::Granted),
         external_model_use: PolicyDecision::Allow,
         evidence: PackEvidence {
+            original_span: None,
             id: must(EvidenceHandle::new(id)),
             source: must(SourceHandle::new(format!("source:{id}"))),
             selector: EvidenceSelector::TextBytes {

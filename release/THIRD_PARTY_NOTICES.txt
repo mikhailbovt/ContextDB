@@ -5,7 +5,7 @@ Release profile: contextdb-local-mcp-windows-x86_64
 Target: x86_64-pc-windows-msvc
 Cargo package: contextdb-cli
 Cargo features: local-mcp (default features disabled)
-Dependency graph SHA-256: 38a6c7ef150c3ae164d42a5c2d64ee7594f9bf086ce667c0a65713b86aae9331
+Dependency graph SHA-256: 470b7a0f8d7beac53b95cf0c12cb3c40f01e3651541375e22fa349e9351336b4
 Third-party Cargo packages: 133
 Generated with cargo-about 0.9.2 using supply-chain/about.toml.
 

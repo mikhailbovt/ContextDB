@@ -152,6 +152,25 @@ class ContextPackTests(unittest.TestCase):
             json.loads(FIXTURE.read_text(encoding="utf-8")),
         )
 
+    def test_raw_original_contract_retains_utf8_bytes_and_rejects_forgery(self) -> None:
+        original = json.loads(
+            (FIXTURE.parent / "original_evidence_v1.json").read_text(encoding="utf-8")
+        )
+        wire = copy.deepcopy(self.fixture["response"])
+        wire["context_pack"]["sections"]["raw_observations"] = [original["block"]]
+        wire["context_pack"]["evidence"] = [original["evidence"]]
+        response = ContextDbClient(FixtureTransport(wire)).compile_context(request())
+        self.assertEqual(len(response.context_pack.sections.raw_observations), 1)
+        self.assertEqual(response.context_pack.evidence[0].excerpt, original["evidence"]["excerpt"])
+        for field, value in [("end", 1), ("span_digest", "0" * 64), ("unexpected", True)]:
+            bad = copy.deepcopy(wire)
+            bad["context_pack"]["evidence"][0]["original_span"][field] = value
+            with self.assertRaises(ProtocolError):
+                ContextDbClient(FixtureTransport(bad)).compile_context(request())
+        wire["context_pack"]["sections"]["raw_observations"][0]["claim_ids"] = ["invented-fact"]
+        with self.assertRaises(ProtocolError):
+            ContextDbClient(FixtureTransport(wire)).compile_context(request())
+
     def test_typed_request_matches_fixture_and_response_keeps_channels_separate(self) -> None:
         transport = FixtureTransport(self.fixture["response"])
         response = ContextDbClient(transport).compile_context(request())

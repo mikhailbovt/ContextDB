@@ -293,7 +293,7 @@ impl NativeService {
                 "assertion projections differ from accepted semantic payloads",
             ));
         }
-        Ok(())
+        self.verify_state_catalog(snapshot, &mut budget)
     }
 
     pub(in super::super) fn assertion_scope_epochs<S: ReadSnapshot>(
