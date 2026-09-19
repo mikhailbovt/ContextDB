@@ -294,6 +294,9 @@ outcome positions remain reserved across restart. Unknown outcomes reconcile
 through the target; lost outcome receipts retry capture alone. A successful
 `contextdb.memory.expand` schedules bounded original queries for the next
 preparation; its acknowledgement does not claim retrieval has already succeeded.
+Terminal runs release resident source pins. Cancellation can discard unexecuted
+proposals from residency without inventing outcomes; their originals and earlier
+checkpoints remain auditable. Unknown dispatched outcomes must first reconcile.
 
 Interrupted buffered output is preserved as opaque partial bytes with no
 executable actions. Recovery cannot claim the request was never accepted after

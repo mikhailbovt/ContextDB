@@ -435,12 +435,13 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     item.status = ObligationStatus::Cancelled;
                 }
             }
-            for group in &mut next.groups {
-                group.complete = true;
-            }
         } else if next.groups.iter().any(|group| !group.complete) {
             return Err(invalid("complete the current interaction before finishing"));
         }
+        // Termination releases residency, including proposals that were never
+        // dispatched. Prior checkpoints and original events remain immutable.
+        next.groups.clear();
+        next.last_model_output = None;
         next.status = status;
         next.validate()
             .map_err(|_| invalid("terminal run retains pending obligations"))?;

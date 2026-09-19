@@ -104,6 +104,80 @@ fn reader(target: &FileTarget) -> ScriptedReader {
 }
 
 #[test]
+fn cancellation_releases_unexecuted_proposals_without_inventing_tool_results() {
+    let directory = tempfile::tempdir().expect("directory");
+    let owner = Arc::new(
+        NativeService::open(directory.path().join("native"), "runtime", [7; 32]).expect("open"),
+    );
+    let (context, identity) = identity();
+    owner
+        .initialize_state_catalog(&context, &mut budget())
+        .expect("catalog");
+    let target = target(directory.path(), false);
+    let reader = reader(&target);
+    let mut runtime = OwnedAgentRuntime::start(
+        Arc::clone(&owner),
+        context.clone(),
+        StartRun {
+            identity: identity.clone(),
+            model_profile: reader.profile(),
+            recorded_at: now(),
+        },
+        settings(),
+        &mut budget(),
+    )
+    .expect("start");
+    runtime
+        .accept_user(
+            "Propose the action before dispatch.".into(),
+            now(),
+            &mut budget(),
+        )
+        .expect("input");
+    let proposal = runtime
+        .step(
+            &reader,
+            &FixtureFence,
+            &FixturePreparation(Arc::clone(&owner)),
+            &[],
+            now(),
+            &mut budget(),
+        )
+        .expect("proposal")
+        .output_receipt;
+    assert!(runtime.next_tool(&mut budget()).expect("queued").is_some());
+    runtime
+        .finish(OwnedRunStatus::Cancelled, now(), &mut budget())
+        .expect("cancel before effect");
+    assert_eq!(target.effects.load(Ordering::SeqCst), 0);
+    assert!(!target.path.exists());
+    assert!(runtime.checkpoint().required_sources().next().is_none());
+    owner
+        .read_original(ReadOriginalRequest {
+            context: context.clone(),
+            event_id: proposal.event_id,
+            after_receipt: Some(proposal),
+        })
+        .expect("proposal remains auditable");
+    drop(runtime);
+    let mut resumed = OwnedAgentRuntime::resume(
+        owner,
+        context,
+        identity.run_id,
+        settings(),
+        now(),
+        &mut budget(),
+    )
+    .expect("terminal checkpoint");
+    assert_eq!(resumed.checkpoint().status, OwnedRunStatus::Cancelled);
+    assert!(
+        resumed
+            .accept_user("Cannot resume execution.".into(), now(), &mut budget())
+            .is_err()
+    );
+}
+
+#[test]
 fn owned_tool_recovery_after_real_effect_keeps_protocol_and_does_not_execute_again() {
     let directory = tempfile::tempdir().expect("directory");
     let database = directory.path().join("native");
