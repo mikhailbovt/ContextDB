@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod assertion;
 mod capability;
 mod capture;
 mod collections;
@@ -24,6 +25,7 @@ mod runtime;
 mod semantic;
 mod time;
 
+pub use assertion::*;
 pub use capability::*;
 pub use capture::*;
 pub use collections::NonEmptyVec;

@@ -11,6 +11,7 @@ Each mutation updates bounded records in one synchronized Fjall transaction:
 - immutable revision content and bitemporal history;
 - workspace-local to global commit mappings;
 - content-free event-chain and idempotency receipts.
+- digest-bound accepted record/edge mutation payloads and affected scope epochs.
 
 Recall scans policy labels first and applies the requested record-family filter
 before it builds or caps the authorized universe. Only then is content
@@ -69,13 +70,24 @@ promotion occurred. Deep verification checks candidate endpoints, exact policy
 equality, record roles, quarantine/provenance attributes, deterministic edge
 IDs, and acyclicity before returning its database digest.
 
-The canonical `contextdb.native-fjall.logical-backup.v1` format includes every
-admitted native keyspace under strict entry/byte caps, database identity, deep
+The `contextdb.native-fjall.logical-backup.v2` format includes continuous capture
+and accepted semantic payloads; legacy v1 backups remain readable. Both include
+their admitted native keyspaces under strict entry/byte caps, database identity, deep
 verification receipt, and nested/outer BLAKE3 integrity. Restore validates the
 complete archive before mutation and is restricted to a pristine native target;
 replacement is one synchronized transaction and is deep-verified before its
 receipt. This is a database-global operator primitive, not subject export or a
 live replacement API.
+
+`CapturePort` retains originals independently of extraction; persistent raw
+recall is available through `RawRecallPort`. The host-only `AssertionPort`
+publishes exact-source claims and explicit transitions under a typed authority
+policy. It distinguishes knowledge time, valid time and unresolved interpretation;
+assistant proposals do not become decisions. All new native record writes,
+including existing candidate/correction/edge paths, journal their accepted bytes.
+The [continuous-context contract](../../docs/architecture/continuous-context.md)
+documents format activation, current-source ACLs and supported bounds. These
+embedded ports do not give model-facing candidate tools publication authority.
 
 Subject-safe export/import, accelerated vector search, lifecycle state, live
 restore, hard deletion, and candidate promotion remain separate executors. An

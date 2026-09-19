@@ -1716,7 +1716,7 @@ fn admin_backup_restores_all_native_keyspaces_into_a_pristine_target_and_reopens
             context: admin.clone(),
         })
         .expect("create native backup");
-    assert_eq!(backup.format, backup::native_backup_format());
+    assert_eq!(backup.format, NATIVE_CONTINUOUS_BACKUP_FORMAT);
     assert_eq!(backup.digest, digest_bytes(&backup.bytes));
     assert_eq!(backup.commit_seq, 3);
     assert!(backup.bytes.len() < backup::maximum_native_backup_bytes());

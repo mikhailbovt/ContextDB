@@ -46,8 +46,12 @@ budget. Lost responses are resolved by that key, not assumed to be failed writes
 Receipts bind database identity, sequence domain, event identity and durability.
 Equal integers from chat, native and physical domains do not establish a fence.
 Legacy import retains original identities and receipts with an explicit mapping.
-Native audit hashes are not a replay log: reconstruction needs the accepted
-mutation bytes and source history as well.
+The legacy native prefix contains audit hashes. New record writes retain the
+actual accepted record/edge revisions behind digest-bound journal references,
+including negative closures; assertion publications retain their complete typed
+batch. Reconstruction uses these bytes and source history. Activation is explicit
+(`continuous-record-mutations-v1` / `continuous-assertions-v1`); neither retrofit
+claims to recreate an old payload that the legacy journal never retained.
 
 The first native capture implementation exposes `CapturePort` and the
 `NativeConversationCapture` host adapter (`contextdb-chat/service-adapter`).
@@ -63,7 +67,8 @@ payload and 128 disjoint producer gaps. Overflow is an explicit
 
 First capture atomically enables the `continuous-capture-v1` format feature.
 Older binaries reject this extended manifest. New code still reads legacy
-databases and v1 backups; backups containing capture use the explicit v2 format.
+databases and v1 backups; backups containing continuous capture or accepted
+semantic payloads use the explicit v2 format.
 Restore verifies original/receipt/outbox/producer/scope/stream closure before
 writing a pristine target. A restored receipt remains usable after host-key
 rotation, with fresh authorization and exact stored-receipt equality.
@@ -151,6 +156,30 @@ Physical snapshots are short lived (the baseline Fjall adapter retains 64).
 Future valid-time boundaries can invalidate a lease without a new write. Raw
 pending interpretation is a separate coverage state: capture does not prove that
 all natural-language constraints were understood.
+
+`AssertionPort` adds a trusted host interpreter boundary over existing `Claim`,
+`ClaimRevision`, `BitemporalRange` and evidence identities. A versioned authority
+policy grants exact adapter/actor/role combinations for a predicate and scope.
+Assistant proposals and model inferences remain attributed assertions without
+resolution authority. Observed configuration and desired policy use different
+predicate identities. Incompatible authorized values produce an explicit
+conflict; correction requires supported supersession, and retraction is an
+explicit negative transition. Removing a replacement's permission cannot revive
+its predecessor as current. Evidence source identities and spans are verified
+against capture, independently of the containing assertion's narrower envelope.
+
+Publication compares the affected scope epoch and atomically writes accepted
+semantics, interpreter/version, coverage and a new epoch. A pending original,
+partial observation or producer gap blocks an unqualified current value. Raw
+overlay overflow returns `IndexTooStale`. An unchanged fully interpreted scope
+skips unrelated raw backlog. The bounded profile admits 128 outbox entries per
+interpretation window, 128 unresolved sources, 64 changes / 4 MiB per assertion
+batch, 64 authority revisions and 512 changes per queried slot. Existing native
+record mutations are capped at 1,024 writes / 16 MiB per commit. Maintenance and
+larger supported profiles remain explicit work; no archive-size latency SLO is
+inferred from these bounds. Returned state has an opaque principal/epoch binding
+and the next valid-time boundary; it is not an action lease. Historical reads
+retain current source permissions, and consent uses current wall time.
 
 Selective retrieval returns bounded evidence and gaps. Exhaustive retrieval
 uses snapshot-bound enumeration or aggregation with explicit scan coverage.

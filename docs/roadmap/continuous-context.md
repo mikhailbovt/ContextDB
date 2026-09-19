@@ -11,8 +11,8 @@ native or model acceptance.
 | 01 | Native conversation capture, receipts, streams and recovery | Merged in #3; CI passed on all four native targets |
 | 02 | Tool/artifact capture, request provenance and reconciliation | Merged in #4; CI passed on all four native targets |
 | 03 | Original ID/source/range/lexical recall without promotion | Merged in #5; CI passed on all four native targets |
-| 04 | Persistent authorized indexed provider and exhaustive paging | Implemented; local checks passed, CI pending |
-| 05 | Temporal assertions, resolution, negative overlay and coverage | Planned |
+| 04 | Persistent authorized indexed provider and exhaustive paging | Merged in #6; CI passed on all four native targets |
+| 05 | Temporal assertions, resolution, negative overlay and coverage | Implemented; local checks passed, CI pending |
 | 06 | Evidence compiler, whole-request manifest, R0 and budgets | Planned |
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Planned |
 | 08 | Atomic lease admission, invalidation and action fences | Planned |
@@ -84,4 +84,16 @@ content, current-policy revocation, staged rebuild/cutover, backup restore,
 bounded fresh tail, explicit overflow, generation-aware enumeration, large-source
 fallback, causal history, cancellation, writer contention and missing-index
 reconstruction. The existing materialized semantic corpus provider stays available
-as an oracle; continuous current-state selection is the next phase.
+as an oracle.
+
+Phase 05 passes 120 tests across core, service and native service, including eight
+new native scenarios. They exercise source authority, proposal isolation,
+explicit supersession/retraction, future and retroactive applicability, rollback,
+branch isolation, conflict, pending interpretation, producer gaps, atomic scope
+comparison, concurrent retry, current evidence ACLs, restart and backup restore.
+The resolver reuses canonical claims and bitemporal ranges; it does not infer
+natural-language truth. Accepted assertion batches and new writes through the
+existing native record/edge API retain replayable payloads and atomic scope
+epochs. Deep verification reconstructs their derived rows. Host interpretation
+remains an explicit pipeline claim; a capture/index watermark cannot certify it.
+Context assembly and lease admission are the next connected acceptance gates.

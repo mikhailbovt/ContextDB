@@ -13,6 +13,7 @@
 
 #[cfg(test)]
 mod adapter_tests;
+mod assertions;
 mod backup;
 mod capture;
 mod indexed_provider;
@@ -20,6 +21,7 @@ mod payload;
 mod provider;
 mod raw;
 mod raw_index;
+mod record_journal;
 
 pub use backup::{NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT};
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
@@ -273,6 +275,10 @@ struct StoredEvent {
     accepted_payload: Option<contextdb_core::OriginalPayloadRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_original_revocation: Option<OriginalRevocationReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_assertions: Option<contextdb_service::AssertionReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    accepted_records: Vec<record_journal::RecordMutationRef>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -525,6 +531,7 @@ impl NativeService {
     ) -> ServiceResult<()> {
         let response_bytes = encode(response)?;
         let response_digest = digest_bytes(&response_bytes);
+        let accepted_records = self.accepted_record_mutations(transaction, frame)?;
         let mut event = StoredEvent {
             schema_version: SCHEMA_VERSION,
             global_commit: frame.global_commit,
@@ -562,6 +569,12 @@ impl NativeService {
             } else {
                 None
             },
+            accepted_assertions: if operation == "assertions" {
+                Some(decode(&response_bytes, "assertion receipt")?)
+            } else {
+                None
+            },
+            accepted_records,
         };
         event.event_digest = event_digest(&event)?;
         let idempotency = StoredIdempotency {
@@ -672,6 +685,7 @@ impl NativeService {
             record: record.clone(),
             digest: record_digest,
         };
+        self.journal_record(transaction, record)?;
         let key = history_key(&policy.record_digest, policy.revision);
         transaction
             .put(&self.keyspaces.policy_history, key.clone(), encode(policy)?)
@@ -1024,6 +1038,8 @@ impl NativeService {
         self.verify_capture_records(snapshot)?;
         self.verify_payload_records(snapshot)?;
         self.verify_raw_index_records(snapshot)?;
+        self.verify_assertion_records(snapshot)?;
+        self.verify_record_mutations(snapshot)?;
         for entry in snapshot
             .scan_prefix(&self.keyspaces.events, b"")
             .map_err(storage_error)?
@@ -2925,6 +2941,8 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
             feature != capture::CAPTURE_FEATURE
                 && feature != payload::SOURCE_FEATURE
                 && feature != raw_index::INDEX_FEATURE
+                && feature != assertions::STATE_FEATURE
+                && feature != record_journal::RECORD_FEATURE
         })
         || manifest.checksum != manifest_checksum(manifest)?
     {

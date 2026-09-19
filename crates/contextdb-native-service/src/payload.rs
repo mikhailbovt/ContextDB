@@ -453,7 +453,7 @@ impl NativeService {
         Ok(bytes)
     }
 
-    fn source_span<S: ReadSnapshot>(
+    pub(super) fn source_span<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         context: Option<&AuthenticatedRequestContext>,
