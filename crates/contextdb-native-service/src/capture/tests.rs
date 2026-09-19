@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::*;
 
-fn request(sequence: u64, text: &str) -> CaptureRequest {
+pub(crate) fn request(sequence: u64, text: &str) -> CaptureRequest {
     let workspace = WorkspaceId::from_uuid(Uuid::from_u128(1)).expect("workspace");
     let scope = ScopeId::from_uuid(Uuid::from_u128(2)).expect("scope");
     let mut context = crate::tests::authenticated(
@@ -56,6 +56,7 @@ fn request(sequence: u64, text: &str) -> CaptureRequest {
             upstream_truncated: false,
             gap_reason: None,
             response_stream: None,
+            provenance: None,
         },
     }
 }

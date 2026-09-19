@@ -3,12 +3,13 @@
 use std::collections::BTreeMap;
 
 use contextdb_core::{
-    ContentDigest, EventEnvelope, ObservationId, ResponseStream, StreamId, Validate,
+    ContentDigest, EventEnvelope, EventPayload, ObservationId, OriginalPayloadRef, RequestPart,
+    ResponseStream, StreamId, Validate,
 };
 use contextdb_service::{
-    AuthenticatedRequestContext, Capability, CaptureDurability, CaptureGapRange, CapturePort,
-    CaptureReceipt, CaptureRequest, CapturedOriginal, ErrorCode, NATIVE_CAPTURE_DOMAIN,
-    ProducerCoverage, ReadOriginalRequest, ServiceError, ServiceResult,
+    AuthenticatedRequestContext, Capability, CaptureAcceptance, CaptureDurability, CaptureGapRange,
+    CapturePort, CaptureReceipt, CaptureRequest, CapturedOriginal, ErrorCode,
+    NATIVE_CAPTURE_DOMAIN, ProducerCoverage, ReadOriginalRequest, ServiceError, ServiceResult,
 };
 use contextdb_storage::{
     Durability, ReadSnapshot, SnapshotSelector, StorageEngine, StorageError, WriteTransaction,
@@ -37,6 +38,15 @@ struct CaptureRecord {
     producer_key: String,
     producer_sequence: u64,
     idempotency_digest: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dependencies: Vec<CaptureDependency>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum CaptureDependency {
+    Source { event_id: ObservationId },
+    Payload { reference: OriginalPayloadRef },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -55,7 +65,10 @@ pub(super) struct CaptureWork {
 }
 
 impl CapturePort for NativeService {
-    fn append_event(&self, request: CaptureRequest) -> ServiceResult<CaptureReceipt> {
+    fn append_event_with_status(
+        &self,
+        request: CaptureRequest,
+    ) -> ServiceResult<CaptureAcceptance> {
         require_capability(&request.context, Capability::Observe)?;
         validate_identifier(&request.idempotency_key, "capture idempotency key")?;
         request
@@ -109,6 +122,7 @@ impl CapturePort for NativeService {
             .map_err(storage_error)?;
         let policy =
             self.authorized_capture_policy(&snapshot, &request.context, request.event_id)?;
+        self.authorize_capture_dependencies(&snapshot, &request.context, request.event_id)?;
         let original = self.load_captured_original(&snapshot, request.event_id)?;
         if original.event.workspace_id.to_string() != policy.access.workspace_id {
             return Err(integrity("capture workspace differs from its policy"));
@@ -175,7 +189,7 @@ impl NativeService {
         producer: &str,
         idempotency: &str,
         request_digest: &str,
-    ) -> ServiceResult<Option<CaptureReceipt>> {
+    ) -> ServiceResult<Option<CaptureAcceptance>> {
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(receipt) = self.replay::<CaptureReceipt, _>(
             &transaction,
@@ -184,7 +198,11 @@ impl NativeService {
             request_digest,
         )? {
             self.authorized_capture_policy(&transaction, &request.context, receipt.event_id)?;
-            return Ok(Some(receipt));
+            self.authorize_capture_dependencies(&transaction, &request.context, receipt.event_id)?;
+            return Ok(Some(CaptureAcceptance {
+                receipt,
+                newly_accepted: false,
+            }));
         }
         let event = &request.event;
         let position = position_key(producer, event.producer_sequence);
@@ -222,6 +240,15 @@ impl NativeService {
             read_optional(&transaction, self, producer_head_key.as_bytes())?.unwrap_or_default();
         let coverage = advance_coverage(old, event.producer_sequence)?;
         self.stage_response_stream(&mut transaction, request, producer)?;
+        self.validate_capture_sources(&transaction, &request.context, event)?;
+        if event.provenance.is_some()
+            || matches!(
+                event.payload,
+                EventPayload::Staged { .. } | EventPayload::Assembly { .. }
+            )
+        {
+            self.enable_source_format(&mut transaction)?;
+        }
         self.enable_capture_format(&mut transaction)?;
         let frame = self.begin_frame(&transaction, &request.context.request.workspace_id, false)?;
         let mut access = trusted_structured_policy(&request.context.request);
@@ -295,6 +322,7 @@ impl NativeService {
             producer_key: producer.into(),
             producer_sequence: event.producer_sequence,
             idempotency_digest: idempotency.into(),
+            dependencies: capture_dependencies(&event.payload),
         };
         transaction
             .put(
@@ -355,10 +383,16 @@ impl NativeService {
         }
         #[cfg(test)]
         capture_fault("after_commit");
-        Ok(Some(receipt))
+        Ok(Some(CaptureAcceptance {
+            receipt,
+            newly_accepted: true,
+        }))
     }
 
-    fn enable_capture_format<T: WriteTransaction>(&self, transaction: &mut T) -> ServiceResult<()> {
+    pub(super) fn enable_capture_format<T: WriteTransaction>(
+        &self,
+        transaction: &mut T,
+    ) -> ServiceResult<()> {
         let bytes = transaction
             .get(&self.keyspaces.meta, META_MANIFEST_KEY)
             .map_err(storage_error)?
@@ -400,7 +434,7 @@ impl NativeService {
             .map_err(storage_error)
     }
 
-    fn authorized_capture_policy<S: ReadSnapshot>(
+    pub(super) fn authorized_capture_policy<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         context: &AuthenticatedRequestContext,
@@ -421,7 +455,7 @@ impl NativeService {
         Ok(policy)
     }
 
-    fn load_captured_original<S: ReadSnapshot>(
+    pub(super) fn load_captured_original<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         id: ObservationId,
@@ -458,6 +492,11 @@ impl NativeService {
             .validate()
             .map_err(|_| integrity("captured envelope invariant failed"))?;
         validate_payload(&event).map_err(|_| integrity("captured original digest is invalid"))?;
+        if record.dependencies != capture_dependencies(&event.payload) {
+            return Err(integrity(
+                "capture source dependencies differ from its original",
+            ));
+        }
         let receipt = record.receipt;
         let (global, _) = self.select_snapshot(
             snapshot,
@@ -485,7 +524,10 @@ impl NativeService {
     ) -> ServiceResult<()> {
         let entries = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"")
-            .map_err(storage_error)?;
+            .map_err(storage_error)?
+            .into_iter()
+            .filter(|entry| !entry.key.starts_with(b"payload/"))
+            .collect::<Vec<_>>();
         if entries.is_empty() {
             return Ok(());
         }
@@ -506,6 +548,17 @@ impl NativeService {
             if entry.key.starts_with(b"receipt/") {
                 let record: CaptureRecord = decode(&entry.value, "capture record")?;
                 let original = self.load_captured_original(snapshot, record.receipt.event_id)?;
+                if (original.event.provenance.is_some()
+                    || matches!(
+                        original.event.payload,
+                        EventPayload::Staged { .. } | EventPayload::Assembly { .. }
+                    ))
+                    && !manifest.features.contains(super::payload::SOURCE_FEATURE)
+                {
+                    return Err(integrity("capture source format feature is absent"));
+                }
+                self.verify_capture_source_integrity(snapshot, &original.event)
+                    .map_err(|_| integrity("captured original source closure is invalid"))?;
                 if entry.key != record_key(original.event.event_id)
                     || record.producer_sequence != original.event.producer_sequence
                 {
@@ -641,6 +694,87 @@ impl NativeService {
             ));
         }
         Ok(())
+    }
+
+    pub(super) fn authorize_capture_dependencies<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        event_id: ObservationId,
+    ) -> ServiceResult<()> {
+        let record: CaptureRecord = read_required(snapshot, self, &record_key(event_id))?;
+        if record.dependencies.len() > super::CAPTURE_MAX_REQUEST_PARTS {
+            return Err(integrity("capture dependency budget exceeded"));
+        }
+        for dependency in record.dependencies {
+            match dependency {
+                CaptureDependency::Payload { reference } => {
+                    self.authorized_payload(snapshot, context, &reference)?
+                }
+                CaptureDependency::Source { event_id: source } => {
+                    if source == event_id {
+                        return Err(integrity("capture cannot depend on itself"));
+                    }
+                    self.authorized_capture_policy(snapshot, context, source)?;
+                    let source_record: CaptureRecord =
+                        read_required(snapshot, self, &record_key(source))?;
+                    for dependency in source_record.dependencies {
+                        let CaptureDependency::Payload { reference } = dependency else {
+                            return Err(integrity(
+                                "request echo is not an independent source root",
+                            ));
+                        };
+                        self.authorized_payload(snapshot, context, &reference)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn verify_capture_journal_reference<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event: &super::StoredEvent,
+    ) -> ServiceResult<()> {
+        match (&event.accepted_original, event.operation.as_str()) {
+            (Some(work), "capture") => {
+                let record: CaptureRecord =
+                    read_required(snapshot, self, &record_key(work.event_id))
+                        .map_err(|_| integrity("journal capture reference is absent"))?;
+                if record.receipt.event_digest != work.event_digest
+                    || record.receipt.workspace_commit != event.workspace_commit
+                    || work.workspace_commit != event.workspace_commit
+                {
+                    return Err(integrity("journal capture reference differs"));
+                }
+            }
+            (None, operation) if operation != "capture" => {}
+            _ => return Err(integrity("journal capture reference kind is invalid")),
+        }
+        Ok(())
+    }
+}
+
+fn capture_dependencies(payload: &EventPayload) -> Vec<CaptureDependency> {
+    match payload {
+        EventPayload::Staged { reference, .. } => vec![CaptureDependency::Payload {
+            reference: reference.clone(),
+        }],
+        EventPayload::Assembly { manifest } => manifest
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                RequestPart::Source { span } => Some(CaptureDependency::Source {
+                    event_id: span.event_id,
+                }),
+                RequestPart::StoredNovel { payload } => Some(CaptureDependency::Payload {
+                    reference: payload.clone(),
+                }),
+                RequestPart::Novel { .. } => None,
+            })
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -827,4 +961,4 @@ fn capture_fault(stage: &str) {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

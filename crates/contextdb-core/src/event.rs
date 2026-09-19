@@ -116,6 +116,8 @@ pub enum PayloadOmission {
     LegacyMissing,
     /// Payload was explicitly erased under a retention policy.
     ExplicitlyDeleted,
+    /// The observed source was deleted; prior captured versions remain historical.
+    SourceDeleted,
 }
 
 /// Original bytes. Digest verification belongs to the capture/materialization boundary.
@@ -138,6 +140,18 @@ pub enum EventPayload {
         /// BLAKE3-256 of the original bytes.
         digest: ContentDigest,
     },
+    /// A complete durable original larger than the inline capture limit.
+    Staged {
+        /// Policy-bound original block.
+        reference: crate::OriginalPayloadRef,
+        /// Source media type.
+        media_type: String,
+    },
+    /// Exact model-request occurrence represented by ordered source references.
+    Assembly {
+        /// Wire replay and provenance manifest.
+        manifest: crate::ModelRequestManifest,
+    },
     /// An explicit lack of original bytes, never an invented quotation.
     Omitted {
         /// Custody or upstream limitation.
@@ -148,6 +162,8 @@ pub enum EventPayload {
 impl std::fmt::Debug for EventPayload {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Staged { reference, .. } => f.debug_tuple("Staged").field(reference).finish(),
+            Self::Assembly { manifest } => f.debug_tuple("Assembly").field(manifest).finish(),
             Self::InlineUtf8 { text, digest } => f
                 .debug_struct("InlineUtf8")
                 .field("byte_length", &text.len())
@@ -170,7 +186,7 @@ impl EventPayload {
         match self {
             Self::InlineUtf8 { text, .. } => Some(text.as_bytes()),
             Self::InlineBytes { bytes, .. } => Some(bytes),
-            Self::Omitted { .. } => None,
+            Self::Omitted { .. } | Self::Staged { .. } | Self::Assembly { .. } => None,
         }
     }
 
@@ -178,6 +194,8 @@ impl EventPayload {
     #[must_use]
     pub const fn digest(&self) -> Option<ContentDigest> {
         match self {
+            Self::Staged { reference, .. } => Some(reference.digest),
+            Self::Assembly { manifest } => Some(manifest.wire_digest),
             Self::InlineUtf8 { digest, .. } | Self::InlineBytes { digest, .. } => Some(*digest),
             Self::Omitted { .. } => None,
         }
@@ -266,6 +284,9 @@ pub struct EventEnvelope {
     pub gap_reason: Option<String>,
     /// Optional durable response stream position/terminal manifest.
     pub response_stream: Option<ResponseStream>,
+    /// Typed host attribution for tool and artifact adapters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::EventProvenance>,
 }
 
 impl Validate for EventEnvelope {
@@ -300,7 +321,8 @@ impl Validate for EventEnvelope {
                 return Err(invalid("event metadata is invalid"));
             }
         }
-        if let EventPayload::InlineBytes { media_type, .. } = &self.payload
+        if let EventPayload::InlineBytes { media_type, .. }
+        | EventPayload::Staged { media_type, .. } = &self.payload
             && (media_type.trim().is_empty() || media_type.len() > 256)
         {
             return Err(invalid("event media type is invalid"));
@@ -333,6 +355,49 @@ impl Validate for EventEnvelope {
             && self.coverage == EventCoverage::CompleteObservation
         {
             return Err(invalid("aborted response must report partial capture"));
+        }
+        if matches!(self.payload, EventPayload::Assembly { .. })
+            && (self.kind != EventKind::ModelRequested
+                || self.coverage != EventCoverage::CompleteObservation)
+        {
+            return Err(invalid(
+                "assembly requires a complete model request occurrence",
+            ));
+        }
+        match &self.provenance {
+            Some(crate::EventProvenance::Tool {
+                request_event_id,
+                action_digest,
+                ..
+            }) => match self.kind {
+                EventKind::ToolRequested
+                    if *request_event_id == self.event_id
+                        && self.payload.digest() == Some(*action_digest) => {}
+                EventKind::ToolCompleted
+                | EventKind::ToolFailed
+                | EventKind::ToolOutcomeUnknown
+                    if self.parent_event_ids.contains(request_event_id) => {}
+                _ => return Err(invalid("tool provenance does not bind its dispatch intent")),
+            },
+            Some(crate::EventProvenance::Artifact {
+                base_digest,
+                new_digest,
+                ..
+            }) if !matches!(
+                self.kind,
+                EventKind::ArtifactObserved
+                    | EventKind::ArtifactChanged
+                    | EventKind::ArtifactDeleted
+            ) || (self.kind != EventKind::ArtifactDeleted
+                && *new_digest != self.payload.digest())
+                || (self.kind == EventKind::ArtifactDeleted && new_digest.is_some())
+                || (base_digest.is_some() && self.supersedes_event_id.is_none()) =>
+            {
+                return Err(invalid(
+                    "artifact provenance differs from its source version",
+                ));
+            }
+            _ => {}
         }
         Ok(())
     }

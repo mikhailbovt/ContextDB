@@ -458,11 +458,16 @@ def _build_notices(about: dict[str, Any], graph: dict[str, Any]) -> tuple[bytes,
 
 
 def _snapshot_cyclonedx_files(root: Path) -> dict[Path, bytes]:
-    return {
-        path: path.read_bytes()
-        for path in root.rglob("*.cdx.json")
-        if "target" not in path.relative_to(root).parts
-    }
+    snapshot = {}
+    for directory, children, filenames in os.walk(root):
+        # Prune build output before traversal; filtering rglob results still
+        # walks every compiler artifact, especially costly across WSL mounts.
+        children[:] = [name for name in children if name not in {"target", ".git"}]
+        for filename in filenames:
+            if filename.endswith(".cdx.json"):
+                path = Path(directory) / filename
+                snapshot[path] = path.read_bytes()
+    return snapshot
 
 
 def _generate_raw_sbom(root: Path) -> dict[str, Any]:

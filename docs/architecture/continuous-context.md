@@ -68,6 +68,26 @@ Restore verifies original/receipt/outbox/producer/scope/stream closure before
 writing a pristine target. A restored receipt remains usable after host-key
 rotation, with fresh authorization and exact stored-receipt equality.
 
+`contextdb-capture` adds host adapters for tools, complete artifact versions and
+model requests. `PayloadPort` stages up to 64 MiB in synchronized 256 KiB chunks
+before event publication. Each reference binds both the full original digest
+and the ordered chunk manifest; a span read verifies just its intersecting
+chunks. Staging has its own receipt and does not claim event capture. The
+`continuous-sources-v1` feature fences older readers of these representations.
+
+Request occurrences retain ordered source spans and novel bytes. Native capture
+checks source permissions, exact byte ranges and the final wire digest, with
+at most 512 parts. Request echoes cannot be used as independent source roots.
+Reads check each dependency's current policy before loading the request body.
+
+Tool intent is durable before dispatch. Recovery first asks the target about
+that exact call/action digest. Automatic retry requires target idempotency or
+an atomic version comparison; an unresolved duplicate does not take another
+dispatcher's outcome slot. A failed result capture returns its full pending
+observation for a persistence-only retry. Later resolution uses a fresh outcome
+slot for the same invocation. Artifact deletion observes the source's absence;
+it does not erase previously captured versions or claim retention deletion.
+
 ## Retrieval and current state
 
 Interactive retrieval queries persistent indexes within an authorized domain;

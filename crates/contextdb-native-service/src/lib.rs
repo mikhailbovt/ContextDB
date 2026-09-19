@@ -11,12 +11,16 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+#[cfg(test)]
+mod adapter_tests;
 mod backup;
 mod capture;
+mod payload;
 mod provider;
 
 pub use backup::{NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT};
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
+pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -260,6 +264,8 @@ struct StoredEvent {
     response_digest: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_original: Option<capture::CaptureWork>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_payload: Option<contextdb_core::OriginalPayloadRef>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -530,6 +536,17 @@ impl NativeService {
                 None
             },
             previous_event_digest: frame.previous_event_digest.clone(),
+            accepted_payload: if operation == "stage_payload" {
+                Some(
+                    decode::<contextdb_service::PayloadReceipt>(
+                        &response_bytes,
+                        "payload response",
+                    )?
+                    .reference,
+                )
+            } else {
+                None
+            },
             event_digest: String::new(),
         };
         event.event_digest = event_digest(&event)?;
@@ -991,6 +1008,15 @@ impl NativeService {
         }
         self.verify_active_graph_invariants(snapshot)?;
         self.verify_capture_records(snapshot)?;
+        self.verify_payload_records(snapshot)?;
+        for entry in snapshot
+            .scan_prefix(&self.keyspaces.events, b"")
+            .map_err(storage_error)?
+        {
+            let event: StoredEvent = decode(&entry.value, "native journal reference")?;
+            self.verify_capture_journal_reference(snapshot, &event)?;
+            self.verify_payload_journal_reference(snapshot, &event)?;
+        }
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"contextdb/native-service/deep-verification/v1\0");
         for keyspace in self.keyspaces.all() {
@@ -2880,10 +2906,9 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
     if manifest.schema_version != SCHEMA_VERSION
         || manifest.format != FORMAT_NAME
         || manifest.database_id != database_id
-        || manifest
-            .features
-            .iter()
-            .any(|feature| feature != capture::CAPTURE_FEATURE)
+        || manifest.features.iter().any(|feature| {
+            feature != capture::CAPTURE_FEATURE && feature != payload::SOURCE_FEATURE
+        })
         || manifest.checksum != manifest_checksum(manifest)?
     {
         return Err(ServiceError::new(

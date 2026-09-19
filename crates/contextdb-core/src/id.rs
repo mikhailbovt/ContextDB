@@ -109,6 +109,7 @@ stable_id!(
     RecallRunId,
     ContextPackId,
     ModelCallId,
+    ToolCallId,
     DerivationId,
     SummaryId,
     ScopeId,
