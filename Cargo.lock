@@ -727,14 +727,17 @@ name = "contextdb-native-service"
 version = "0.2.0-alpha.3"
 dependencies = [
  "blake3",
+ "chacha20poly1305",
  "contextdb-capture",
  "contextdb-chat",
  "contextdb-context",
  "contextdb-core",
+ "contextdb-index",
  "contextdb-recall",
  "contextdb-service",
  "contextdb-storage",
  "contextdb-storage-fjall",
+ "getrandom 0.4.3",
  "serde",
  "serde_json",
  "tempfile",
