@@ -145,6 +145,18 @@ fn checkpoint_reopens_exact_state_and_concurrent_publication_has_one_winner() {
     assert!(!metadata.contains("checkpoint_sentinel"));
     assert!(!metadata.contains("Та самая шутка"));
     drop(snapshot);
+    let source = request.checkpoint.groups[0].messages[0].source.event_id;
+    let lineage = service
+        .inspect_original_deletion(&request.context, &BTreeSet::from([source]), &mut budget())
+        .expect("checkpoint input lineage");
+    assert_eq!(
+        lineage
+            .sources
+            .iter()
+            .map(|entry| entry.receipt.event_id)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([source, saved.receipt.event_id])
+    );
     drop(service);
     let service = Arc::new(
         NativeService::open_encrypted(dir.path(), "owned", [8; 32], ledger, keys).expect("reopen"),

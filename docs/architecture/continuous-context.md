@@ -75,6 +75,18 @@ subsequent missing metadata fails verification. This prepares explicit retention
 removal without duplicating deleted text; it neither permits a missing original
 nor changes its immutable receipt or the existing logical backup digest.
 
+`inspect_original_deletion` computes captured descendants from the accepted
+journal, including revisions, model/tool/checkpoint inputs and shared staged
+originals. A shared original reaches earlier owners and their descendants;
+unrelated novel blocks still used by an independent capture are retained.
+Equal text, equal ACLs and causal-only links do not establish dependency.
+The administrative scan checks the global event chain and complete workspace
+mapping in bounded pages, then rechecks the workspace commit before returning
+only identities, receipts and digests. Its work grows with retained history;
+budget exhaustion returns no partial inventory. The report covers source/payload
+lineage only, with at most 65,536 targets; semantic records, keys and external
+copies require further inventory. It does not suppress or remove anything.
+
 The initial profile uses strict pause: retain the input and retry the same key
 until a synchronized receipt arrives. It admits at most 256 KiB per inline
 payload and 128 disjoint producer gaps. Overflow is an explicit

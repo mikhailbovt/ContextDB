@@ -366,4 +366,30 @@ fn legacy_prefix_remains_readable_but_new_captures_require_bound_metadata() {
             .event,
         next.event
     );
+    let mut budget = contextdb_recall::QueryBudget::new(
+        100_000,
+        32 * 1024 * 1024,
+        std::time::Duration::from_secs(30),
+        Default::default(),
+    );
+    assert_eq!(
+        service
+            .inspect_original_deletion(
+                &input.context,
+                &BTreeSet::from([input.event.event_id]),
+                &mut budget
+            )
+            .expect_err("legacy source needs explicit recovery migration")
+            .code,
+        ErrorCode::FormatIncompatible
+    );
+    let current = service
+        .inspect_original_deletion(
+            &next.context,
+            &BTreeSet::from([next.event.event_id]),
+            &mut budget,
+        )
+        .expect("independent new source");
+    assert_eq!(current.sources.len(), 1);
+    assert_eq!(current.sources[0].receipt.event_id, next.event.event_id);
 }

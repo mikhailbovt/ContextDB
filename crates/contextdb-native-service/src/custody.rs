@@ -47,8 +47,8 @@ struct CustodyState {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Inputs {
-    sources: BTreeSet<ObservationId>,
-    payloads: Vec<OriginalPayloadRef>,
+    pub(super) sources: BTreeSet<ObservationId>,
+    pub(super) payloads: Vec<OriginalPayloadRef>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

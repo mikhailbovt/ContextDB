@@ -17,6 +17,7 @@ mod assertions;
 mod backup;
 mod capture;
 mod custody;
+mod deletion;
 mod encryption;
 mod indexed_provider;
 mod lease;
@@ -35,6 +36,7 @@ pub use backup::{
 };
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
+pub use deletion::{NativeDeletionLineage, NativeDeletionSource};
 pub use encryption::{
     CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
 };
