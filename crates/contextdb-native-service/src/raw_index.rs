@@ -1,6 +1,9 @@
 //! Persistent raw-source generations, advanced from the native capture outbox.
 
+mod gc;
 mod verify;
+pub use gc::RawReclaimProgress;
+pub(super) use gc::retained_generations;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -21,6 +24,7 @@ use super::{
 };
 
 pub(super) const INDEX_FEATURE: &str = "continuous-raw-index-v1";
+pub(super) const GC_FEATURE: &str = "continuous-raw-generation-gc-v1";
 pub(super) const MAX_DOMAINS: usize = 1024;
 pub(super) const MAX_TAIL: usize = 128;
 const MAX_INDEX_TERMS: usize = 16_384;
@@ -32,6 +36,11 @@ pub(super) struct IndexState {
     pub active: Option<u64>,
     pub building: Option<u64>,
     pub next: u64,
+    /// Legacy stores retained every generation from one through `next`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained: Option<BTreeSet<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reclaiming: Option<gc::Reclaiming>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -119,18 +128,24 @@ impl NativeService {
             .raw_value(&snapshot, &state_key(&workspace))?
             .unwrap_or_default();
         let auth = self.raw_authorization_epoch(&snapshot, &workspace)?;
+        let mut retained = retained_generations(&state)?;
         let mut next = state.clone();
         let fresh = rebuild || (state.active.is_none() && state.building.is_none());
         let mut generation = if fresh {
             if state.building.is_some() {
                 return Err(super::invalid("a raw generation is already building"));
             }
-            if state.next >= MAX_GENERATIONS {
+            if retained.len() >= MAX_GENERATIONS as usize {
                 return Err(exhausted(
                     "retained raw generation limit reached; maintenance is required",
                 ));
             }
-            next.next += 1;
+            next.next = next
+                .next
+                .checked_add(1)
+                .ok_or_else(|| exhausted("raw generation identity exhausted"))?;
+            retained.insert(next.next);
+            next.retained = Some(retained);
             next.building = Some(next.next);
             Generation {
                 number: next.next,
@@ -268,6 +283,9 @@ impl NativeService {
             ));
         }
         self.enable_raw_index_format(&mut tx)?;
+        if next.retained.is_some() {
+            self.enable_capture_extension(&mut tx, GC_FEATURE)?;
+        }
         for (key, value) in rows {
             budget.check().map_err(budget_error)?;
             tx.put(&self.keyspaces.continuous, key, value)
@@ -539,14 +557,14 @@ pub(super) fn domain_eligibility_keys(
     domain: &str,
     policy: &PolicyDomain,
 ) -> ServiceResult<Vec<Vec<u8>>> {
-    let root = policy
+    // Custody labels are canonicalized by digest, not ancestry. Every label
+    // must authorize the caller, so any scoped label is a valid routing seed.
+    let routing_policy = policy
         .policies
-        .first()
-        .ok_or_else(|| integrity("raw domain has no root policy"))?;
-    if root.scopes.is_empty() {
-        return Err(integrity("raw source domain has no scope"));
-    }
-    Ok(root
+        .iter()
+        .find(|policy| !policy.scopes.is_empty())
+        .ok_or_else(|| integrity("raw domain has no scoped policy"))?;
+    Ok(routing_policy
         .scopes
         .iter()
         .map(|scope| {

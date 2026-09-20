@@ -126,19 +126,14 @@ impl NativeService {
             let state: IndexState = decode(&entry.value, "raw index state")?;
             let workspace = std::str::from_utf8(&entry.key[b"raw/state/".len()..])
                 .map_err(|_| integrity("raw index workspace invalid"))?;
-            if state.next == 0
-                || state.next > MAX_GENERATIONS
-                || state.active == state.building
-                || state
-                    .active
-                    .into_iter()
-                    .chain(state.building)
-                    .any(|number| number == 0 || number > state.next)
+            let retained = retained_generations(&state)?;
+            if (state.retained.is_some() || state.reclaiming.is_some())
+                && !manifest.features.contains(GC_FEATURE)
             {
-                return Err(integrity("raw index generation state invalid"));
+                return Err(integrity("raw reclamation format feature missing"));
             }
             expected.insert(entry.key.clone(), encode(&state)?);
-            for number in 1..=state.next {
+            for number in retained {
                 let generation: Generation = self
                     .raw_value(snapshot, &generation_key(workspace, number))?
                     .ok_or_else(|| integrity("retained raw generation missing"))?;
@@ -155,6 +150,27 @@ impl NativeService {
                     return Err(integrity("raw generation binding invalid"));
                 }
                 expected.insert(generation_key(workspace, number), encode(&generation)?);
+                if state
+                    .reclaiming
+                    .as_ref()
+                    .is_some_and(|job| job.generation == number)
+                {
+                    // This unreachable generation is being discarded, not
+                    // repaired or admitted to queries. Its remaining rows are
+                    // opaque garbage; every usable generation still requires
+                    // complete reconstruction below. No cursor or restart may
+                    // turn this unfinished job back into an active generation.
+                    for row in snapshot
+                        .scan_prefix(
+                            &self.keyspaces.continuous,
+                            generation_prefix(workspace, number).as_bytes(),
+                        )
+                        .map_err(storage_error)?
+                    {
+                        expected.insert(row.key, row.value);
+                    }
+                    continue;
+                }
                 let mut domains = BTreeMap::<String, PolicyDomain>::new();
                 let mut count = 0;
                 let outbox = format!("outbox/{workspace}/");

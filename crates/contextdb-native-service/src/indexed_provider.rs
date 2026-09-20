@@ -225,6 +225,7 @@ impl IndexedRecallProvider for NativeIndexedRecallProvider<'_> {
             .service
             .raw_value(&snapshot, &state_key(&workspace))?
             .unwrap_or_default();
+        super::raw_index::retained_generations(&index)?;
         let generation = if let Some(number) = index.active {
             self.service
                 .raw_value::<Generation, _>(&snapshot, &generation_key(&workspace, number))?

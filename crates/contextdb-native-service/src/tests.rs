@@ -1694,6 +1694,7 @@ fn admin_backup_restores_all_native_keyspaces_into_a_pristine_target_and_reopens
         "policy_first_candidate_recall",
         "policy_first_candidate_traversal",
         "quarantined_memory_proposals",
+        "raw_index_generation_gc",
     ] {
         assert_eq!(
             status.capability_manifest.capability(capability),
@@ -1709,7 +1710,6 @@ fn admin_backup_restores_all_native_keyspaces_into_a_pristine_target_and_reopens
         "native_graph_store",
         "observation_semantic_extraction",
         "physical_deletion_closure",
-        "raw_index_generation_gc",
         "reflect",
         "restore_current_suppression_ledger",
     ] {
