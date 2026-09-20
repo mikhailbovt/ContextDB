@@ -42,7 +42,9 @@ pub use encryption::{
     CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
 };
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
-pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
+pub use payload::{
+    CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS, NativePayloadPruningProgress,
+};
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
 pub use retention::{
     NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt, NativeSourcePruningReceipt,
@@ -321,6 +323,8 @@ struct StoredEvent {
     accepted_removal_preparation: Option<retention::RemovalPreparationPublication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_source_pruning: Option<retention::SourcePruningPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_payload_pruning: Option<payload::PayloadPruningPublication>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -710,6 +714,11 @@ impl NativeService {
             },
             accepted_source_pruning: if operation == "source_prune" {
                 Some(decode(&response_bytes, "source pruning publication")?)
+            } else {
+                None
+            },
+            accepted_payload_pruning: if operation == "payload_prune" {
+                Some(decode(&response_bytes, "payload pruning publication")?)
             } else {
                 None
             },
@@ -3115,6 +3124,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != suppression::SUPPRESSION_FEATURE
                 && feature != retention::RETENTION_FEATURE
                 && feature != retention::PRUNING_FEATURE
+                && feature != payload::PAYLOAD_PRUNING_FEATURE
                 && feature != encryption::ENCRYPTION_FEATURE
         })
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
@@ -3126,6 +3136,9 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || (manifest.features.contains(retention::PRUNING_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
+        || (manifest.features.contains(payload::PAYLOAD_PRUNING_FEATURE)
+            && (!manifest.features.contains(retention::PRUNING_FEATURE)
+                || !manifest.features.contains(payload::SOURCE_FEATURE)))
         || manifest.features.contains(encryption::ENCRYPTION_FEATURE)
             != manifest.custody_authority.is_some()
         || manifest.custody_authority.is_some_and(|id| id.is_nil())

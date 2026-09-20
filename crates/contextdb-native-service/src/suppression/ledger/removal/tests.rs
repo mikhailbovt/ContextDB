@@ -3,6 +3,204 @@ use crate::capture::tests::request;
 use contextdb_service::{CapturePort, CreateBackupRequest, RestoreBackupRequest};
 
 #[test]
+fn payload_membership_pages_reject_shared_blocks_redirects_corruption_and_family_loss() {
+    use contextdb_core::{
+        ContentBlockId, EventKind, EventPayload, EventProvenance, EventRole, ModelCallId,
+        ModelRequestManifest, RequestPart,
+    };
+    use contextdb_service::{Capability, PayloadPort, StagePayloadRequest};
+    let root = tempfile::tempdir().expect("root");
+    let ledger = NativeSuppressionLedger::create(root.path().join("ledger"), "payload-pages")
+        .expect("ledger");
+    let native = NativeService::open_with_suppression(
+        root.path().join("native"),
+        "payload-pages",
+        [7; 32],
+        ledger.clone(),
+    )
+    .expect("native");
+    let mut owner = request(1, "shared owner");
+    let shared = native
+        .stage_payload(StagePayloadRequest {
+            context: owner.context.clone(),
+            idempotency_key: "shared".into(),
+            block_id: ContentBlockId::new(),
+            bytes: vec![42],
+        })
+        .expect("shared")
+        .reference;
+    owner.event.payload = EventPayload::Staged {
+        reference: shared.clone(),
+        media_type: "application/octet-stream".into(),
+    };
+    native
+        .append_event(owner.clone())
+        .expect("independent owner");
+    let mut wire = Vec::new();
+    let mut parts = Vec::new();
+    for index in 0..260 {
+        let bytes = vec![(index % 251) as u8];
+        wire.extend_from_slice(&bytes);
+        let payload = native
+            .stage_payload(StagePayloadRequest {
+                context: owner.context.clone(),
+                idempotency_key: format!("selected-{index}"),
+                block_id: ContentBlockId::new(),
+                bytes,
+            })
+            .expect("selected block")
+            .reference;
+        parts.push(RequestPart::StoredNovel { payload });
+    }
+    parts.push(RequestPart::StoredNovel {
+        payload: shared.clone(),
+    });
+    wire.push(42);
+    let mut call = request(2, "placeholder");
+    let model_call_id = ModelCallId::new();
+    call.context.capability_grants.insert(Capability::Runtime);
+    call.event.kind = EventKind::ModelRequested;
+    call.event.role = EventRole::Host;
+    call.event.provenance = Some(EventProvenance::ModelRequest { model_call_id });
+    call.event.payload = EventPayload::Assembly {
+        manifest: ModelRequestManifest {
+            model_call_id,
+            renderer: "payload-pages/v1".into(),
+            byte_length: wire.len() as u64,
+            wire_digest: ContentDigest::from_bytes(*blake3::hash(&wire).as_bytes()),
+            parts,
+        },
+    };
+    native.append_event(call.clone()).expect("request owner");
+    let mut budget = inventory::verification_budget();
+    let request = native
+        .request_original_removal(
+            &call.context,
+            &BTreeSet::from([call.event.event_id]),
+            "remove request",
+            &mut budget,
+        )
+        .expect("retained request");
+    let workspace = digest_bytes(call.context.request.workspace_id.as_bytes());
+    let checkpoint = RemovalCheckpoint {
+        sequence: request.sequence,
+        digest: request.digest.clone(),
+    };
+    let (_, inventory) = ledger
+        .retained_removal_inventory(&workspace, &checkpoint, &mut budget)
+        .expect("inventory");
+    assert_eq!(inventory.payloads.len(), 260);
+    assert_eq!(inventory.retained_shared_payloads, vec![shared.clone()]);
+    let selected = inventory.payloads.last().expect("last page");
+    assert_eq!(
+        ledger
+            .removal_payload(&workspace, &checkpoint, selected.block_id, &mut budget)
+            .expect("bounded last-page proof"),
+        *selected
+    );
+    assert!(
+        ledger
+            .removal_payload(&workspace, &checkpoint, shared.block_id, &mut budget)
+            .is_err()
+    );
+    let locator = format!(
+        "removal/control/{}/payload/{}",
+        inventory.digest, selected.block_id
+    )
+    .into_bytes();
+    let shared_locator = format!(
+        "removal/control/{}/payload/{}",
+        inventory.digest, shared.block_id
+    )
+    .into_bytes();
+    let page = format!("removal/control/{}/payload-page/00000001", inventory.digest).into_bytes();
+    let snapshot = ledger
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("snapshot");
+    let saved_locator = snapshot
+        .get(&ledger.rows, &locator)
+        .expect("locator")
+        .expect("present");
+    let saved_page = snapshot
+        .get(&ledger.rows, &page)
+        .expect("page")
+        .expect("present");
+    drop(snapshot);
+    let mut tx = ledger.engine.begin_write().expect("tx");
+    tx.put(
+        &ledger.rows,
+        locator.clone(),
+        encode(&0_usize).expect("locator"),
+    )
+    .expect("redirect");
+    tx.put(
+        &ledger.rows,
+        shared_locator.clone(),
+        encode(&0_usize).expect("locator"),
+    )
+    .expect("forge shared target");
+    tx.commit(Durability::Sync).expect("commit");
+    assert!(
+        ledger
+            .removal_payload(&workspace, &checkpoint, selected.block_id, &mut budget)
+            .is_err()
+    );
+    assert!(
+        ledger
+            .removal_payload(&workspace, &checkpoint, shared.block_id, &mut budget)
+            .is_err()
+    );
+    let mut tx = ledger.engine.begin_write().expect("tx");
+    tx.put(&ledger.rows, locator.clone(), saved_locator)
+        .expect("repair locator");
+    tx.delete(&ledger.rows, shared_locator)
+        .expect("repair shared target");
+    let mut changed = saved_page.clone();
+    changed[10] ^= 1;
+    tx.put(&ledger.rows, page.clone(), changed)
+        .expect("corrupt page");
+    tx.commit(Durability::Sync).expect("commit");
+    assert!(
+        ledger
+            .removal_payload(&workspace, &checkpoint, selected.block_id, &mut budget)
+            .is_err()
+    );
+    let mut tx = ledger.engine.begin_write().expect("tx");
+    tx.put(&ledger.rows, page, saved_page).expect("repair page");
+    tx.commit(Durability::Sync).expect("commit");
+    ledger.verify().expect("exact page closure");
+    let snapshot = ledger
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("snapshot");
+    let rows = snapshot
+        .scan_prefix(
+            &ledger.rows,
+            format!("removal/control/{}/payload", inventory.digest).as_bytes(),
+        )
+        .expect("payload pages and locators");
+    drop(snapshot);
+    let mut tx = ledger.engine.begin_write().expect("tx");
+    for row in &rows {
+        tx.delete(&ledger.rows, row.key.clone())
+            .expect("lose family");
+    }
+    tx.commit(Durability::Sync).expect("commit");
+    assert!(
+        ledger.verify().is_err(),
+        "request-bound pages cannot disappear together"
+    );
+    let mut tx = ledger.engine.begin_write().expect("tx");
+    for row in rows {
+        tx.put(&ledger.rows, row.key, row.value)
+            .expect("restore family");
+    }
+    tx.commit(Durability::Sync).expect("commit");
+    ledger.verify().expect("restored exact authority");
+}
+
+#[test]
 fn retained_multi_chunk_inventory_rejects_missing_targets_and_a_rehashed_partial_copy() {
     let root = tempfile::tempdir().expect("root");
     let ledger_path = root.path().join("ledger");

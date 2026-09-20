@@ -175,7 +175,7 @@ impl NativeService {
     }
 }
 
-fn removal_receipt(
+pub(crate) fn removal_receipt(
     ledger: &NativeSuppressionLedger,
     checkpoint: &RemovalCheckpoint,
     intent: &RemovalIntent,

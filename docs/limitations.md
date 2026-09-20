@@ -31,7 +31,9 @@ and release verifier—not the presence of an API name—determine completion.
   retained key inventory and master key. It does not hide record addresses or
   detect rollback of all authorities. CLI/MCP key provisioning, plaintext
   migration, key reclamation, remote authority custody and physical deletion
-  remain open. See [the native profile](architecture/continuous-context.md).
+  remain open. Explicit source/chunk pruning supports interrupted cleanup and
+  restore, but rejects semantic workspaces and cannot yet reopen disclosure with
+  a completed-removal receipt. See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector
   certification shape; E01/E02/E03 remain open.
 - Native Linux x86_64 and Windows x86_64 local-MCP developer previews have distinct

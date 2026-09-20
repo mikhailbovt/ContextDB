@@ -40,6 +40,7 @@ enum Operation {
     Request {
         intent: RemovalIntent,
         source_pages: Vec<ContentDigest>,
+        payload_pages: Vec<ContentDigest>,
     },
 }
 
@@ -214,6 +215,7 @@ impl NativeSuppressionLedger {
             Operation::Request {
                 intent: intent.clone(),
                 source_pages: inventory::source_page_digests(inventory)?,
+                payload_pages: inventory::payload_page_digests(inventory)?,
             },
         )?;
         tx.put(
@@ -422,9 +424,11 @@ impl NativeSuppressionLedger {
             Operation::Request {
                 intent,
                 source_pages,
+                payload_pages,
             } => {
                 self.validate_removal_intent(intent)?;
-                if source_pages.is_empty() || source_pages.len() > 256 {
+                if source_pages.is_empty() || source_pages.len() > 256 || payload_pages.len() > 256
+                {
                     return Err(integrity("retained source page manifest is invalid"));
                 }
             }
@@ -517,6 +521,7 @@ impl NativeSuppressionLedger {
                 Operation::Request {
                     intent,
                     source_pages,
+                    payload_pages,
                 } => {
                     if workspaces.get(&intent.workspace) != Some(&intent.previous)
                         || expected
@@ -535,7 +540,9 @@ impl NativeSuppressionLedger {
                     );
                     let mut budget = inventory::verification_budget();
                     let inventory = self.read_removal_inventory(snapshot, intent, &mut budget)?;
-                    if inventory::source_page_digests(&inventory)? != *source_pages {
+                    if inventory::source_page_digests(&inventory)? != *source_pages
+                        || inventory::payload_page_digests(&inventory)? != *payload_pages
+                    {
                         return Err(integrity(
                             "retained source page manifest differs from inventory",
                         ));

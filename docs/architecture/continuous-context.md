@@ -71,9 +71,10 @@ New captures also bind compact recovery metadata into both the journal and outbo
 coverage and checkpoint control transitions, with digests for arbitrary strings
 and payloads. Verification compares it to the complete original before replaying
 producer, stream, scope and run heads. Activation preserves the legacy prefix;
-subsequent missing metadata fails verification. This prepares explicit retention
-removal without duplicating deleted text; it neither permits a missing original
-nor changes its immutable receipt or the existing logical backup digest.
+subsequent missing metadata fails verification. An explicitly pruned original also
+requires independently retained control commitments and accepted native removal
+publications. Recovery metadata alone never permits a missing body or changes
+the original's immutable receipt.
 
 `inspect_original_deletion` computes captured descendants from the accepted
 journal, including revisions, model/tool/checkpoint inputs and shared staged
@@ -117,6 +118,40 @@ Restore completion acknowledges archive installation; reads stay closed until
 these gates pass. New denials after restore close them again. Independent capture
 can continue, but an externally denied source ID cannot be recaptured. Competing
 native owners compare the external head under its publication owner before append.
+
+Explicit removal has a separate durable request. `request_original_removal`
+retains the complete inspected source inventory and every known descendant-ID
+denial in one external Sync. Version 2 suppression authorities require permanent
+workspace registration and request history; legacy authorities require migration.
+Request-bound pages prove exact source and block membership. Shared novel blocks
+with an independent captured owner are excluded from removal targets.
+
+The current local maintenance sequence is:
+
+1. `prepare_original_removal_sources` validates complete originals and their
+   dependencies, revokes access and retains immutable control commitments.
+2. `maintain_custody`, `project_originals` and `reclaim_raw_generations` propagate
+   restrictions, build a generation omitting prepared sources and discard old copies.
+3. `prune_original_sources` removes up to 256 primary body rows per Sync, retaining
+   exact policy/control commitments and journal-bound tombstones.
+4. `prune_original_payload` removes up to 32 staged chunks (8 MiB) per Sync after
+   all affected primary bodies are pruned. Starting a block checks fresh ownership
+   and its full original, at most 64 MiB; continuation verifies the accepted progress
+   chain and the next batch. The immutable staging header remains available.
+
+Analysis precedes publication; a changed workspace rejects the attempt without
+partial removal. Restart and pristine restore resume the exact accepted progress.
+Missing tombstones, unexplained chunk holes, resurrected data and changed controls
+fail verification. A backup made during cleanup hashes the actual remaining rows
+with the existing deep-digest algorithm; old full archives remain verifiable under
+the retained keys and restore behind current suppression.
+
+This executor is incomplete: primary pruning rejects workspaces with accepted
+semantic or generic-record publications until their copies can be pruned safely.
+No local completion/admission publication exists, so removal requests continue to
+close disclosure. Complete copy inventory, semantic cleanup, key disablement and
+physical/provider/export/backup dispositions remain open. These Rust APIs do not
+claim completed hard deletion or expose a model-facing deletion tool.
 
 `NativeService::open_with_suppression` retains plaintext native values.
 `NativeService::open_encrypted` additionally requires `NativeCustodyKeys` and seals
