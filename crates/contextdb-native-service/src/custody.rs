@@ -46,7 +46,7 @@ struct CustodyState {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Inputs {
+pub(super) struct Inputs {
     sources: BTreeSet<ObservationId>,
     payloads: Vec<OriginalPayloadRef>,
 }
@@ -465,7 +465,7 @@ impl NativeService {
     }
 }
 
-fn inputs(event: &EventEnvelope) -> ServiceResult<Inputs> {
+pub(super) fn inputs(event: &EventEnvelope) -> ServiceResult<Inputs> {
     let mut inputs = Inputs::default();
     // A declared revision is not a declassification grant, even when the host
     // retains full replacement bytes. Safe transformation needs its own proof.

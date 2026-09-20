@@ -36,6 +36,25 @@ pub(super) struct RunHead {
     status: OwnedRunStatus,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CheckpointControl {
+    workspace_id: contextdb_core::WorkspaceId,
+    run_id: AgentRunId,
+    identity_digest: ContentDigest,
+    expected_revision: u64,
+    revision: u64,
+    state_digest: ContentDigest,
+    producer_id: contextdb_core::StreamId,
+    next_sequence: u64,
+    status: OwnedRunStatus,
+}
+
+pub(super) struct RecoveredRunHead {
+    control: CheckpointControl,
+    receipt: CaptureReceipt,
+}
+
 impl OwnedRunPort for NativeService {
     fn save_run_checkpoint(
         &self,
@@ -481,18 +500,81 @@ impl NativeService {
         .map_err(storage_error)
     }
 
-    pub(super) fn replay_checkpoint_head(
+    pub(super) fn replay_checkpoint_control(
         &self,
-        event: &EventEnvelope,
+        control: &CheckpointControl,
         receipt: &CaptureReceipt,
-        heads: &mut BTreeMap<Vec<u8>, RunHead>,
+        heads: &mut BTreeMap<Vec<u8>, RecoveredRunHead>,
     ) -> ServiceResult<()> {
+        if control.workspace_id != receipt.workspace_id
+            || control.revision != control.expected_revision.saturating_add(1)
+        {
+            return Err(integrity(
+                "checkpoint recovery identity or revision differs",
+            ));
+        }
+        let key = head_key(&control.workspace_id.to_string(), control.run_id);
+        let previous = heads.get(&key).map(|head| &head.control);
+        if previous.map_or(0, |head| head.revision) != control.expected_revision
+            || previous.is_some_and(|head| {
+                head.identity_digest != control.identity_digest
+                    || head.producer_id != control.producer_id
+                    || head.status != OwnedRunStatus::Active
+            })
+        {
+            return Err(integrity(
+                "accepted checkpoint history forks or changes its owner",
+            ));
+        }
+        heads.insert(
+            key,
+            RecoveredRunHead {
+                control: control.clone(),
+                receipt: receipt.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    pub(super) fn verify_replayed_checkpoint_heads<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        heads: BTreeMap<Vec<u8>, RecoveredRunHead>,
+    ) -> ServiceResult<BTreeMap<Vec<u8>, Vec<u8>>> {
+        let mut rows = BTreeMap::new();
+        for (key, expected) in heads {
+            let actual: RunHead = decode(
+                &snapshot
+                    .get(&self.keyspaces.continuous, &key)
+                    .map_err(storage_error)?
+                    .ok_or_else(|| integrity("replayed checkpoint head is absent"))?,
+                "replayed checkpoint head",
+            )?;
+            if identity_digest(&actual.identity)? != expected.control.identity_digest
+                || actual.revision != expected.control.revision
+                || actual.state_digest != expected.control.state_digest
+                || actual.receipt != expected.receipt
+                || actual.producer_id != expected.control.producer_id
+                || actual.status != expected.control.status
+            {
+                return Err(integrity(
+                    "checkpoint head differs from accepted control history",
+                ));
+            }
+            rows.insert(key, encode(&actual)?);
+        }
+        Ok(rows)
+    }
+}
+
+impl CheckpointControl {
+    pub(super) fn from_event(event: &EventEnvelope) -> ServiceResult<Option<Self>> {
         let Some(EventProvenance::OwnedCheckpoint {
             expected_revision,
             state_digest,
         }) = event.provenance
         else {
-            return Ok(());
+            return Ok(None);
         };
         let checkpoint = decode_checkpoint(event)?;
         if checkpoint
@@ -510,32 +592,24 @@ impl NativeService {
         {
             return Err(integrity("checkpoint event identity or provenance differs"));
         }
-        let key = head_key(&event.workspace_id.to_string(), checkpoint.identity.run_id);
-        let previous = heads.get(&key);
-        if previous.map_or(0, |head| head.revision) != expected_revision
-            || previous.is_some_and(|head| {
-                head.identity != checkpoint.identity
-                    || head.producer_id != checkpoint.producer_id
-                    || head.status != OwnedRunStatus::Active
-            })
-        {
-            return Err(integrity(
-                "accepted checkpoint history forks or changes its owner",
-            ));
-        }
-        heads.insert(
-            key,
-            RunHead {
-                identity: checkpoint.identity,
-                revision: checkpoint.revision,
-                state_digest,
-                receipt: receipt.clone(),
-                producer_id: checkpoint.producer_id,
-                status: checkpoint.status,
-            },
-        );
-        Ok(())
+        Ok(Some(Self {
+            workspace_id: checkpoint.identity.workspace_id,
+            run_id: checkpoint.identity.run_id,
+            identity_digest: identity_digest(&checkpoint.identity)?,
+            expected_revision,
+            revision: checkpoint.revision,
+            state_digest,
+            producer_id: checkpoint.producer_id,
+            next_sequence: checkpoint.next_sequence,
+            status: checkpoint.status,
+        }))
     }
+}
+
+fn identity_digest(identity: &OwnedRunIdentity) -> ServiceResult<ContentDigest> {
+    Ok(ContentDigest::from_bytes(
+        *blake3::hash(&encode(identity)?).as_bytes(),
+    ))
 }
 
 fn check_identity(

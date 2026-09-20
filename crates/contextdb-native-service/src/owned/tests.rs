@@ -109,7 +109,9 @@ fn checkpoint_reopens_exact_state_and_concurrent_publication_has_one_winner() {
     let service =
         NativeService::open_encrypted(dir.path(), "owned", [7; 32], ledger.clone(), keys.clone())
             .expect("open");
-    let request = fixture(&service);
+    let mut request = fixture(&service);
+    request.checkpoint.model_profile.id = "checkpoint_sentinel_profile_14873".into();
+    request.checkpoint.obligations[0].id = "checkpoint_sentinel_obligation_25874".into();
     let saved = service
         .save_run_checkpoint(request.clone(), &mut budget())
         .expect("checkpoint");
@@ -123,6 +125,26 @@ fn checkpoint_reopens_exact_state_and_concurrent_publication_has_one_winner() {
     service
         .verify_native(true)
         .expect("atomic checkpoint and head");
+    let snapshot = service
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("snapshot");
+    let stored: serde_json::Value = decode(
+        &snapshot
+            .get(
+                &service.keyspaces.continuous,
+                format!("receipt/{}", saved.receipt.event_id).as_bytes(),
+            )
+            .expect("capture record")
+            .expect("present"),
+        "capture record",
+    )
+    .expect("JSON");
+    let metadata = stored["recovery"].to_string();
+    assert!(stored["recovery"]["checkpoint"].is_object());
+    assert!(!metadata.contains("checkpoint_sentinel"));
+    assert!(!metadata.contains("Та самая шутка"));
+    drop(snapshot);
     drop(service);
     let service = Arc::new(
         NativeService::open_encrypted(dir.path(), "owned", [8; 32], ledger, keys).expect("reopen"),
@@ -244,6 +266,56 @@ fn checkpoint_rejects_role_forgery_and_detects_total_run_head_loss() {
         service.verify_native(true).is_err(),
         "missing entire head family must fail deep reconstruction"
     );
+}
+
+#[test]
+fn recovery_control_rejects_checkpoint_owner_and_state_projection_tampering() {
+    let dir = tempfile::tempdir().expect("directory");
+    let service = NativeService::open(dir.path(), "owned", [7; 32]).expect("open");
+    let request = fixture(&service);
+    service
+        .save_run_checkpoint(request.clone(), &mut budget())
+        .expect("checkpoint");
+    let key = head_key(
+        &request.context.request.workspace_id,
+        request.checkpoint.identity.run_id,
+    );
+    let snapshot = service
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("snapshot");
+    let original: RunHead = decode(
+        &snapshot
+            .get(&service.keyspaces.continuous, &key)
+            .expect("head")
+            .expect("present"),
+        "head",
+    )
+    .expect("decode");
+    for damage in ["owner", "state", "revision", "status", "producer"] {
+        let mut changed = original.clone();
+        match damage {
+            "owner" => changed.identity.subject_id = "a-different-owner".into(),
+            "state" => changed.state_digest = ContentDigest::from_bytes([1; 32]),
+            "revision" => changed.revision += 1,
+            "status" => changed.status = OwnedRunStatus::Completed,
+            _ => changed.producer_id = contextdb_core::StreamId::new(),
+        }
+        let mut tx = service.engine.begin_write().expect("write");
+        tx.put(
+            &service.keyspaces.continuous,
+            key.clone(),
+            encode(&changed).expect("head"),
+        )
+        .expect("tamper");
+        tx.commit(contextdb_storage::Durability::Sync)
+            .expect("commit");
+        assert_eq!(
+            service.verify_native(true).expect_err(damage).code,
+            ErrorCode::IntegrityFailure,
+            "{damage}"
+        );
+    }
 }
 
 #[test]

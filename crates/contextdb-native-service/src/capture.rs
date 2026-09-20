@@ -27,6 +27,9 @@ use super::{
 
 pub(super) const CAPTURE_FEATURE: &str = "continuous-capture-v1";
 pub(super) const IMPACT_FEATURE: &str = "continuous-capture-impact-v1";
+use recovery::CaptureRecovery;
+pub(super) use recovery::RECOVERY_FEATURE;
+mod recovery;
 /// Maximum original payload in one synchronized capture transaction.
 pub const CAPTURE_MAX_INLINE_BYTES: usize = 256 * 1024;
 /// Maximum disjoint producer gaps before strict capture applies backpressure.
@@ -48,6 +51,8 @@ struct CaptureRecord {
     affects_scope: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     custody_version: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recovery: Option<CaptureRecovery>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -70,6 +75,23 @@ pub(super) struct CaptureWork {
     pub event_id: ObservationId,
     pub workspace_commit: u64,
     pub event_digest: ContentDigest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_digest: Option<ContentDigest>,
+}
+
+impl CaptureRecord {
+    fn work(&self) -> ServiceResult<CaptureWork> {
+        Ok(CaptureWork {
+            event_id: self.receipt.event_id,
+            workspace_commit: self.receipt.workspace_commit,
+            event_digest: self.receipt.event_digest,
+            recovery_digest: self
+                .recovery
+                .as_ref()
+                .map(CaptureRecovery::digest)
+                .transpose()?,
+        })
+    }
 }
 
 impl CapturePort for NativeService {
@@ -427,6 +449,7 @@ impl NativeService {
             self.enable_request_transform_format(&mut transaction)?;
         }
         let frame = self.begin_frame(&transaction, &request.context.request.workspace_id, false)?;
+        self.enable_capture_recovery(&mut transaction, frame.global_commit)?;
         let mut access = trusted_structured_policy(&request.context.request);
         access.scopes = event.scope_ids.iter().map(ToString::to_string).collect();
         let metadata = BTreeMap::from([
@@ -501,6 +524,7 @@ impl NativeService {
             dependencies: capture_dependencies(&event.payload),
             affects_scope: (!affects_scope).then_some(false),
             custody_version: Some(super::custody::CUSTODY_VERSION),
+            recovery: Some(CaptureRecovery::from_event(event)?),
         };
         transaction
             .put(
@@ -533,11 +557,7 @@ impl NativeService {
             .put(
                 &self.keyspaces.continuous,
                 work_key(&frame.workspace_digest, receipt.workspace_commit),
-                encode(&CaptureWork {
-                    event_id: event.event_id,
-                    workspace_commit: receipt.workspace_commit,
-                    event_digest: receipt.event_digest,
-                })?,
+                encode(&record.work()?)?,
             )
             .map_err(storage_error)?;
         for scope in event.scope_ids.iter().filter(|_| affects_scope) {
@@ -719,7 +739,7 @@ impl NativeService {
                 "a source observation cannot suppress its scope impact",
             ));
         }
-        let receipt = record.receipt;
+        let receipt = &record.receipt;
         let (global, _) = self.select_snapshot(
             snapshot,
             &event.workspace_id.to_string(),
@@ -737,13 +757,18 @@ impl NativeService {
         {
             return Err(integrity("capture receipt and original disagree"));
         }
-        Ok(CapturedOriginal { event, receipt })
+        self.validate_capture_recovery(snapshot, &record, &event, global)?;
+        Ok(CapturedOriginal {
+            event,
+            receipt: record.receipt,
+        })
     }
 
     pub(super) fn verify_capture_records<S: ReadSnapshot>(
         &self,
         snapshot: &S,
     ) -> ServiceResult<()> {
+        let recovery_activation = self.verify_capture_recovery_format(snapshot)?;
         let entries = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"")
             .map_err(storage_error)?
@@ -756,9 +781,13 @@ impl NativeService {
                     && !entry.key.starts_with(b"catalog/")
                     && !entry.key.starts_with(b"custody/")
                     && !entry.key.starts_with(b"suppression/")
+                    && !entry.key.starts_with(b"recovery/")
             })
             .collect::<Vec<_>>();
         if entries.is_empty() {
+            if recovery_activation.is_some() {
+                return Err(integrity("capture recovery format lacks accepted captures"));
+            }
             return Ok(());
         }
         let manifest: Manifest = decode(
@@ -852,7 +881,11 @@ impl NativeService {
                 {
                     return Err(integrity("capture retry binding is invalid"));
                 }
-                accepted.push((record, original.event));
+                let recovery = match &record.recovery {
+                    Some(recovery) => recovery.clone(),
+                    None => CaptureRecovery::from_event(&original.event)?,
+                };
+                accepted.push((record, recovery));
             } else if entry.key.starts_with(b"producer/") {
                 validate_coverage(&decode(&entry.value, "producer coverage")?)?;
             } else if entry.key.starts_with(b"position/") {
@@ -865,9 +898,7 @@ impl NativeService {
                 let work: CaptureWork = decode(&entry.value, "capture outbox")?;
                 let record: CaptureRecord =
                     read_required(snapshot, self, &record_key(work.event_id))?;
-                if work.workspace_commit != record.receipt.workspace_commit
-                    || work.event_digest != record.receipt.event_digest
-                {
+                if work != record.work()? {
                     return Err(integrity("capture outbox binding is invalid"));
                 }
             } else if entry.key.starts_with(b"scope/") {
@@ -888,17 +919,15 @@ impl NativeService {
         let mut streams = BTreeMap::<String, StreamHead>::new();
         let mut scopes = BTreeMap::<Vec<u8>, u64>::new();
         let mut run_heads = BTreeMap::new();
-        for (record, event) in accepted {
-            self.replay_checkpoint_head(&event, &record.receipt, &mut run_heads)?;
-            let workspace = digest_bytes(event.workspace_id.to_string().as_bytes());
-            let work = CaptureWork {
-                event_id: event.event_id,
-                workspace_commit: record.receipt.workspace_commit,
-                event_digest: record.receipt.event_digest,
-            };
+        for (record, recovery) in accepted {
+            if let Some(control) = &recovery.checkpoint {
+                self.replay_checkpoint_control(control, &record.receipt, &mut run_heads)?;
+            }
+            let workspace = digest_bytes(record.receipt.workspace_id.to_string().as_bytes());
+            let work = record.work()?;
             let (global, _) = self.select_snapshot(
                 snapshot,
-                &event.workspace_id.to_string(),
+                &record.receipt.workspace_id.to_string(),
                 Some(work.workspace_commit),
             )?;
             let journal: super::StoredEvent = decode(
@@ -913,15 +942,15 @@ impl NativeService {
                     "capture journal lacks its accepted original reference",
                 ));
             }
-            expected.insert(record_key(event.event_id), encode(&record)?);
+            expected.insert(record_key(record.receipt.event_id), encode(&record)?);
             expected.insert(
                 position_key(&record.producer_key, record.producer_sequence),
-                encode(&event.event_id)?,
+                encode(&record.receipt.event_id)?,
             );
             expected.insert(work_key(&workspace, work.workspace_commit), encode(&work)?);
             let coverage = producers.entry(record.producer_key.clone()).or_default();
             *coverage = advance_coverage(std::mem::take(coverage), record.producer_sequence)?;
-            for scope in event
+            for scope in recovery
                 .scope_ids
                 .iter()
                 .filter(|_| record.affects_scope.unwrap_or(true))
@@ -931,7 +960,7 @@ impl NativeService {
                     work.workspace_commit,
                 );
             }
-            if let Some(stream) = &event.response_stream {
+            if let Some(stream) = &recovery.response_stream {
                 let response = match stream {
                     ResponseStream::Chunk { response_id, .. }
                     | ResponseStream::Finished { response_id, .. } => response_id,
@@ -952,9 +981,7 @@ impl NativeService {
         for (stream, head) in streams {
             expected.insert(stream.into_bytes(), encode(&head)?);
         }
-        for (key, head) in run_heads {
-            expected.insert(key, encode(&head)?);
-        }
+        expected.extend(self.verify_replayed_checkpoint_heads(snapshot, run_heads)?);
         for (scope, epoch) in self.raw_revocation_scope_epochs(snapshot)? {
             let current = scopes.entry(scope).or_default();
             *current = (*current).max(epoch);
@@ -1010,7 +1037,7 @@ impl NativeService {
                 let record: CaptureRecord =
                     read_required(snapshot, self, &record_key(work.event_id))
                         .map_err(|_| integrity("journal capture reference is absent"))?;
-                if record.receipt.event_digest != work.event_digest
+                if record.work()? != *work
                     || record.receipt.workspace_commit != event.workspace_commit
                     || work.workspace_commit != event.workspace_commit
                 {
