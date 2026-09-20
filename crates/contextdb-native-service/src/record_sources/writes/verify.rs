@@ -6,14 +6,27 @@ impl NativeService {
         snapshot: &S,
         event: &StoredEvent,
     ) -> ServiceResult<RecordWriteIntent> {
+        self.budgeted_record_write_intent(snapshot, event, &mut None)
+    }
+
+    pub(super) fn budgeted_record_write_intent<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event: &StoredEvent,
+        budget: &mut Option<&mut QueryBudget>,
+    ) -> ServiceResult<RecordWriteIntent> {
         let reference = event
             .accepted_record_write
             .as_ref()
             .ok_or_else(|| integrity("accepted source intent absent"))?;
-        let bytes = snapshot
-            .get(&self.keyspaces.continuous, &intent_key(event.global_commit))
-            .map_err(storage_error)?
-            .ok_or_else(|| integrity("accepted source intent bytes absent"))?;
+        let bytes = control_bytes(
+            snapshot,
+            &self.keyspaces.continuous,
+            &intent_key(event.global_commit),
+            MAX_INTENT_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("accepted source intent bytes absent"))?;
         let intent: RecordWriteIntent = decode(&bytes, "accepted source intent")?;
         if !is_source_write(&event.operation)
             || event.event_digest != event_digest(event)?
@@ -49,10 +62,14 @@ impl NativeService {
                 .map_err(|_| integrity("accepted source control is invalid"))?;
         }
         let receipt: StoredIdempotency = decode(
-            &snapshot
-                .get(&self.keyspaces.idempotency, &intent.idempotency_key)
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("source-aware write retry receipt absent"))?,
+            &control_bytes(
+                snapshot,
+                &self.keyspaces.idempotency,
+                &intent.idempotency_key,
+                MAX_JSON_BYTES,
+                budget,
+            )?
+            .ok_or_else(|| integrity("source-aware write retry receipt absent"))?,
             "source-aware write retry receipt",
         )?;
         let response: MutationResponse = if event.operation == PROPOSE {
@@ -90,10 +107,7 @@ impl NativeService {
         event: &StoredEvent,
         budget: &mut QueryBudget,
     ) -> ServiceResult<RecordWriteIntent> {
-        let intent = self.record_write_intent(snapshot, event)?;
-        budget
-            .charge(1, encode(&intent)?.len() as u64)
-            .map_err(raw_index::budget_error)?;
+        let intent = self.budgeted_record_write_intent(snapshot, event, &mut Some(budget))?;
         if intent.group.is_some() {
             self.verified_record_group(snapshot, event, &intent, budget)?;
             return Ok(intent);

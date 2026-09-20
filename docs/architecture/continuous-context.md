@@ -170,8 +170,22 @@ reconstructs copied metadata and rejects missing or swapped copy witnesses befor
 transfer. The correction format is explicitly versioned; older groups keep their
 original encoding. Completion retries up to two snapshot conflicts within the
 shared budget, rechecking accepted history without accepting another mutation.
-Automatic pending-work discovery and origin aggregation for longer revision
-chains remain unfinished.
+`pending_record_source_writes` discovers interrupted groups from accepted workspace
+commits in pages of 1..256. `repair_record_source_writes` returns continuation only
+after a complete page has been repaired. Cursors bind the caller, database,
+operation and fixed journal frontier; restore revalidates their history anchors.
+Missing mappings, intents, receipts or completion proofs fail closed. Before
+creating a missing completion, recovery checks later accepted events to reject a
+lost locator for an already completed group. Control reads share the operation's
+work, byte, time and cancellation budget, with bytes charged before decoding.
+
+The owned runtime invokes recovery on start, resume and before each interaction.
+It requires the host's Runtime and Admin grants in a source-aware workspace;
+model output cannot grant them. A bounded process-local cache retains completed
+64-commit pages between attempts. Reopen rechecks accepted history; durable
+checkpoints and measured recovery/backlog limits remain open. Proving a completion
+absent may rescan the later journal after budget exhaustion. Origin aggregation
+for longer revision chains also remains unfinished.
 Legacy workspaces retain their existing behavior. Version 1/2 authorities require
 explicit migration before accepting origins; this API does not perform migration
 or establish that a host's declaration is semantically complete.

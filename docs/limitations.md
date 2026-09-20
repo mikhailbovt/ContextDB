@@ -38,8 +38,11 @@ and release verifier—not the presence of an API name—determine completion.
   workspaces can activate origin requirements before their first record. Explicit
   publication, candidate supersession, correction and retraction support atomic
   source-aware groups and resumable origin transfer. Rewired hierarchy edges
-  retain their copied sources. Automatic recovery discovery and origin aggregation
-  beyond the current 64-source profile remain unfinished.
+  retain their copied sources. The owned runtime automatically discovers and
+  repairs accepted groups under a shared budget. Recovery progress is process-local;
+  restart rescans history, and a missing-completion check may rescan its suffix.
+  Durable progress, measured backlog limits and origin aggregation beyond the
+  current 64-source profile remain unfinished.
   Unclassified records remain unavailable. Generic-record cleanup and
   verified deletion completion that reopens disclosure remain unfinished.
   See [the native profile](architecture/continuous-context.md).

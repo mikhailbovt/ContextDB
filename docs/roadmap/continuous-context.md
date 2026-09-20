@@ -202,5 +202,11 @@ closed. Tests cover actual process exit after partial transfer, concurrent retri
 encrypted pending restore, hidden edges and exact copied-origin closure. Correction
 retains each rewired edge's sources separately from the fully supplied successor;
 tests reject swapped copy witnesses and oversized unions without partial acceptance.
-Host classification remains trusted. Automatic pending-work discovery, larger
-origin ancestry, generic-record pruning and migration remain open.
+Bounded discovery and repair now follow accepted workspace commits. Cursors bind
+authority and history; missing completion locators cannot mint duplicate
+completions. The owned runtime repairs on start, resume and before interaction,
+retaining completed page progress in a bounded process-local cache. Tests cover
+changing frontiers, interleaved workspaces, older encrypted restore, corrupt or
+missing controls, budget interruption, and actual runtime start/reopen/resume.
+Host classification remains trusted. Durable recovery progress, measured backlog
+limits, larger origin ancestry, generic-record pruning and migration remain open.

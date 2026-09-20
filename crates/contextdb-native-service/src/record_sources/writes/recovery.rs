@@ -81,12 +81,15 @@ impl NativeService {
         }
         let intent = self.verified_record_write_intent(&snapshot, &event, budget)?;
         let accepted_world = self.workspace_state(&snapshot, &context.request.workspace_id)?;
-        if let Some(completed) = self.record_write_completion(&snapshot, &event)? {
+        if let Some(completed) =
+            self.budgeted_record_write_completion(&snapshot, &event, &mut Some(&mut *budget))?
+        {
             return Ok(NativeRecordWriteReceipt {
                 commit_seq,
                 completed_at: completed.workspace_commit,
             });
         }
+        self.require_record_completion_absent(&snapshot, &event, &accepted_world, budget)?;
         let ledger = self
             .suppression
             .as_ref()
@@ -125,6 +128,15 @@ impl NativeService {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         let world = self.workspace_state(&snapshot, &context.request.workspace_id)?;
+        if let Some(completed) =
+            self.budgeted_record_write_completion(&snapshot, &event, &mut Some(&mut *budget))?
+        {
+            return Ok(NativeRecordWriteReceipt {
+                commit_seq,
+                completed_at: completed.workspace_commit,
+            });
+        }
+        self.require_record_completion_absent(&snapshot, &event, &world, budget)?;
         let through = self.record_sources_applied(&snapshot, &workspace)?;
         self.verify_record_write_bindings(&intent, &through, budget)?;
         let publication = RecordWriteCompletion {
@@ -146,7 +158,9 @@ impl NativeService {
         });
         let _guard = self.lock_index_publication(budget)?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
-        if let Some(completed) = self.record_write_completion(&tx, &event)? {
+        if let Some(completed) =
+            self.budgeted_record_write_completion(&tx, &event, &mut Some(&mut *budget))?
+        {
             return Ok(NativeRecordWriteReceipt {
                 commit_seq,
                 completed_at: completed.workspace_commit,
@@ -266,22 +280,36 @@ impl NativeService {
         snapshot: &S,
         write: &StoredEvent,
     ) -> ServiceResult<Option<StoredEvent>> {
-        let intent = self.record_write_intent(snapshot, write)?;
-        let Some(bytes) = snapshot
-            .get(
-                &self.keyspaces.continuous,
-                &completion_key(write.global_commit),
-            )
-            .map_err(storage_error)?
+        self.budgeted_record_write_completion(snapshot, write, &mut None)
+    }
+
+    pub(super) fn budgeted_record_write_completion<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        write: &StoredEvent,
+        budget: &mut Option<&mut QueryBudget>,
+    ) -> ServiceResult<Option<StoredEvent>> {
+        let intent = self.budgeted_record_write_intent(snapshot, write, budget)?;
+        let Some(bytes) = control_bytes(
+            snapshot,
+            &self.keyspaces.continuous,
+            &completion_key(write.global_commit),
+            MAX_JSON_BYTES,
+            budget,
+        )?
         else {
             return Ok(None);
         };
         let marker: CompletedWrite = decode(&bytes, "record write completion marker")?;
         let event: StoredEvent = decode(
-            &snapshot
-                .get(&self.keyspaces.events, &marker.global_commit.to_be_bytes())
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("record write completion event absent"))?,
+            &control_bytes(
+                snapshot,
+                &self.keyspaces.events,
+                &marker.global_commit.to_be_bytes(),
+                MAX_JSON_BYTES,
+                budget,
+            )?
+            .ok_or_else(|| integrity("record write completion event absent"))?,
             "record write completion event",
         )?;
         if event.schema_version != SCHEMA_VERSION
@@ -310,7 +338,8 @@ impl NativeService {
         {
             return Err(integrity("record write completion is not journal-bound"));
         }
-        let applied = self.record_sources_applied(snapshot, &write.workspace_digest)?;
+        let applied =
+            self.budgeted_record_sources_applied(snapshot, &write.workspace_digest, budget)?;
         if applied.epoch < marker.publication.through.epoch
             || (applied.epoch == marker.publication.through.epoch
                 && applied != marker.publication.through)

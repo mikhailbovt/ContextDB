@@ -32,8 +32,9 @@ mod raw_index;
 mod record_journal;
 mod record_sources;
 pub use record_sources::{
-    NativeRecordSourceProgress, NativeRecordSourceReceipt, NativeRecordSourceWorkspaceReceipt,
-    NativeRecordWriteReceipt,
+    NativePendingRecordWrites, NativeRecordSourceProgress, NativeRecordSourceReceipt,
+    NativeRecordSourceWorkspaceReceipt, NativeRecordWriteReceipt,
+    NativeRecordWriteRecoveryProgress,
 };
 mod retention;
 mod suppression;
@@ -383,6 +384,7 @@ pub struct NativeService {
     lease_started: std::time::Instant,
     lease_instance: uuid::Uuid,
     suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
+    record_write_recovery: Mutex<record_sources::writes::RecoveryCache>,
 }
 
 impl fmt::Debug for NativeService {
@@ -469,6 +471,7 @@ impl NativeService {
             lease_started: std::time::Instant::now(),
             lease_instance: contextdb_core::ObservationId::new().as_uuid(),
             suppression,
+            record_write_recovery: Mutex::default(),
         };
         service.install_or_verify_manifest()?;
         service.verify_native(false)?;

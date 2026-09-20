@@ -27,6 +27,7 @@ zeroize.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+contextdb-agent-runtime.workspace = true
 contextdb-capture.workspace = true
 contextdb-chat = { workspace = true, features = ["service-adapter"] }
 tempfile.workspace = true

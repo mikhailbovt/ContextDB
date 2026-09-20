@@ -4,13 +4,44 @@
 use super::*;
 use contextdb_core::ContentDigest;
 
+mod discovery;
 mod groups;
 mod recovery;
 #[cfg(test)]
 mod tests;
 mod verify;
 
+pub(crate) use discovery::RecoveryCache;
+pub use discovery::{NativePendingRecordWrites, NativeRecordWriteRecoveryProgress};
 pub(crate) use groups::GroupRequest;
+
+// Control metadata is charged before decoding. Ordinary reads use the same
+// verifiers without an administrative recovery budget.
+pub(super) fn control_bytes<S: ReadSnapshot>(
+    snapshot: &S,
+    keyspace: &Keyspace,
+    key: &[u8],
+    max_bytes: usize,
+    budget: &mut Option<&mut QueryBudget>,
+) -> ServiceResult<Option<Vec<u8>>> {
+    if let Some(budget) = budget.as_deref_mut() {
+        budget.charge(1, 0).map_err(raw_index::budget_error)?;
+    }
+    let bytes = snapshot.get(keyspace, key).map_err(storage_error)?;
+    if let Some(bytes) = &bytes {
+        if let Some(budget) = budget.as_deref_mut() {
+            budget
+                .charge(0, bytes.len() as u64)
+                .map_err(raw_index::budget_error)?;
+        }
+        if bytes.len() > max_bytes {
+            return Err(integrity(
+                "record recovery control exceeds its format bound",
+            ));
+        }
+    }
+    Ok(bytes)
+}
 
 pub(crate) const WRITE_FEATURE: &str = "continuous-record-source-writes-v1";
 const COMPLETE: &str = "record_write_complete";

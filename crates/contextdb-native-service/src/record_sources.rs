@@ -11,7 +11,9 @@ pub(crate) const FEATURE: &str = "continuous-record-sources-v1";
 mod registration;
 pub use registration::NativeRecordSourceWorkspaceReceipt;
 pub(crate) mod writes;
-pub use writes::NativeRecordWriteReceipt;
+pub use writes::{
+    NativePendingRecordWrites, NativeRecordWriteReceipt, NativeRecordWriteRecoveryProgress,
+};
 
 /// Durable host declaration of one record revision's captured origins.
 /// This is an authority receipt, not a native commit or deletion receipt.
@@ -340,25 +342,39 @@ impl NativeService {
         snapshot: &S,
         workspace: &str,
     ) -> ServiceResult<RecordSourcesCheckpoint> {
+        self.budgeted_record_sources_applied(snapshot, workspace, &mut None)
+    }
+
+    fn budgeted_record_sources_applied<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+        budget: &mut Option<&mut QueryBudget>,
+    ) -> ServiceResult<RecordSourcesCheckpoint> {
         let ledger = self
             .suppression
             .as_ref()
             .ok_or_else(|| integrity("record source authority absent"))?;
-        let Some(bytes) = snapshot
-            .get(&self.keyspaces.continuous, &applied_key(workspace))
-            .map_err(storage_error)?
+        let Some(bytes) = writes::control_bytes(
+            snapshot,
+            &self.keyspaces.continuous,
+            &applied_key(workspace),
+            MAX_JSON_BYTES,
+            budget,
+        )?
         else {
             return ledger.record_sources_genesis(workspace);
         };
         let applied: Applied = decode(&bytes, "applied record origins")?;
         let event: StoredEvent = decode(
-            &snapshot
-                .get(
-                    &self.keyspaces.events,
-                    &applied.native_global_commit.to_be_bytes(),
-                )
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("record provenance application absent"))?,
+            &writes::control_bytes(
+                snapshot,
+                &self.keyspaces.events,
+                &applied.native_global_commit.to_be_bytes(),
+                MAX_JSON_BYTES,
+                budget,
+            )?
+            .ok_or_else(|| integrity("record provenance application absent"))?,
             "record provenance application",
         )?;
         if event.operation != "record_sources_reconcile"

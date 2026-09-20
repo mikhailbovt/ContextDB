@@ -46,6 +46,16 @@ pub struct RunCaptureTail {
 
 /// Embedded operational-state port; transport adapters cannot mint its authority.
 pub trait OwnedRunPort: Send + Sync {
+    /// Recover already accepted record handoffs before starting/resuming a run
+    /// or preparing another interaction. This must not republish memory or relax
+    /// source policy. Backends require their administrative host grants; partial
+    /// work remains resumable when the shared budget or cancellation stops it.
+    fn recover_record_writes(
+        &self,
+        context: &AuthenticatedRequestContext,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()>;
+
     /// Publish the captured checkpoint and compare-and-swap run head together.
     fn save_run_checkpoint(
         &self,

@@ -633,6 +633,14 @@ impl PayloadPort for LostOutputAcknowledgement {
     }
 }
 impl OwnedRunPort for LostOutputAcknowledgement {
+    fn recover_record_writes(
+        &self,
+        context: &AuthenticatedRequestContext,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        self.owner.recover_record_writes(context, budget)
+    }
+
     fn save_run_checkpoint(
         &self,
         request: SaveRunCheckpointRequest,
