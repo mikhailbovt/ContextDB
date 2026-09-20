@@ -18,7 +18,7 @@ native or model acceptance.
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Merged in #9; all eight CI jobs passed; reader/cache acceptance remains open |
 | 08 | Atomic lease admission, invalidation and action fences | Merged in #10; all eight CI jobs passed; strict transport handoff remains open |
 | 09 | Cache/cost controller and paired runtime evaluation | Merged in #11; all eight CI jobs passed; R0 quality and total monetary benefit remain open |
-| 10 | Restore/revocation, retention, custody and bounded publication | Custody, suppression, encrypted backups and lineage implemented; local source/chunk cleanup verified on Windows; semantic/key/external closure and completion admission remain open |
+| 10 | Restore/revocation, retention, custody and bounded publication | Custody, suppression, encrypted backups and lineage implemented; local source/assertion/chunk cleanup verified on Windows; generic-record/key/external closure and completion admission remain open |
 | 11 | Migration, integrations, demo and release evidence | Planned |
 | 12 | Router replay corpus, contracts and training lineage | Planned |
 | 13 | Measured R1 scorer and optional bounded R2 cascade | Planned |
@@ -163,63 +163,28 @@ summary-generation/embedding overhead and an illustrative losing token-price
 case. Real monetary/energy cost, adaptive-controller benefit, multimodal/streaming
 quality and multi-step task acceptance are not established by this text replay.
 
-The first phase 10 slice propagates access restrictions through model responses,
-tool results and checkpoints. Native fixtures cover a 520-edge conversation,
-restricted scopes, historical index reads, restart and restore during revocation,
-legacy custody migration, concurrent capture/revocation and bounded cancellation.
-FIFO queue fixtures cover ordering, capacity, cancellation and publisher failure.
-The capability manifest identifies available Rust executors and unresolved
-physical deletion.
-The 181 affected runtime/native/service/server tests, workspace Clippy and
-governance validation passed locally; #12 subsequently passed all eight CI jobs.
+Phase 10 propagates access restrictions through model responses, tool results
+and checkpoints, with bounded publication admission and obsolete-index cleanup.
+Current native restore consults an independently retained suppression authority.
+The encrypted profile seals values and v3 archives under separate key custody;
+a durable issued-backup registry survives native restore and lost responses.
+These foundations passed cross-platform CI before their respective merges.
 
-Bounded raw-generation reclamation removes the three-generation lifetime limit.
-Three native scenarios cover ten successive generations, active/build protection,
-obsolete-build abandonment, interrupted cleanup and restore, pinned physical
-views, byte/work limits and invalid cleanup metadata. Originals remain readable;
-the receipts describe logical row reclamation, without claiming physical erasure.
-Scoped routing also tolerates inherited labels with no scope constraint. The 91
-native tests and all eight CI jobs passed before #13 merged.
+Removal requests retain complete captured-source lineage, including shared owners
+and independently owned novel blocks that must survive. Cleanup prepares source
+controls, rebuilds and reclaims raw indexes, removes source-supported assertions
+from mixed batches, then prunes primary bodies and staged chunks. Independent
+semantic mutations remain byte-exact. Control metadata preserves replay and
+negative relationships without retaining removed values or envelopes. Old full,
+partially pruned and cleaned archives verify their actual remaining logical rows
+and restore behind current suppression.
 
-Bound native restore now consults a separately retained current suppression
-authority. Native regressions cover an older backup with newer denials, inherited
-restrictions, absent-source ID reuse, pinned views, partial reconciliation,
-real process exit after external Sync, concurrent authority advancement and
-competing native owners. Missing/wrong authority and lost progress fail closed.
-All 97 native tests, workspace Clippy and governance validation passed locally;
-#14 subsequently passed all eight CI jobs. Unbound archives containing captures
-require explicit migration. The local authority is not a remote anti-rollback
-service or a physical-erasure executor.
-
-The optional encrypted native profile seals every value and preserves ciphertext
-in v3 backups. Local tests cover actual file/archive bytes, large payload spans,
-semantic state, checkpoint restart, token-key rotation, current suppression after
-restore, wrong authorities, ciphertext relocation, competing key allocation and
-process exit between key Sync and native publication. Selected reads perform one
-key lookup at inventories of 1, 128 and 4,096 entries. This is bounded logical work,
-not a latency SLO. Host provisioning, plaintext migration, key/copy reclamation
-and full deletion closure remain separate gates.
-
-An independent issued-backup registry synchronizes a content-free registration
-before returning encrypted archives. It survives native restore and response loss,
-rejects registry corruption/loss, and supports bounded revision-bound pages.
-Existing v1 key authorities retain read support; backup issuance requires explicit
-registry migration. Issued archives remain potential external copies until their
-disposition is independently verified; this registry is not a deletion receipt.
-
-Capture recovery metadata binds content-free control state and exact input handles
-to accepted journal entries. Checkpoint reconstruction uses those transitions while
-original validation remains mandatory. The 112 native tests include encrypted
-reopen/restore, shared payload inputs, legacy activation, metadata loss/tampering
-and checkpoint owner/state corruption. Workspace Clippy and governance validation
-pass. Source removal, mixed semantic-batch pruning and deletion-aware archive
-recovery remain open; this change does not establish deletion closure.
-
-Source-deletion inspection now computes the full captured dependency graph from
-accepted journal frames, including older shared owners and independent novel
-blocks that must survive. The 115 native tests cover encrypted reopen/restore,
-model/tool/checkpoint lineage, revoked sources, legacy refusal, a 261-frame paged
-history, missing authority, altered journal acceptance, bounded cancellation and
-concurrent revision. The inspector returns no partial closure or source text.
-Workspace Clippy and governance checks pass. This is an administrative source
-inventory; the remaining copy classes and the removal executor remain open.
+The 134 native tests passed on Windows. Final projection changes also passed all
+21 assertion scenarios; workspace Clippy and governance checks passed. Fixtures
+cover actual partial restart, overlapping removal requests, shared blocks, mixed
+semantic batches, supersession/retraction targets, original receipt retries,
+missing controls, resurrected content and concurrent publication. This is local
+logical-copy cleanup, not physical or key erasure. Generic-record cleanup,
+complete copy inventory, old-replica reconciliation, verified local completion,
+key disablement and external-copy dispositions remain open. Disclosure stays
+closed after a removal request until a verified completion executor exists.

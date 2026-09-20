@@ -14,6 +14,7 @@
 #[cfg(test)]
 mod adapter_tests;
 mod assertions;
+pub use assertions::NativeAssertionPruningReceipt;
 mod backup;
 mod capture;
 mod custody;
@@ -325,6 +326,8 @@ struct StoredEvent {
     accepted_source_pruning: Option<retention::SourcePruningPublication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_payload_pruning: Option<payload::PayloadPruningPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_assertion_pruning: Option<assertions::AssertionPruningPublication>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -719,6 +722,11 @@ impl NativeService {
             },
             accepted_payload_pruning: if operation == "payload_prune" {
                 Some(decode(&response_bytes, "payload pruning publication")?)
+            } else {
+                None
+            },
+            accepted_assertion_pruning: if operation == "assertion_prune" {
+                Some(decode(&response_bytes, "assertion pruning publication")?)
             } else {
                 None
             },
@@ -3119,6 +3127,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != raw_index::GC_FEATURE
                 && feature != raw_index::REMOVAL_FEATURE
                 && feature != assertions::STATE_FEATURE
+                && feature != assertions::PRUNING_FEATURE
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
                 && feature != suppression::SUPPRESSION_FEATURE
@@ -3136,6 +3145,9 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || (manifest.features.contains(retention::PRUNING_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
+        || (manifest.features.contains(assertions::PRUNING_FEATURE)
+            && (!manifest.features.contains(retention::RETENTION_FEATURE)
+                || !manifest.features.contains(assertions::STATE_FEATURE)))
         || (manifest.features.contains(payload::PAYLOAD_PRUNING_FEATURE)
             && (!manifest.features.contains(retention::PRUNING_FEATURE)
                 || !manifest.features.contains(payload::SOURCE_FEATURE)))

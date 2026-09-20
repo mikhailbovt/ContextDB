@@ -44,8 +44,8 @@ pub struct NativeSourcePruningReceipt {
 
 impl NativeService {
     /// Remove 1..256 primary body rows after verified preparation and raw-copy
-    /// reclamation. The current implementation requires semantic cleanup first;
-    /// a workspace with accepted semantic publications is explicitly rejected.
+    /// reclamation. Affected assertions must be pruned first. Workspaces with
+    /// generic-record publications still require a separate cleanup executor.
     /// All other retention gates remain closed after this operation.
     pub fn prune_original_sources(
         &self,
@@ -97,7 +97,16 @@ impl NativeService {
             return Err(removal_pending());
         }
         self.require_custody_rebuilt(&snapshot, &workspace)?;
-        self.require_primary_pruning_semantics_ready(&snapshot, &workspace, budget)?;
+        self.require_primary_pruning_semantics_ready(
+            &snapshot,
+            &workspace,
+            &closure
+                .sources
+                .iter()
+                .map(|source| source.receipt.event_id)
+                .collect(),
+            budget,
+        )?;
         for source in &closure.sources {
             let id = source.receipt.event_id;
             if ledger.removal_source(&workspace, &request, id, budget)? != *source
@@ -417,12 +426,13 @@ impl NativeService {
         Ok(policy)
     }
 
-    // This gate is deliberately explicit until accepted semantic bodies have a
-    // prunable representation. It must be replaced by real per-copy cleanup.
+    // Semantic originals may disappear only after every affected mutation has
+    // a verified pruned representation. Generic record cleanup remains separate.
     fn require_primary_pruning_semantics_ready<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
+        sources: &BTreeSet<ObservationId>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         let mut after = None;
@@ -443,11 +453,9 @@ impl NativeService {
                     .charge(1, row.value.len() as u64)
                     .map_err(raw_index::budget_error)?;
                 let event: StoredEvent = decode(&row.value, "primary pruning semantic inventory")?;
-                if event.workspace_digest == workspace
-                    && (event.accepted_assertions.is_some() || !event.accepted_records.is_empty())
-                {
+                if event.workspace_digest == workspace && !event.accepted_records.is_empty() {
                     return Err(unsupported(
-                        "primary pruning requires semantic-copy cleanup, which is not yet implemented",
+                        "primary pruning requires generic-record copy cleanup, which is not yet implemented",
                     ));
                 }
                 after = Some(row.key);
@@ -455,6 +463,14 @@ impl NativeService {
             if page.continuation.is_none() {
                 break;
             }
+        }
+        if !self
+            .verify_assertion_records_budget(snapshot, budget)?
+            .is_disjoint(sources)
+        {
+            return Err(unsupported(
+                "prune source-supported assertion copies before primary originals",
+            ));
         }
         Ok(())
     }

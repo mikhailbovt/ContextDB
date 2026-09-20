@@ -132,9 +132,15 @@ The current local maintenance sequence is:
    dependencies, revokes access and retains immutable control commitments.
 2. `maintain_custody`, `project_originals` and `reclaim_raw_generations` propagate
    restrictions, build a generation omitting prepared sources and discard old copies.
-3. `prune_original_sources` removes up to 256 primary body rows per Sync, retaining
+3. `prune_source_assertions` removes affected assertions and retractions from one
+   accepted batch, preserving independent mutations and the original receipt.
+   Journal-bound controls retain IDs, evidence offsets/hashes and negative
+   relationships without values or envelopes. Explicit host authority policies
+   remain schema configuration. Pruned labels permanently report unavailable
+   support, so an erased negative transition cannot revive an old current value.
+4. `prune_original_sources` removes up to 256 primary body rows per Sync, retaining
    exact policy/control commitments and journal-bound tombstones.
-4. `prune_original_payload` removes up to 32 staged chunks (8 MiB) per Sync after
+5. `prune_original_payload` removes up to 32 staged chunks (8 MiB) per Sync after
    all affected primary bodies are pruned. Starting a block checks fresh ownership
    and its full original, at most 64 MiB; continuation verifies the accepted progress
    chain and the next batch. The immutable staging header remains available.
@@ -146,10 +152,10 @@ fail verification. A backup made during cleanup hashes the actual remaining rows
 with the existing deep-digest algorithm; old full archives remain verifiable under
 the retained keys and restore behind current suppression.
 
-This executor is incomplete: primary pruning rejects workspaces with accepted
-semantic or generic-record publications until their copies can be pruned safely.
+This executor is incomplete: primary pruning rejects affected live assertions
+and workspaces with generic-record publications that still require copy cleanup.
 No local completion/admission publication exists, so removal requests continue to
-close disclosure. Complete copy inventory, semantic cleanup, key disablement and
+close disclosure. Complete copy inventory, generic-record cleanup, key disablement and
 physical/provider/export/backup dispositions remain open. These Rust APIs do not
 claim completed hard deletion or expose a model-facing deletion tool.
 

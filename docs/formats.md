@@ -61,9 +61,12 @@ the same ordered row framing carries authenticated ciphertext and an exact key
 authority ID. It requires the retained external key inventory, master key and
 current suppression ledger; none is imported from the backup. Logical closure
 is verified through a decoding view before restoring a pristine encrypted target.
-Explicit source and payload pruning have separate manifest features and accepted
-journal records. Their tombstones and chunk progress permit only the declared
-missing bodies; the deep digest still hashes every actual remaining row. A partial
+Explicit source, assertion and payload pruning have separate manifest features
+and accepted journal records. Assertion pruning retains independent mutations in
+a distinct representation, bound to the original receipt and accepted control
+hashes; it never claims rewritten bytes have the old full-batch digest. Tombstones
+and chunk progress permit only declared missing bodies. The deep digest still
+hashes every actual remaining row. A partial
 cleanup archive is not a completion receipt or evidence of physical erasure.
 The header and record addresses are visible; the format does not claim signatures,
 physical erasure or production host key custody. See the
