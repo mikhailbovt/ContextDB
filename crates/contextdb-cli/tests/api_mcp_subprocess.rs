@@ -618,21 +618,32 @@ fn unix_mcp_broker_socket_is_owner_only_and_removed_after_shutdown() {
         rustix::process::geteuid().as_raw()
     );
 
-    let sockets = std::fs::read_dir(&broker_directory)
+    let entries = std::fs::read_dir(&broker_directory)
         .expect("broker directory")
         .map(|entry| entry.expect("broker directory entry").path())
-        .collect::<Vec<_>>();
-    assert_eq!(sockets.len(), 1);
+        .collect::<BTreeSet<_>>();
     let socket = expected_runtime_socket(&authority, &archive);
-    assert_eq!(sockets.into_iter().next().expect("broker socket"), socket);
+    let lock = socket.with_extension("lock");
+    assert_eq!(entries, BTreeSet::from([socket.clone(), lock.clone()]));
     let metadata = std::fs::symlink_metadata(&socket).expect("broker socket metadata");
     assert!(metadata.file_type().is_socket());
     assert_eq!(metadata.mode() & 0o777, 0o600);
     assert_eq!(metadata.uid(), rustix::process::geteuid().as_raw());
+    let lock_metadata = std::fs::symlink_metadata(&lock).expect("broker ownership metadata");
+    assert!(lock_metadata.is_file());
+    assert_eq!(lock_metadata.mode() & 0o777, 0o600);
+    assert_eq!(lock_metadata.uid(), rustix::process::geteuid().as_raw());
+    assert_eq!(lock_metadata.nlink(), 1);
 
     stop_memory_mcp(binary, &authority, &archive);
     broker.wait_for_exit();
     assert!(!socket.exists(), "broker shutdown must unlink its socket");
+    assert_eq!(
+        std::fs::symlink_metadata(lock)
+            .expect("persistent ownership inode")
+            .ino(),
+        lock_metadata.ino()
+    );
 }
 
 #[cfg(unix)]
@@ -994,6 +1005,7 @@ fn unix_mcp_broker_concurrent_cold_autostarts_share_one_tmp_fallback_owner() {
 #[cfg(unix)]
 #[test]
 fn unix_mcp_broker_concurrent_autostarts_share_one_authenticated_owner() {
+    use std::os::unix::fs::FileTypeExt;
     use std::sync::{Arc, Barrier};
 
     const SESSIONS: usize = 8;
@@ -1049,11 +1061,15 @@ fn unix_mcp_broker_concurrent_autostarts_share_one_authenticated_owner() {
     }
 
     let broker_directory = authority.runtime_broker_directory();
+    let sockets = std::fs::read_dir(broker_directory)
+        .expect("broker directory")
+        .map(|entry| entry.expect("broker directory entry"))
+        .filter(|entry| entry.file_type().expect("broker entry type").is_socket())
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
     assert_eq!(
-        std::fs::read_dir(broker_directory)
-            .expect("broker directory")
-            .count(),
-        1,
+        sockets,
+        vec![expected_runtime_socket(&authority, &archive)],
         "simultaneous autostarts must converge on exactly one socket owner"
     );
     stop_memory_mcp(binary, &authority, &archive);

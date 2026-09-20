@@ -40,6 +40,11 @@ use crate::{
     mcp_session_authority, read_external_key, state_head,
 };
 
+#[cfg(unix)]
+mod unix_endpoint;
+#[cfg(unix)]
+use unix_endpoint::EndpointOwner;
+
 const BROKER_SCHEMA_VERSION: u16 = 1;
 #[cfg(windows)]
 const BROKER_PIPE_PREFIX: &str = r"\\.\pipe\contextdb-mcp-broker-v1-";
@@ -150,6 +155,11 @@ pub(crate) fn run_broker(path: &Path, reference: bool) -> CliResult<()> {
     let canonical_path = state_head::canonical_archive_path(path).map_err(CliError::from)?;
     let pipe_id = state_head::path_digest(&canonical_path);
     let pipe_name = endpoint_name(&canonical_path, &pipe_id)?;
+    // bind(2) publishes a Unix socket before listen(2) can accept connections.
+    // Claim ownership first so another starter cannot mistake that interval
+    // for a stale endpoint, unlink it, and connect clients to a losing owner.
+    #[cfg(unix)]
+    let endpoint_owner = EndpointOwner::claim(&pipe_name).map_err(CliError::from)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -160,7 +170,11 @@ pub(crate) fn run_broker(path: &Path, reference: bool) -> CliResult<()> {
     // contending on the state-head or Fjall locks.
     let first_server = {
         let _runtime = runtime.enter();
-        create_server(&pipe_name, true).map_err(CliError::from)?
+        #[cfg(windows)]
+        let server = create_server(&pipe_name, true);
+        #[cfg(unix)]
+        let server = create_server(&pipe_name, &endpoint_owner);
+        server.map_err(CliError::from)?
     };
     #[cfg(unix)]
     let socket_cleanup = UnixSocketGuard::new(&pipe_name).map_err(CliError::from)?;
@@ -189,6 +203,10 @@ pub(crate) fn run_broker(path: &Path, reference: bool) -> CliResult<()> {
     drop(runtime);
     #[cfg(unix)]
     drop(socket_cleanup);
+    // A successful stop's state-head probe must also imply that a new broker
+    // can claim the endpoint. Release its guard before the durable authority.
+    #[cfg(unix)]
+    drop(endpoint_owner);
     drop(service);
     result
 }
@@ -708,7 +726,7 @@ fn create_server(pipe_name: &str, first: bool) -> io::Result<BrokerListener> {
 }
 
 #[cfg(unix)]
-fn create_server(socket_name: &str, _first: bool) -> io::Result<BrokerListener> {
+fn create_server(socket_name: &str, _owner: &EndpointOwner) -> io::Result<BrokerListener> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 
     match fs::symlink_metadata(socket_name) {
@@ -777,6 +795,12 @@ async fn open_client(socket_name: &str) -> io::Result<BrokerClient> {
 fn remove_owned_stale_socket(socket_name: &str) -> io::Result<bool> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
+    let _owner = match EndpointOwner::claim(socket_name) {
+        Ok(owner) => owner,
+        // A live owner may be between bind/listen or listener drop/unlink.
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
+        Err(error) => return Err(error),
+    };
     let original = match fs::symlink_metadata(socket_name) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
@@ -1254,6 +1278,33 @@ fn strip_utf8_bom(bytes: &[u8]) -> &[u8] {
 mod tests {
     use super::*;
     use crate::{McpCapabilityArg, McpClearanceArg};
+
+    #[cfg(unix)]
+    #[test]
+    fn live_endpoint_ownership_prevents_stale_cleanup_during_listener_gaps() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let directory = tempfile::tempdir_in("/tmp").expect("short private fixture path");
+        let socket = directory.path().join("broker.sock");
+        let socket_name = socket.to_str().expect("socket path");
+        let owner = EndpointOwner::claim(socket_name).expect("first owner");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("listener");
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).expect("socket mode");
+        let inode = fs::symlink_metadata(&socket).expect("socket inode").ino();
+        // Dropping the listener before cleanup leaves the same refused-connect
+        // state as a socket whose owner has bound it but has not listened yet.
+        drop(listener);
+        assert!(!remove_owned_stale_socket(socket_name).expect("live owner"));
+        assert_eq!(
+            fs::symlink_metadata(&socket).expect("same socket").ino(),
+            inode
+        );
+
+        drop(owner);
+        assert!(remove_owned_stale_socket(socket_name).expect("crashed owner cleanup"));
+        assert!(!socket.exists());
+        EndpointOwner::claim(socket_name).expect("next owner can start");
+    }
 
     fn test_key(byte: u8) -> TokenKey {
         TokenKey::new([byte; 32]).expect("test token key")
