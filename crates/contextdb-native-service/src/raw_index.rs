@@ -557,14 +557,14 @@ pub(super) fn domain_eligibility_keys(
     domain: &str,
     policy: &PolicyDomain,
 ) -> ServiceResult<Vec<Vec<u8>>> {
-    let root = policy
+    // Custody labels are canonicalized by digest, not ancestry. Every label
+    // must authorize the caller, so any scoped label is a valid routing seed.
+    let routing_policy = policy
         .policies
-        .first()
-        .ok_or_else(|| integrity("raw domain has no root policy"))?;
-    if root.scopes.is_empty() {
-        return Err(integrity("raw source domain has no scope"));
-    }
-    Ok(root
+        .iter()
+        .find(|policy| !policy.scopes.is_empty())
+        .ok_or_else(|| integrity("raw domain has no scoped policy"))?;
+    Ok(routing_policy
         .scopes
         .iter()
         .map(|scope| {

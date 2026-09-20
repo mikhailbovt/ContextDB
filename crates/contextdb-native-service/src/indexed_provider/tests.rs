@@ -20,6 +20,56 @@ fn budget() -> QueryBudget {
     )
 }
 
+#[test]
+fn staged_workspace_payload_is_routable_when_its_unscoped_policy_sorts_first() {
+    let directory = tempfile::tempdir().expect("directory");
+    let service = NativeService::open(directory.path(), "indexed-db", [7; 32]).expect("open");
+    let mut input = crate::capture::tests::request(1, "placeholder");
+    let mut staging = input.context.clone();
+    staging.request.scopes.clear();
+    let payload_policy = crate::trusted_structured_policy(&staging.request);
+    let first_digest = canonical_digest(&payload_policy).expect("policy digest");
+    // Choose a stable scoped policy after the workspace policy in canonical
+    // order. Domain routing must not assume that the original is first.
+    let scope = (2..1024)
+        .find_map(|number| {
+            let scope = ScopeId::from_uuid(uuid::Uuid::from_u128(number)).expect("scope");
+            let mut scoped = payload_policy.clone();
+            scoped.scopes.insert(scope.to_string());
+            (canonical_digest(&scoped).expect("scoped digest") > first_digest).then_some(scope)
+        })
+        .expect("scoped policy sorts after workspace policy");
+    input.context.request.scopes.insert(scope.to_string());
+    input.event.scope_ids = BTreeSet::from([scope]);
+    let staged = service
+        .stage_payload(StagePayloadRequest {
+            context: staging,
+            idempotency_key: "workspace-payload".into(),
+            block_id: ContentBlockId::new(),
+            bytes: b"workspace_payload_sentinel".to_vec(),
+        })
+        .expect("stage independently of source scopes");
+    input.event.payload = contextdb_core::EventPayload::Staged {
+        reference: staged.reference,
+        media_type: "text/plain".into(),
+    };
+    service
+        .append_event(input.clone())
+        .expect("source with inherited payload restriction");
+    project(&service, &input, false);
+    let page = service
+        .recall_originals(request(
+            &input,
+            Some(RawTextQuery::AllTerms("workspace_payload_sentinel".into())),
+        ))
+        .expect("routed candidate");
+    assert_eq!(page.hits.len(), 1);
+    assert_eq!(page.hits[0].source.event_id, input.event.event_id);
+    service
+        .verify_native(true)
+        .expect("canonical labels and scope routing");
+}
+
 fn request(input: &CaptureRequest, text: Option<RawTextQuery>) -> RawRecallRequest {
     RawRecallRequest {
         context: input.context.clone(),
