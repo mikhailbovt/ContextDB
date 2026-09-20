@@ -8,6 +8,9 @@ use contextdb_recall::QueryBudget;
 
 pub(crate) const FEATURE: &str = "continuous-record-sources-v1";
 
+mod registration;
+pub use registration::NativeRecordSourceWorkspaceReceipt;
+
 /// Durable host declaration of one record revision's captured origins.
 /// This is an authority receipt, not a native commit or deletion receipt.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -177,7 +180,7 @@ impl NativeService {
             authority_id: ledger.authority_id(),
             epoch: entry.checkpoint.epoch,
             digest: entry.checkpoint.digest,
-            record_digest: entry.control.record_digest,
+            record_digest: control.record_digest,
             revision,
         })
     }
@@ -220,8 +223,10 @@ impl NativeService {
         self.verify_record_mutations(&snapshot)?;
         let mut scopes = BTreeSet::new();
         for entry in &entries {
-            self.verify_local_record_origin(&snapshot, &entry.control, budget)?;
-            scopes.extend(entry.control.scopes.iter().cloned());
+            if let Some(control) = entry.control.record() {
+                self.verify_local_record_origin(&snapshot, control, budget)?;
+                scopes.extend(control.scopes.iter().cloned());
+            }
         }
         let through = entries
             .last()
@@ -375,12 +380,13 @@ impl NativeService {
                     false,
                 )
             })?;
-        if binding.control.transaction_from != policy.transaction_from {
+        let control = binding.record_control()?;
+        if control.transaction_from != policy.transaction_from {
             return Err(integrity("record provenance refers to another acceptance"));
         }
         self.require_custody_ready(snapshot, &workspace)?;
         let mut policies = Vec::new();
-        for id in binding.control.sources.keys() {
+        for id in control.sources.keys() {
             let source: StoredObservationPolicy = decode(
                 &snapshot
                     .get(
@@ -593,8 +599,10 @@ impl NativeService {
             )?;
             let mut scopes = BTreeSet::new();
             for entry in &entries {
-                self.verify_local_record_origin(snapshot, &entry.control, &mut budget)?;
-                scopes.extend(entry.control.scopes.iter().cloned());
+                if let Some(control) = entry.control.record() {
+                    self.verify_local_record_origin(snapshot, control, &mut budget)?;
+                    scopes.extend(control.scopes.iter().cloned());
+                }
             }
             if entries.last().map(|entry| &entry.checkpoint) != Some(&publication.through)
                 || scopes != publication.scopes

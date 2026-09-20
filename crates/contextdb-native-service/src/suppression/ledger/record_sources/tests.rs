@@ -30,6 +30,140 @@ fn control(workspace: &str, record: &str) -> RecordSourceControl {
 }
 
 #[test]
+fn workspace_registration_has_no_fictitious_record_and_keeps_exact_retries() {
+    let directory = tempfile::tempdir().expect("root");
+    let path = directory.path().join("ledger");
+    let ledger = NativeSuppressionLedger::create(&path, "registration").expect("ledger");
+    let origin = control("workspace-a", "record-a");
+    let registration = ledger
+        .register_record_sources_workspace(&origin.workspace, &mut budget())
+        .expect("register before any record");
+    assert_eq!(registration.epoch, 1);
+    let from = ledger
+        .record_sources_genesis(&origin.workspace)
+        .expect("genesis");
+    let page = ledger
+        .record_sources_batch(&origin.workspace, &from, 256, &mut budget())
+        .expect("registration page");
+    assert_eq!(page.len(), 1);
+    assert!(page[0].control.record().is_none());
+    assert!(
+        ledger
+            .retained_record_sources(&origin.workspace, &origin.record_digest, 1)
+            .expect("record lookup")
+            .is_none()
+    );
+    let other = control("workspace-b", "record-b");
+    ledger
+        .register_record_sources_workspace(&other.workspace, &mut budget())
+        .expect("interleaved independent workspace");
+    let record = ledger
+        .bind_record_origin(&origin, &mut budget())
+        .expect("real record");
+    assert_eq!(record.checkpoint.epoch, 2);
+    assert_eq!(record.global_sequence, 3);
+    assert_eq!(record.previous, registration);
+    // Untagged record declarations retain the original v3 serialization/hash.
+    assert_eq!(
+        encode(&record.control).expect("declaration"),
+        encode(&origin).expect("v3 control")
+    );
+    assert_eq!(
+        record.checkpoint.digest,
+        canonical_digest(&(
+            DOMAIN,
+            &ledger.identity,
+            record.global_sequence,
+            &record.previous_global,
+            &record.previous,
+            record.checkpoint.epoch,
+            &origin,
+        ))
+        .expect("original v3 entry digest")
+    );
+    assert_eq!(
+        ledger
+            .register_record_sources_workspace(&origin.workspace, &mut budget())
+            .expect("retry after later binding"),
+        registration
+    );
+    ledger.verify().expect("mixed registration/binding closure");
+    let authority = ledger.authority_id();
+    drop(ledger);
+    let reopened = NativeSuppressionLedger::open(&path, "registration", authority).expect("reopen");
+    assert_eq!(
+        reopened
+            .register_record_sources_workspace(&origin.workspace, &mut budget())
+            .expect("reopened retry"),
+        registration
+    );
+    assert_eq!(
+        reopened
+            .record_sources_batch(&origin.workspace, &registration, 256, &mut budget())
+            .expect("reopened suffix"),
+        vec![record]
+    );
+}
+
+#[test]
+fn registration_cannot_disappear_or_be_used_as_a_record_locator() {
+    for corruption in ["event", "workspace", "record"] {
+        let directory = tempfile::tempdir().expect("root");
+        let ledger =
+            NativeSuppressionLedger::create(directory.path().join("ledger"), "registration")
+                .expect("ledger");
+        let origin = control("workspace", "record");
+        ledger
+            .register_record_sources_workspace(&origin.workspace, &mut budget())
+            .expect("register");
+        let mut tx = ledger.engine.begin_write().expect("tx");
+        match corruption {
+            "event" => tx
+                .delete(&ledger.rows, entry_key(1))
+                .expect("lose registration"),
+            "workspace" => tx
+                .delete(&ledger.rows, workspace_key(&origin.workspace, 1))
+                .expect("lose index"),
+            _ => tx
+                .put(
+                    &ledger.rows,
+                    record_key(&origin.workspace, &origin.record_digest, 1),
+                    encode(&1_u64).expect("locator"),
+                )
+                .expect("redirect record to registration"),
+        }
+        tx.commit(Durability::Sync).expect("corruption");
+        assert_eq!(
+            ledger
+                .verify()
+                .expect_err("closed registration/index family")
+                .code,
+            ErrorCode::IntegrityFailure
+        );
+        if corruption == "record" {
+            assert_eq!(
+                ledger
+                    .retained_record_sources(&origin.workspace, &origin.record_digest, 1)
+                    .expect_err("registration is not a record declaration")
+                    .code,
+                ErrorCode::IntegrityFailure
+            );
+        } else {
+            let from = ledger
+                .record_sources_genesis(&origin.workspace)
+                .expect("genesis");
+            assert_eq!(
+                ledger
+                    .record_sources_batch(&origin.workspace, &from, 1, &mut budget())
+                    .expect_err("lost registration is not an empty workspace")
+                    .code,
+                ErrorCode::IntegrityFailure
+            );
+        }
+    }
+}
+
+#[test]
 fn retained_origins_are_bounded_interleaved_exact_and_loss_detectable() {
     let directory = tempfile::tempdir().expect("root");
     let ledger = NativeSuppressionLedger::create(directory.path().join("ledger"), "record-ledger")

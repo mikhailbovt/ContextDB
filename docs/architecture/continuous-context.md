@@ -136,7 +136,13 @@ page contains at most 256 entries and 384 KiB; native application compares the
 workspace before one Sync. Applied progress is journal-bound and advances the
 declared record scopes. Whole registry loss is an error, including at reopen.
 
-Once origins are declared in a workspace, unclassified record revisions are
+`initialize_record_sources` activates these requirements before the first generic
+record. It checks accepted workspace history and policy projections within a
+budget, then compares the workspace before external Sync. Captured history may
+already exist; existing generic records require explicit migration. Registration
+is a separate journal control and preserves existing v3 record-binding bytes.
+
+Once a workspace is activated, unclassified record revisions are
 unavailable. Get, timeline, candidate/ordinary recall, traversal and ContextPack
 reads apply current original and inherited custody policies before loading record
 bodies. Independent records remain available after ordinary source revocation.

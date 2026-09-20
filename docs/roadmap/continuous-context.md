@@ -179,7 +179,7 @@ negative relationships without retaining removed values or envelopes. Old full,
 partially pruned and cleaned archives verify their actual remaining logical rows
 and restore behind current suppression.
 
-The 140 native tests passed on Windows. Fixtures
+The 144 native tests passed on Windows. Fixtures
 cover actual partial restart, overlapping removal requests, shared blocks, mixed
 semantic batches, supersession/retraction targets, original receipt retries,
 missing controls, resurrected content and concurrent publication. This is local
@@ -192,6 +192,8 @@ Retained record origins now prevent an old native archive from losing later
 source-policy bindings. Tests include encrypted old/partial/current restore,
 records absent from an early archive, denial before decoding damaged bodies,
 independent recall, actual process exit after external Sync, interrupted catch-up,
-registry loss and genuine version 2 compatibility. Declarations require trusted
-host classification; source-aware mutation ports, generic-record pruning and
-authority migration remain unfinished.
+registry loss and genuine version 2 compatibility. Empty record workspaces can
+activate retained origin requirements before their first record, with exact retry,
+old-archive catch-up and a publication fence against concurrent legacy writes.
+Declarations require trusted host classification; source-aware mutation ports,
+generic-record pruning and authority migration remain unfinished.

@@ -31,7 +31,9 @@ mod raw;
 mod raw_index;
 mod record_journal;
 mod record_sources;
-pub use record_sources::{NativeRecordSourceProgress, NativeRecordSourceReceipt};
+pub use record_sources::{
+    NativeRecordSourceProgress, NativeRecordSourceReceipt, NativeRecordSourceWorkspaceReceipt,
+};
 mod retention;
 mod suppression;
 
@@ -929,8 +931,9 @@ impl NativeService {
                 &policy.record_digest,
                 policy.revision,
             )?
-            && (binding.control.transaction_from != policy.transaction_from
-                || binding.control.document_digest != canonical_digest(&stored.record.document)?)
+            && (binding.record_control()?.transaction_from != policy.transaction_from
+                || binding.record_control()?.document_digest
+                    != canonical_digest(&stored.record.document)?)
         {
             return Err(integrity(
                 "record body differs from retained source provenance",

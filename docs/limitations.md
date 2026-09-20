@@ -34,7 +34,8 @@ and release verifier—not the presence of an API name—determine completion.
   remain open. Explicit source/assertion/chunk pruning supports interrupted
   cleanup and restore, retaining independent assertions and shared blocks.
   Version 3 authorities retain administrator-declared generic-record origins
-  across restore, enforcing current source policies before body reads. New generic
+  across restore, enforcing current source policies before body reads. Empty record
+  workspaces can activate origin requirements before their first record. New generic
   writes in an origin-aware workspace require unfinished source-aware writers;
   unclassified records remain unavailable. Generic-record cleanup and a verified
   completion publication that reopens disclosure remain unfinished.

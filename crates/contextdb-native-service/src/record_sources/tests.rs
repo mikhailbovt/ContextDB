@@ -564,3 +564,211 @@ fn concurrent_capture_cancellation_and_missing_progress_cannot_accept_partial_pr
         ErrorCode::IntegrityFailure
     );
 }
+
+#[test]
+fn empty_record_workspace_registration_survives_encrypted_restore_and_catchup() {
+    let root = tempfile::tempdir().expect("root");
+    let (_ledger_directory, ledger) = suppression::tests::authority("empty-origins");
+    let (_keys_directory, keys) = encryption::tests::authority("empty-origins");
+    let service = NativeService::open_encrypted(
+        root.path().join("native"),
+        "empty-origins",
+        [7; 32],
+        ledger.clone(),
+        keys.clone(),
+    )
+    .expect("native");
+    let first = input(1, "capture before the first generic record");
+    service
+        .append_event(first.clone())
+        .expect("existing captured history");
+    let context = &first.context;
+    let oldest = service
+        .create_backup(CreateBackupRequest {
+            context: context.clone(),
+        })
+        .expect("archive before registration");
+    let receipt = service
+        .initialize_record_sources(context, &mut budget())
+        .expect("initialize");
+    assert_eq!(receipt.epoch, 1);
+    assert_eq!(
+        service
+            .publish_memory(publication(context, "unclassified"))
+            .expect_err("external registration closes the pre-application window")
+            .code,
+        ErrorCode::IndexTooStale
+    );
+    service
+        .append_event(input(2, "capture continues during origin catchup"))
+        .expect("independent capture");
+    let progress = service
+        .maintain_record_sources(context, 1, &mut budget())
+        .expect("apply registration");
+    assert_eq!(
+        (progress.through, progress.processed, progress.caught_up),
+        (1, 1, true)
+    );
+    assert_eq!(
+        service
+            .initialize_record_sources(context, &mut budget())
+            .expect("exact retry"),
+        receipt
+    );
+    assert_eq!(
+        service
+            .publish_memory(publication(context, "unclassified"))
+            .expect_err("ordinary writes cannot bypass captured origins")
+            .code,
+        ErrorCode::Unsupported
+    );
+    assert!(
+        service
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .expect("snapshot")
+            .scan_prefix(&service.keyspaces.content_history, b"")
+            .expect("record history")
+            .is_empty()
+    );
+    service
+        .verify_native(true)
+        .expect("registration with no record payload");
+    let current = service
+        .create_backup(CreateBackupRequest {
+            context: context.clone(),
+        })
+        .expect("registered archive");
+    for (ordinal, archive) in [oldest, current].into_iter().enumerate() {
+        let restored = NativeService::open_encrypted(
+            root.path().join(format!("restore-{ordinal}")),
+            "empty-origins",
+            [7; 32],
+            ledger.clone(),
+            keys.clone(),
+        )
+        .expect("restore target");
+        restored
+            .restore_backup(RestoreBackupRequest {
+                context: context.clone(),
+                format: archive.format,
+                bytes: archive.bytes,
+                digest: archive.digest,
+            })
+            .expect("restore actual archive");
+        assert_eq!(
+            restored
+                .publish_memory(publication(context, "unclassified"))
+                .expect_err("restore never makes an unclassified record visible")
+                .code,
+            if ordinal == 0 {
+                ErrorCode::IndexTooStale
+            } else {
+                ErrorCode::Unsupported
+            }
+        );
+        catch_up(&restored, context);
+        assert_eq!(
+            restored
+                .initialize_record_sources(context, &mut budget())
+                .expect("restored retry"),
+            receipt
+        );
+        restored
+            .verify_native(true)
+            .expect("restored registration closure");
+    }
+}
+
+#[test]
+fn registration_rejects_legacy_records_concurrent_publication_and_lost_history() {
+    let root = tempfile::tempdir().expect("root");
+    let (_directory, ledger) = suppression::tests::authority("registration-race");
+    let service = Arc::new(
+        NativeService::open_with_suppression(
+            root.path().join("native"),
+            "registration-race",
+            [7; 32],
+            ledger.clone(),
+        )
+        .expect("native"),
+    );
+    let first = input(1, "existing captured history");
+    service.append_event(first.clone()).expect("capture");
+    let workspace = digest_bytes(first.context.request.workspace_id.as_bytes());
+    let cancellation = QueryCancellation::default();
+    cancellation.cancel();
+    let mut cancelled = QueryBudget::new(10, 1024 * 1024, Duration::from_secs(30), cancellation);
+    assert!(
+        service
+            .initialize_record_sources(&first.context, &mut cancelled)
+            .is_err()
+    );
+    let writer = service.clone();
+    let publish = publication(&first.context, "racing-record");
+    BEFORE_PUBLICATION.with(|hook| {
+        hook.replace(Some(Box::new(move || {
+            writer
+                .publish_memory(publish)
+                .expect("concurrent legacy publication");
+        })))
+    });
+    assert_eq!(
+        service
+            .initialize_record_sources(&first.context, &mut budget())
+            .expect_err("stale empty-workspace proof")
+            .code,
+        ErrorCode::IndexTooStale
+    );
+    assert!(
+        ledger
+            .current_record_sources(&workspace)
+            .expect("head")
+            .is_none()
+    );
+    assert_eq!(
+        service
+            .initialize_record_sources(&first.context, &mut budget())
+            .expect_err("legacy records need explicit migration")
+            .code,
+        ErrorCode::Unsupported
+    );
+    get(&service, &first.context, "racing-record")
+        .expect("rejected activation preserves legacy behavior");
+
+    // Missing projections cannot erase the accepted fact that a record exists.
+    let mut tx = service.engine.begin_write().expect("tx");
+    tx.delete(
+        &service.keyspaces.policy_history,
+        history_key(&digest_bytes(b"racing-record"), 1),
+    )
+    .expect("lose policy projection");
+    tx.commit(Durability::Sync).expect("corruption");
+    assert_eq!(
+        service
+            .initialize_record_sources(&first.context, &mut budget())
+            .expect_err("accepted history still requires migration")
+            .code,
+        ErrorCode::Unsupported
+    );
+    let mut tx = service.engine.begin_write().expect("tx");
+    tx.delete(
+        &service.keyspaces.workspace_map,
+        workspace_map_key(&workspace, 1),
+    )
+    .expect("lose accepted history locator");
+    tx.commit(Durability::Sync).expect("corruption");
+    assert_eq!(
+        service
+            .initialize_record_sources(&first.context, &mut budget())
+            .expect_err("lost history is not empty history")
+            .code,
+        ErrorCode::IntegrityFailure
+    );
+    assert!(
+        ledger
+            .current_record_sources(&workspace)
+            .expect("no partial registration")
+            .is_none()
+    );
+}

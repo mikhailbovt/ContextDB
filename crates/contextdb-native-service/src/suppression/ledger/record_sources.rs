@@ -28,6 +28,38 @@ pub(crate) struct RecordSourceControl {
     pub sources: BTreeMap<ObservationId, ContentDigest>,
 }
 
+// The untagged record variant preserves the exact existing v3 binding bytes.
+// Registration is a distinct control, never a fictitious record with no origins.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum RecordSourceDeclaration {
+    Record(RecordSourceControl),
+    Workspace(RecordSourceWorkspace),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RecordSourceWorkspace {
+    workspace: String,
+    registration: bool,
+}
+
+impl RecordSourceDeclaration {
+    pub(crate) fn workspace(&self) -> &str {
+        match self {
+            Self::Record(control) => &control.workspace,
+            Self::Workspace(control) => &control.workspace,
+        }
+    }
+
+    pub(crate) fn record(&self) -> Option<&RecordSourceControl> {
+        match self {
+            Self::Record(control) => Some(control),
+            Self::Workspace(_) => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordSourceEntry {
@@ -35,7 +67,15 @@ pub(crate) struct RecordSourceEntry {
     pub previous_global: String,
     pub previous: RecordSourcesCheckpoint,
     pub checkpoint: RecordSourcesCheckpoint,
-    pub control: RecordSourceControl,
+    pub control: RecordSourceDeclaration,
+}
+
+impl RecordSourceEntry {
+    pub(crate) fn record_control(&self) -> ServiceResult<&RecordSourceControl> {
+        self.control
+            .record()
+            .ok_or_else(|| integrity("record locator points to workspace registration"))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -139,7 +179,17 @@ impl NativeSuppressionLedger {
                 .ok_or_else(|| integrity("retained record source entry absent"))?,
             "record source entry",
         )?;
-        validate_control(&entry.control)?;
+        match &entry.control {
+            RecordSourceDeclaration::Record(control) => validate_control(control)?,
+            RecordSourceDeclaration::Workspace(control) => {
+                if !control.registration
+                    || blake3::Hash::from_hex(&control.workspace).is_err()
+                    || entry.previous != self.record_sources_genesis(&control.workspace)?
+                {
+                    return Err(integrity("record workspace registration is invalid"));
+                }
+            }
+        }
         if sequence == 0
             || entry.global_sequence != sequence
             || entry.checkpoint.epoch
@@ -177,10 +227,11 @@ impl NativeSuppressionLedger {
         };
         let sequence: u64 = decode(&bytes, "record source locator")?;
         let entry = self.read_record_source_entry(&snapshot, sequence)?;
+        let control = entry.record_control()?;
         if sequence > head.sequence
-            || entry.control.workspace != workspace
-            || entry.control.record_digest != record
-            || entry.control.revision != revision
+            || control.workspace != workspace
+            || control.record_digest != record
+            || control.revision != revision
             || head
                 .workspaces
                 .get(workspace)
@@ -209,7 +260,7 @@ impl NativeSuppressionLedger {
         if let Some(bytes) = tx.get(&self.rows, &key).map_err(storage_error)? {
             let entry =
                 self.read_record_source_entry(&tx, decode(&bytes, "record source retry")?)?;
-            if entry.control != *control {
+            if entry.record_control()? != control {
                 return Err(invalid(
                     "record revision already has a different retained source declaration",
                 ));
@@ -238,7 +289,7 @@ impl NativeSuppressionLedger {
                 digest: String::new(),
             },
             previous,
-            control: control.clone(),
+            control: RecordSourceDeclaration::Record(control.clone()),
         };
         entry.checkpoint.digest = entry_digest(&self.identity, &entry)?;
         head.sequence = entry.global_sequence;
@@ -269,6 +320,85 @@ impl NativeSuppressionLedger {
                 .durability,
         )?;
         Ok(entry)
+    }
+
+    pub(crate) fn register_record_sources_workspace(
+        &self,
+        workspace: &str,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<RecordSourcesCheckpoint> {
+        if blake3::Hash::from_hex(workspace).is_err() {
+            return Err(invalid("record source workspace digest invalid"));
+        }
+        let _guard = self.writes.enter(|| budget.check().map_err(budget_error))?;
+        let mut tx = self.engine.begin_write().map_err(storage_error)?;
+        let mut head = self.record_sources_head(&tx)?;
+        if head.workspaces.contains_key(workspace) {
+            let sequence: u64 = decode(
+                &tx.get(&self.rows, &workspace_key(workspace, 1))
+                    .map_err(storage_error)?
+                    .ok_or_else(|| integrity("record workspace first entry absent"))?,
+                "record workspace registration",
+            )?;
+            let first = self.read_record_source_entry(&tx, sequence)?;
+            if first.control.workspace() != workspace
+                || first.checkpoint.epoch != 1
+                || first.previous != self.record_sources_genesis(workspace)?
+                || sequence > head.sequence
+            {
+                return Err(integrity("record workspace registration points elsewhere"));
+            }
+            budget
+                .charge(1, encode(&first)?.len() as u64)
+                .map_err(budget_error)?;
+            return Ok(first.checkpoint);
+        }
+        if head.workspaces.len() >= 1024 {
+            return Err(exhausted("retained record source workspace bound exceeded"));
+        }
+        let mut entry = RecordSourceEntry {
+            global_sequence: head
+                .sequence
+                .checked_add(1)
+                .ok_or_else(|| exhausted("record source journal exhausted"))?,
+            previous_global: head.digest,
+            previous: self.record_sources_genesis(workspace)?,
+            checkpoint: RecordSourcesCheckpoint {
+                epoch: 1,
+                digest: String::new(),
+            },
+            control: RecordSourceDeclaration::Workspace(RecordSourceWorkspace {
+                workspace: workspace.to_owned(),
+                registration: true,
+            }),
+        };
+        entry.checkpoint.digest = entry_digest(&self.identity, &entry)?;
+        head.sequence = entry.global_sequence;
+        head.digest = entry.checkpoint.digest.clone();
+        head.workspaces
+            .insert(workspace.to_owned(), entry.checkpoint.clone());
+        head.checksum = head_checksum(&self.identity, &head)?;
+        let encoded = encode(&entry)?;
+        budget
+            .charge(1, encoded.len() as u64)
+            .map_err(budget_error)?;
+        tx.put(&self.rows, entry_key(entry.global_sequence), encoded)
+            .map_err(storage_error)?;
+        tx.put(
+            &self.rows,
+            workspace_key(workspace, 1),
+            encode(&entry.global_sequence)?,
+        )
+        .map_err(storage_error)?;
+        tx.put(&self.rows, HEAD.to_vec(), encode(&head)?)
+            .map_err(storage_error)?;
+        budget.check().map_err(budget_error)?;
+        require_sync(
+            tx.commit(Durability::Sync)
+                .map_err(storage_error)?
+                .durability,
+        )?;
+        Ok(entry.checkpoint)
     }
 
     pub(crate) fn record_sources_batch(
@@ -315,7 +445,7 @@ impl NativeSuppressionLedger {
                 break;
             }
             budget.charge(1, entry_bytes as u64).map_err(budget_error)?;
-            if entry.control.workspace != workspace
+            if entry.control.workspace() != workspace
                 || entry.checkpoint.epoch != epoch
                 || entry.previous != previous
                 || sequence > head.sequence
@@ -344,20 +474,19 @@ impl NativeSuppressionLedger {
         let mut calculated = genesis(&self.identity)?;
         for sequence in 1..=head.sequence {
             let entry = self.read_record_source_entry(snapshot, sequence)?;
+            let workspace = entry.control.workspace().to_owned();
             let previous = calculated
                 .workspaces
-                .get(&entry.control.workspace)
+                .get(&workspace)
                 .cloned()
-                .unwrap_or(self.record_sources_genesis(&entry.control.workspace)?);
-            if entry.previous_global != calculated.digest
-                || entry.previous != previous
-                || expected
+                .unwrap_or(self.record_sources_genesis(&workspace)?);
+            if entry.previous_global != calculated.digest || entry.previous != previous {
+                return Err(integrity("record source workspace journal forks"));
+            }
+            if let Some(control) = entry.control.record()
+                && expected
                     .insert(
-                        record_key(
-                            &entry.control.workspace,
-                            &entry.control.record_digest,
-                            entry.control.revision,
-                        ),
+                        record_key(&workspace, &control.record_digest, control.revision),
                         encode(&sequence)?,
                     )
                     .is_some()
@@ -368,14 +497,12 @@ impl NativeSuppressionLedger {
             }
             expected.insert(entry_key(sequence), encode(&entry)?);
             expected.insert(
-                workspace_key(&entry.control.workspace, entry.checkpoint.epoch),
+                workspace_key(&workspace, entry.checkpoint.epoch),
                 encode(&sequence)?,
             );
             calculated.sequence = sequence;
             calculated.digest = entry.checkpoint.digest.clone();
-            calculated
-                .workspaces
-                .insert(entry.control.workspace, entry.checkpoint);
+            calculated.workspaces.insert(workspace, entry.checkpoint);
         }
         calculated.checksum = head_checksum(&self.identity, &calculated)?;
         if calculated != head {
