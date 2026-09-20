@@ -17,6 +17,7 @@ mod assertions;
 mod backup;
 mod capture;
 mod custody;
+mod encryption;
 mod indexed_provider;
 mod lease;
 mod owned;
@@ -29,9 +30,12 @@ mod raw_index;
 mod record_journal;
 mod suppression;
 
-pub use backup::{NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT};
+pub use backup::{
+    NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NATIVE_ENCRYPTED_BACKUP_FORMAT,
+};
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
+pub use encryption::{CustodyMasterKey, NativeCustodyKeys};
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
@@ -60,7 +64,7 @@ use contextdb_storage::{
     CompactRequest, Durability, Keyspace, ReadSnapshot, ScanPageRequest, SnapshotSelector,
     StorageEngine, VerifyMode, WriteTransaction,
 };
-use contextdb_storage_fjall::FjallStorage;
+use encryption::NativeStorage;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use zeroize::Zeroizing;
 
@@ -88,6 +92,7 @@ const META_EVENT_DIGEST_KEY: &[u8] = b"event-digest/v1";
 
 fn native_capability_manifest(
     external_suppression: bool,
+    encrypted: bool,
 ) -> contextdb_service::CapabilityManifestV1 {
     let mut available = vec![
         "admin_native_logical_backup",
@@ -110,6 +115,9 @@ fn native_capability_manifest(
     ];
     if external_suppression {
         available.push("restore_current_suppression_ledger");
+    }
+    if encrypted {
+        available.push("encrypted_custody_domains");
     }
     service_capability_manifest_v1(PROFILE, &available, &[])
 }
@@ -179,6 +187,8 @@ struct Manifest {
     state_catalogs: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     suppression_authority: Option<uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    custody_authority: Option<uuid::Uuid>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -333,7 +343,7 @@ struct HierarchyRewire {
 
 /// Incremental Fjall-backed implementation of the canonical application service.
 pub struct NativeService {
-    engine: FjallStorage,
+    engine: NativeStorage,
     keyspaces: Keyspaces,
     database_id: String,
     token_key: Zeroizing<[u8; 32]>,
@@ -364,7 +374,7 @@ impl NativeService {
         database_id: impl Into<String>,
         token_key: [u8; 32],
     ) -> ServiceResult<Self> {
-        Self::open_internal(path, database_id.into(), token_key, None)
+        Self::open_internal(path, database_id.into(), token_key, None, None)
     }
 
     fn open_internal(
@@ -372,6 +382,7 @@ impl NativeService {
         database_id: String,
         token_key: [u8; 32],
         suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
+        keys: Option<std::sync::Arc<NativeCustodyKeys>>,
     ) -> ServiceResult<Self> {
         validate_identifier(&database_id, "database ID")?;
         if token_key.iter().all(|byte| *byte == 0) {
@@ -380,7 +391,15 @@ impl NativeService {
         if let Some(ledger) = &suppression {
             ledger.require_database(&database_id)?;
         }
-        let engine = FjallStorage::open(path.as_ref()).map_err(storage_error)?;
+        if let Some(keys) = &keys {
+            keys.require_database(&database_id)?;
+            if suppression.is_none() {
+                return Err(invalid(
+                    "encrypted native storage requires current suppression",
+                ));
+            }
+        }
+        let engine = NativeStorage::open(path.as_ref(), keys).map_err(storage_error)?;
         if let Some(ledger) = &suppression {
             let native_path = path
                 .as_ref()
@@ -389,6 +408,22 @@ impl NativeService {
             if native_path.starts_with(&ledger.path) || ledger.path.starts_with(&native_path) {
                 return Err(invalid(
                     "suppression and native authorities require separate directory trees",
+                ));
+            }
+        }
+        if let Some(keys) = &engine.keys {
+            let native_path = path
+                .as_ref()
+                .canonicalize()
+                .map_err(|_| integrity("native path is unavailable"))?;
+            if native_path.starts_with(&keys.path)
+                || keys.path.starts_with(&native_path)
+                || suppression.as_ref().is_some_and(|ledger| {
+                    ledger.path.starts_with(&keys.path) || keys.path.starts_with(&ledger.path)
+                })
+            {
+                return Err(invalid(
+                    "native, suppression and custody-key authorities require separate directory trees",
                 ));
             }
         }
@@ -428,6 +463,7 @@ impl NativeService {
             let manifest: Manifest = decode(&bytes, "native manifest")?;
             validate_manifest(&manifest, &self.database_id)?;
             self.verify_suppression_binding(&manifest)?;
+            self.verify_encryption_binding(&manifest)?;
             return Ok(());
         }
         if snapshot.sequence() != 0 {
@@ -448,11 +484,17 @@ impl NativeService {
                 .suppression
                 .as_ref()
                 .map(|ledger| ledger.authority_id()),
+            custody_authority: self.engine.keys.as_ref().map(|keys| keys.authority_id()),
         };
         if manifest.suppression_authority.is_some() {
             manifest
                 .features
                 .insert(suppression::SUPPRESSION_FEATURE.into());
+        }
+        if manifest.custody_authority.is_some() {
+            manifest
+                .features
+                .insert(encryption::ENCRYPTION_FEATURE.into());
         }
         manifest.checksum = manifest_checksum(&manifest)?;
         transaction
@@ -1498,7 +1540,10 @@ impl CognitiveMemoryService for NativeService {
             profile: PROFILE.to_owned(),
             commit_seq: state.watermarks.journal,
             watermarks: state.watermarks,
-            capability_manifest: native_capability_manifest(self.suppression.is_some()),
+            capability_manifest: native_capability_manifest(
+                self.suppression.is_some(),
+                self.engine.is_encrypted(),
+            ),
         })
     }
 
@@ -3031,10 +3076,15 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
                 && feature != suppression::SUPPRESSION_FEATURE
+                && feature != encryption::ENCRYPTION_FEATURE
         })
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
             != manifest.suppression_authority.is_some()
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
+        || manifest.features.contains(encryption::ENCRYPTION_FEATURE)
+            != manifest.custody_authority.is_some()
+        || manifest.custody_authority.is_some_and(|id| id.is_nil())
+        || (manifest.custody_authority.is_some() && manifest.suppression_authority.is_none())
         || manifest.state_catalogs.len() > 1024
         || manifest
             .state_catalogs

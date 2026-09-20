@@ -767,12 +767,18 @@ fn semantic_journal_reconstructs_all_derived_rows_and_detects_whole_family_loss(
 #[test]
 fn source_authority_and_lineage_cannot_be_forged_and_backup_preserves_resolution() {
     let (_authority_directory, ledger) = crate::suppression::tests::authority("authority-db");
+    let (_key_directory, keys) = crate::encryption::tests::authority("authority-db");
     use contextdb_service::{CognitiveMemoryService, CreateBackupRequest, RestoreBackupRequest};
     let dir = tempfile::tempdir().expect("source directory");
     let restored_dir = tempfile::tempdir().expect("restore directory");
-    let service =
-        NativeService::open_with_suppression(dir.path(), "authority-db", [14; 32], ledger.clone())
-            .expect("open");
+    let service = NativeService::open_encrypted(
+        dir.path(),
+        "authority-db",
+        [14; 32],
+        ledger.clone(),
+        keys.clone(),
+    )
+    .expect("open");
     let (input, original, _) = initial(&service);
     let mut forbidden_policy = policy(&input);
     forbidden_policy.grants[0].source.role = EventRole::Assistant;
@@ -835,11 +841,12 @@ fn source_authority_and_lineage_cannot_be_forged_and_backup_preserves_resolution
             context: input.context.clone(),
         })
         .expect("backup");
-    let restored = NativeService::open_with_suppression(
+    let restored = NativeService::open_encrypted(
         restored_dir.path(),
         "authority-db",
         [15; 32],
         ledger.clone(),
+        keys,
     )
     .expect("fresh restore target");
     restored

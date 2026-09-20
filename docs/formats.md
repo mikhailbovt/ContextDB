@@ -55,6 +55,16 @@ BLAKE3 footer. Readers reject unknown/missing/reordered keyspaces, duplicate or
 unordered keys, trailing bytes, non-canonical re-encoding, violated entry/count
 or byte caps, and broken policy/content/event/workspace closure.
 
+Native continuous archives use `contextdb.native-fjall.logical-backup.v2`.
+The optional encrypted profile uses `contextdb.native-fjall.encrypted-backup.v3`:
+the same ordered row framing carries authenticated ciphertext and an exact key
+authority ID. It requires the retained external key inventory, master key and
+current suppression ledger; none is imported from the backup. Logical closure
+is verified through a decoding view before restoring a pristine encrypted target.
+The header and record addresses are visible; the format does not claim signatures,
+physical erasure or production host key custody. See the
+[native encryption and restore contract](architecture/continuous-context.md).
+
 `contextdb.codex-composite-backup.v1` is a local host envelope containing one
 canonical `contextdb.logical.v1` lifecycle component and one native backup
 component. Its schema embeds the immutable restore policy identifier

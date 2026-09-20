@@ -69,11 +69,13 @@ fn catch_up(service: &NativeService, input: &CaptureRequest) {
 fn old_backup_cannot_revive_newer_denials_or_recapture_an_absent_suppressed_id() {
     let root = tempfile::tempdir().expect("native directories");
     let (_authority_directory, ledger) = authority("suppression-db");
-    let service = NativeService::open_with_suppression(
+    let (_key_directory, keys) = encryption::tests::authority("suppression-db");
+    let service = NativeService::open_encrypted(
         root.path().join("source"),
         "suppression-db",
         [7; 32],
         ledger.clone(),
+        keys.clone(),
     )
     .expect("source");
     let secret = capture::tests::request(1, "original_secret_7319");
@@ -104,11 +106,12 @@ fn old_backup_cannot_revive_newer_denials_or_recapture_an_absent_suppressed_id()
             .expect("durable external denial");
     }
     let target_path = root.path().join("restored");
-    let restored = NativeService::open_with_suppression(
+    let restored = NativeService::open_encrypted(
         &target_path,
         "suppression-db",
         [9; 32],
         ledger.clone(),
+        keys.clone(),
     )
     .expect("target with current authority");
     restore(&restored, &secret, &archive).expect("install old backup behind disclosure barrier");
@@ -124,11 +127,12 @@ fn old_backup_cannot_revive_newer_denials_or_recapture_an_absent_suppressed_id()
         .verify_native(true)
         .expect("pending restore is internally consistent");
     drop(restored);
-    let restored = NativeService::open_with_suppression(
+    let restored = NativeService::open_encrypted(
         &target_path,
         "suppression-db",
         [10; 32],
         ledger.clone(),
+        keys,
     )
     .expect("pending gate survives restart");
     assert_eq!(

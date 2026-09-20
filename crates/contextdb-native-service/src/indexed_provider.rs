@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use crate::encryption::NativeSnapshot;
 use contextdb_core::{ObservationId, RawSource, RawTextQuery, Validate};
 use contextdb_index::{RAW_ANALYZER, match_raw_original, raw_query_terms};
 use contextdb_recall::{
@@ -23,7 +24,6 @@ use contextdb_service::{
     RawRecallPage, RawRecallRequest, ServiceError, ServiceResult,
 };
 use contextdb_storage::{ReadSnapshot, ScanPageRequest, SnapshotSelector, StorageEngine};
-use contextdb_storage_fjall::FjallSnapshot;
 use serde::{Deserialize, Serialize};
 
 use super::raw_index::{
@@ -42,7 +42,7 @@ const CURSOR_DOMAIN: &[u8] = b"contextdb/indexed-original-cursor/v1";
 pub struct NativeIndexedView {
     _permit: ViewPermit,
     database_id: String,
-    snapshot: FjallSnapshot,
+    snapshot: NativeSnapshot,
     workspace: String,
     known_at: u64,
     global: u64,

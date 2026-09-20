@@ -43,7 +43,7 @@ impl NativeService {
         token_key: [u8; 32],
         suppression: std::sync::Arc<NativeSuppressionLedger>,
     ) -> ServiceResult<Self> {
-        Self::open_internal(path, database_id.into(), token_key, Some(suppression))
+        Self::open_internal(path, database_id.into(), token_key, Some(suppression), None)
     }
 
     pub(super) fn verify_suppression_binding(&self, manifest: &Manifest) -> ServiceResult<()> {

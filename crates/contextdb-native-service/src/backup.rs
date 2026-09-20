@@ -25,6 +25,8 @@ use super::{
 pub const NATIVE_BACKUP_FORMAT: &str = "contextdb.native-fjall.logical-backup.v1";
 /// Backup format including the continuous capture authority.
 pub const NATIVE_CONTINUOUS_BACKUP_FORMAT: &str = "contextdb.native-fjall.logical-backup.v2";
+/// Ciphertext-preserving native backup requiring its retained key authority.
+pub const NATIVE_ENCRYPTED_BACKUP_FORMAT: &str = "contextdb.native-fjall.encrypted-backup.v3";
 
 const BACKUP_MAGIC: &[u8] = b"contextdb/native-backup/v1\0";
 const BACKUP_FOOTER_BYTES: usize = 32;
@@ -32,7 +34,7 @@ const MAX_BACKUP_BYTES: usize = 256 * 1024 * 1024;
 const MAX_BACKUP_RAW_BYTES: usize = 128 * 1024 * 1024;
 const MAX_BACKUP_ENTRIES: usize = 2_000_000;
 const MAX_BACKUP_KEY_BYTES: usize = 64 * 1024;
-const MAX_BACKUP_VALUE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_BACKUP_VALUE_BYTES: usize = 16 * 1024 * 1024 + 64;
 const BACKUP_SCAN_PAGE_ENTRIES: usize = 4_096;
 const BACKUP_SCAN_PAGE_BYTES: usize = 32 * 1024 * 1024;
 
@@ -48,6 +50,7 @@ struct NativeBackup {
     database_id: String,
     commit_seq: u64,
     deep_digest: String,
+    custody_authority: Option<uuid::Uuid>,
     keyspaces: Vec<BackupKeyspace>,
 }
 
@@ -72,12 +75,18 @@ impl NativeService {
                 "native storage changed during backup verification",
             ));
         }
-        let keyspaces = self.collect_backup_rows(&snapshot)?;
+        let keyspaces = if self.engine.is_encrypted() {
+            self.collect_backup_rows(&snapshot.inner)?
+        } else {
+            self.collect_backup_rows(&snapshot)?
+        };
         // Verify the exact bounded rows that will be encoded, rather than
         // rescanning an unbounded source keyspace after the cap-enforcing
         // paged collection pass.
         let mut archive = NativeBackup {
-            format: if keyspaces.len() == self.keyspaces.all().len() {
+            format: if self.engine.is_encrypted() {
+                NATIVE_ENCRYPTED_BACKUP_FORMAT
+            } else if keyspaces.len() == self.keyspaces.all().len() {
                 NATIVE_CONTINUOUS_BACKUP_FORMAT
             } else {
                 NATIVE_BACKUP_FORMAT
@@ -86,10 +95,11 @@ impl NativeService {
             database_id: self.database_id.clone(),
             commit_seq: 0,
             deep_digest: "0".repeat(64),
+            custody_authority: self.engine.keys.as_ref().map(|keys| keys.authority_id()),
             keyspaces,
         };
         let (commit_seq, deep_digest) = {
-            let archive_snapshot = BackupSnapshot::new(&archive);
+            let archive_snapshot = self.engine.decode_snapshot(BackupSnapshot::new(&archive));
             self.verify_backup_snapshot(&archive_snapshot)?
         };
         archive.commit_seq = commit_seq;
@@ -113,7 +123,7 @@ impl NativeService {
         require_capability(&request.context, Capability::Admin)?;
         if !matches!(
             request.format.as_str(),
-            NATIVE_BACKUP_FORMAT | NATIVE_CONTINUOUS_BACKUP_FORMAT
+            NATIVE_BACKUP_FORMAT | NATIVE_CONTINUOUS_BACKUP_FORMAT | NATIVE_ENCRYPTED_BACKUP_FORMAT
         ) {
             return Err(ServiceError::new(
                 ErrorCode::FormatIncompatible,
@@ -134,11 +144,16 @@ impl NativeService {
             ..
         } = request;
         let archive = decode_backup(&bytes, &self.database_id)?;
+        if archive.custody_authority != self.engine.keys.as_ref().map(|keys| keys.authority_id()) {
+            return Err(integrity(
+                "backup requires its exact retained custody key authority",
+            ));
+        }
         if archive.format != format {
             return Err(integrity("native backup format differs from its header"));
         }
         drop(bytes);
-        let archive_snapshot = BackupSnapshot::new(&archive);
+        let archive_snapshot = self.engine.decode_snapshot(BackupSnapshot::new(&archive));
         let manifest: Manifest = decode(
             &archive_snapshot
                 .get(&self.keyspaces.meta, META_MANIFEST_KEY)
@@ -147,6 +162,7 @@ impl NativeService {
             "native backup manifest",
         )?;
         self.verify_suppression_binding(&manifest)?;
+        self.verify_encryption_binding(&manifest)?;
         if manifest.features.contains(super::capture::CAPTURE_FEATURE)
             && manifest.suppression_authority.is_none()
         {
@@ -185,8 +201,12 @@ impl NativeService {
                 .find(|candidate| candidate.as_str() == keyspace.name)
                 .ok_or_else(|| integrity("native backup keyspace is not admitted"))?;
             for entry in &keyspace.entries {
+                let logical_value = archive_snapshot
+                    .get(target, &entry.key)
+                    .map_err(storage_error)?
+                    .ok_or_else(|| integrity("verified backup value disappeared"))?;
                 transaction
-                    .put(target, entry.key.clone(), entry.value.clone())
+                    .put(target, entry.key.clone(), logical_value)
                     .map_err(storage_error)?;
             }
         }
@@ -300,7 +320,10 @@ impl NativeService {
                 continuation = Some(next);
             }
             // Preserve the exact v1 archive layout when capture has never run.
-            if keyspace == &self.keyspaces.continuous && entries.is_empty() {
+            if keyspace == &self.keyspaces.continuous
+                && entries.is_empty()
+                && !self.engine.is_encrypted()
+            {
                 continue;
             }
             output.push(BackupKeyspace {
@@ -535,7 +558,9 @@ fn encode_backup(archive: &NativeBackup) -> ServiceResult<Vec<u8>> {
     push_bytes(&mut output, BACKUP_MAGIC)?;
     push_u16(
         &mut output,
-        if archive.format == NATIVE_BACKUP_FORMAT {
+        if archive.format == NATIVE_ENCRYPTED_BACKUP_FORMAT {
+            3
+        } else if archive.format == NATIVE_BACKUP_FORMAT {
             1
         } else {
             2
@@ -546,6 +571,9 @@ fn encode_backup(archive: &NativeBackup) -> ServiceResult<Vec<u8>> {
     push_string(&mut output, &archive.database_id)?;
     push_u64(&mut output, archive.commit_seq)?;
     push_string(&mut output, &archive.deep_digest)?;
+    if let Some(authority) = archive.custody_authority {
+        push_bytes(&mut output, authority.as_bytes())?;
+    }
     let keyspace_count = u16::try_from(archive.keyspaces.len())
         .map_err(|_| exhausted("native backup keyspace count exceeds u16"))?;
     push_u16(&mut output, keyspace_count)?;
@@ -584,7 +612,9 @@ fn decode_backup(bytes: &[u8], database_id: &str) -> ServiceResult<NativeBackup>
     if magic != BACKUP_MAGIC
         || !matches!(
             (schema, format.as_str()),
-            (1, NATIVE_BACKUP_FORMAT) | (2, NATIVE_CONTINUOUS_BACKUP_FORMAT)
+            (1, NATIVE_BACKUP_FORMAT)
+                | (2, NATIVE_CONTINUOUS_BACKUP_FORMAT)
+                | (3, NATIVE_ENCRYPTED_BACKUP_FORMAT)
         )
         || reader.read_string(128)? != FORMAT_NAME
     {
@@ -607,6 +637,16 @@ fn decode_backup(bytes: &[u8], database_id: &str) -> ServiceResult<NativeBackup>
     if deep_digest.len() != 64 || blake3::Hash::from_hex(&deep_digest).is_err() {
         return Err(integrity("native backup deep digest is invalid"));
     }
+    let custody_authority = if schema == 3 {
+        let id = uuid::Uuid::from_slice(reader.take(16)?)
+            .map_err(|_| integrity("backup custody authority is invalid"))?;
+        if id.is_nil() {
+            return Err(integrity("backup custody authority is nil"));
+        }
+        Some(id)
+    } else {
+        None
+    };
     let expected_keyspaces = super::Keyspaces::new()?
         .all()
         .into_iter()
@@ -674,6 +714,7 @@ fn decode_backup(bytes: &[u8], database_id: &str) -> ServiceResult<NativeBackup>
         database_id: archive_database_id,
         commit_seq,
         deep_digest,
+        custody_authority,
         keyspaces,
     };
     if encode_backup(&archive)? != bytes {
