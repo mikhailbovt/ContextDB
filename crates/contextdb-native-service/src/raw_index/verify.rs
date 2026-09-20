@@ -223,7 +223,7 @@ impl NativeService {
                         && generation.authorization_epoch
                             == self.raw_authorization_epoch(snapshot, workspace)?
                         && labels.policies
-                            != self.capture_index_policies(snapshot, work.event_id)?
+                            != self.stored_custody_policies(snapshot, work.event_id)?
                     {
                         return Err(integrity("raw domain authorization closure differs"));
                     }

@@ -160,6 +160,7 @@ impl NativeService {
     ) -> ServiceResult<()> {
         budget.charge(1, 0).map_err(budget_error)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
+        self.require_suppression_current(snapshot, &workspace)?;
         if self.raw_authorization_epoch(snapshot, &workspace)? != record.fence.authorization_epoch {
             return Err(changed("source permissions changed after preparation"));
         }

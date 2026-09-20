@@ -233,6 +233,12 @@ impl RecallProvider for NativeRecallProvider<'_> {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(provider_storage)?;
+        self.service
+            .require_suppression_current(
+                &snapshot,
+                &super::digest_bytes(self.workspace_id.as_bytes()),
+            )
+            .map_err(provider_service)?;
         let (global_commit, state) = self
             .service
             .select_snapshot(

@@ -400,10 +400,14 @@ fn exactly_one_concurrent_caller_observes_first_publication() {
 
 #[test]
 fn backup_restores_chunked_original_and_deep_verify_rejects_lost_payload() {
+    let (_authority_directory, ledger) = crate::suppression::tests::authority("capture-db");
     use contextdb_service::{CognitiveMemoryService, CreateBackupRequest, RestoreBackupRequest};
     let source = tempfile::tempdir().expect("source");
     let target = tempfile::tempdir().expect("target");
-    let owner = Arc::new(NativeService::open(source.path(), "capture-db", [7; 32]).expect("open"));
+    let owner = Arc::new(
+        NativeService::open_with_suppression(source.path(), "capture-db", [7; 32], ledger.clone())
+            .expect("open"),
+    );
     let host = contextdb_capture::CaptureHost::new(Arc::clone(&owner));
     let input = request(1, "");
     let bytes = vec![17; CHUNK_BYTES + 97];
@@ -420,7 +424,9 @@ fn backup_restores_chunked_original_and_deep_verify_rejects_lost_payload() {
             context: input.context.clone(),
         })
         .expect("backup");
-    let restored = NativeService::open(target.path(), "capture-db", [9; 32]).expect("target");
+    let restored =
+        NativeService::open_with_suppression(target.path(), "capture-db", [9; 32], ledger.clone())
+            .expect("target");
     restored
         .restore_backup(RestoreBackupRequest {
             context: input.context.clone(),

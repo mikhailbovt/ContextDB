@@ -27,6 +27,7 @@ mod publication;
 mod raw;
 mod raw_index;
 mod record_journal;
+mod suppression;
 
 pub use backup::{NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT};
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
@@ -34,6 +35,7 @@ pub use custody::CustodyProgress;
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
+pub use suppression::{NativeSuppressionLedger, SuppressionProgress};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -84,30 +86,32 @@ const META_MANIFEST_KEY: &[u8] = b"manifest/v1";
 const META_GLOBAL_HEAD_KEY: &[u8] = b"global-head/v1";
 const META_EVENT_DIGEST_KEY: &[u8] = b"event-digest/v1";
 
-fn native_capability_manifest() -> contextdb_service::CapabilityManifestV1 {
-    service_capability_manifest_v1(
-        PROFILE,
-        &[
-            "admin_native_logical_backup",
-            "admin_native_pristine_restore",
-            "bounded_publication_admission",
-            "candidate_hierarchy_dag",
-            "capture_custody_migration",
-            "capture_custody_propagation",
-            "compact",
-            "context_pack_recall",
-            "durable_fjall_storage",
-            "native_service_executor",
-            "policy_first_candidate_recall",
-            "policy_first_candidate_traversal",
-            "quarantined_memory_proposals",
-            "raw_index_generation_gc",
-            "restart_verification",
-            "status",
-            "verify",
-        ],
-        &[],
-    )
+fn native_capability_manifest(
+    external_suppression: bool,
+) -> contextdb_service::CapabilityManifestV1 {
+    let mut available = vec![
+        "admin_native_logical_backup",
+        "admin_native_pristine_restore",
+        "bounded_publication_admission",
+        "candidate_hierarchy_dag",
+        "capture_custody_migration",
+        "capture_custody_propagation",
+        "compact",
+        "context_pack_recall",
+        "durable_fjall_storage",
+        "native_service_executor",
+        "policy_first_candidate_recall",
+        "policy_first_candidate_traversal",
+        "quarantined_memory_proposals",
+        "raw_index_generation_gc",
+        "restart_verification",
+        "status",
+        "verify",
+    ];
+    if external_suppression {
+        available.push("restore_current_suppression_ledger");
+    }
+    service_capability_manifest_v1(PROFILE, &available, &[])
 }
 
 #[derive(Clone, Debug)]
@@ -173,6 +177,8 @@ struct Manifest {
     features: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     state_catalogs: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    suppression_authority: Option<uuid::Uuid>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -291,6 +297,8 @@ struct StoredEvent {
     accepted_assertions: Option<contextdb_service::AssertionReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     accepted_records: Vec<record_journal::RecordMutationRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_suppression: Option<suppression::SuppressionPublication>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -334,6 +342,7 @@ pub struct NativeService {
     leases: Mutex<lease::LeaseRegistry>,
     lease_started: std::time::Instant,
     lease_instance: uuid::Uuid,
+    suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
 }
 
 impl fmt::Debug for NativeService {
@@ -348,17 +357,41 @@ impl fmt::Debug for NativeService {
 
 impl NativeService {
     /// Opens an existing native database or initializes an empty one.
+    /// Continuous archives created without an external suppression authority are
+    /// archival only; restoring them requires explicit authority migration.
     pub fn open(
         path: impl AsRef<Path>,
         database_id: impl Into<String>,
         token_key: [u8; 32],
     ) -> ServiceResult<Self> {
-        let database_id = database_id.into();
+        Self::open_internal(path, database_id.into(), token_key, None)
+    }
+
+    fn open_internal(
+        path: impl AsRef<Path>,
+        database_id: String,
+        token_key: [u8; 32],
+        suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
+    ) -> ServiceResult<Self> {
         validate_identifier(&database_id, "database ID")?;
         if token_key.iter().all(|byte| *byte == 0) {
             return Err(invalid("native service token key must not be all zero"));
         }
-        let engine = FjallStorage::open(path).map_err(storage_error)?;
+        if let Some(ledger) = &suppression {
+            ledger.require_database(&database_id)?;
+        }
+        let engine = FjallStorage::open(path.as_ref()).map_err(storage_error)?;
+        if let Some(ledger) = &suppression {
+            let native_path = path
+                .as_ref()
+                .canonicalize()
+                .map_err(|_| integrity("native path is unavailable"))?;
+            if native_path.starts_with(&ledger.path) || ledger.path.starts_with(&native_path) {
+                return Err(invalid(
+                    "suppression and native authorities require separate directory trees",
+                ));
+            }
+        }
         let keyspaces = Keyspaces::new()?;
         let service = Self {
             engine,
@@ -370,6 +403,7 @@ impl NativeService {
             leases: Mutex::new(lease::LeaseRegistry::default()),
             lease_started: std::time::Instant::now(),
             lease_instance: contextdb_core::ObservationId::new().as_uuid(),
+            suppression,
         };
         service.install_or_verify_manifest()?;
         service.verify_native(false)?;
@@ -393,6 +427,7 @@ impl NativeService {
         {
             let manifest: Manifest = decode(&bytes, "native manifest")?;
             validate_manifest(&manifest, &self.database_id)?;
+            self.verify_suppression_binding(&manifest)?;
             return Ok(());
         }
         if snapshot.sequence() != 0 {
@@ -409,7 +444,16 @@ impl NativeService {
             checksum: String::new(),
             features: BTreeSet::new(),
             state_catalogs: BTreeSet::new(),
+            suppression_authority: self
+                .suppression
+                .as_ref()
+                .map(|ledger| ledger.authority_id()),
         };
+        if manifest.suppression_authority.is_some() {
+            manifest
+                .features
+                .insert(suppression::SUPPRESSION_FEATURE.into());
+        }
         manifest.checksum = manifest_checksum(&manifest)?;
         transaction
             .put(
@@ -592,6 +636,11 @@ impl NativeService {
                 None
             },
             accepted_records,
+            accepted_suppression: if operation == "suppression_reconcile" {
+                Some(decode(&response_bytes, "suppression publication")?)
+            } else {
+                None
+            },
         };
         event.event_digest = event_digest(&event)?;
         let idempotency = StoredIdempotency {
@@ -826,6 +875,10 @@ impl NativeService {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
+        self.require_suppression_current(
+            &snapshot,
+            &digest_bytes(request.context.request.workspace_id.as_bytes()),
+        )?;
         let (global_commit, _) = self.select_snapshot(
             &snapshot,
             &request.context.request.workspace_id,
@@ -1054,6 +1107,7 @@ impl NativeService {
         self.verify_active_graph_invariants(snapshot)?;
         self.verify_capture_records(snapshot)?;
         self.verify_custody_records(snapshot)?;
+        self.verify_suppression_records(snapshot)?;
         self.verify_payload_records(snapshot)?;
         self.verify_raw_index_records(snapshot)?;
         self.verify_assertion_records(snapshot)?;
@@ -1444,7 +1498,7 @@ impl CognitiveMemoryService for NativeService {
             profile: PROFILE.to_owned(),
             commit_seq: state.watermarks.journal,
             watermarks: state.watermarks,
-            capability_manifest: native_capability_manifest(),
+            capability_manifest: native_capability_manifest(self.suppression.is_some()),
         })
     }
 
@@ -2708,6 +2762,10 @@ impl NativeService {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
+        self.require_suppression_current(
+            &snapshot,
+            &digest_bytes(request.context.request.workspace_id.as_bytes()),
+        )?;
         let (global_commit, state) = self.select_snapshot(
             &snapshot,
             &request.context.request.workspace_id,
@@ -2874,6 +2932,10 @@ impl NativeService {
         lifecycle: MemoryLifecycle,
         family: AuthorizedPolicyFamily,
     ) -> ServiceResult<BTreeMap<String, StoredPolicy>> {
+        self.require_suppression_current(
+            snapshot,
+            &digest_bytes(principal.workspace_id.as_bytes()),
+        )?;
         let mut selected = BTreeMap::<String, StoredPolicy>::new();
         let route_prefix = policy_route_prefix(&principal.workspace_id);
         let mut continuation: Option<Vec<u8>> = None;
@@ -2968,7 +3030,11 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != assertions::STATE_FEATURE
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
+                && feature != suppression::SUPPRESSION_FEATURE
         })
+        || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
+            != manifest.suppression_authority.is_some()
+        || manifest.suppression_authority.is_some_and(|id| id.is_nil())
         || manifest.state_catalogs.len() > 1024
         || manifest
             .state_catalogs

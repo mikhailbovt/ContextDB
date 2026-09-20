@@ -261,6 +261,7 @@ impl NativeService {
         snapshot: &S,
         workspace: &str,
     ) -> ServiceResult<()> {
+        self.require_suppression_current(snapshot, workspace)?;
         match self.custody_state(snapshot, workspace)? {
             Some(state) if !state.pending => Ok(()),
             None if self
@@ -302,6 +303,16 @@ impl NativeService {
         let record = self.custody_record(snapshot, id)?;
         self.require_custody_ready(snapshot, &record.workspace)?;
         Ok(record.policies)
+    }
+
+    // Administrative reconstruction of an archived prefix is independent of
+    // current disclosure admission. verify_custody_records checks these rows.
+    pub(super) fn stored_custody_policies<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+    ) -> ServiceResult<Vec<AccessPolicy>> {
+        Ok(self.custody_record(snapshot, id)?.policies)
     }
 
     fn build_custody_record<S: ReadSnapshot>(

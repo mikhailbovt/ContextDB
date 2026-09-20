@@ -139,6 +139,21 @@ impl NativeService {
         }
         drop(bytes);
         let archive_snapshot = BackupSnapshot::new(&archive);
+        let manifest: Manifest = decode(
+            &archive_snapshot
+                .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("native backup manifest is absent"))?,
+            "native backup manifest",
+        )?;
+        self.verify_suppression_binding(&manifest)?;
+        if manifest.features.contains(super::capture::CAPTURE_FEATURE)
+            && manifest.suppression_authority.is_none()
+        {
+            return Err(super::unsupported(
+                "continuous restore requires an independently retained current suppression authority; unbound archives need explicit migration",
+            ));
+        }
         let (commit_seq, deep_digest) = self.verify_backup_snapshot(&archive_snapshot)?;
         if commit_seq != archive.commit_seq || deep_digest != archive.deep_digest {
             return Err(integrity(

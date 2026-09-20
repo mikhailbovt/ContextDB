@@ -17,7 +17,7 @@ native or model acceptance.
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Merged in #9; all eight CI jobs passed; reader/cache acceptance remains open |
 | 08 | Atomic lease admission, invalidation and action fences | Merged in #10; all eight CI jobs passed; strict transport handoff remains open |
 | 09 | Cache/cost controller and paired runtime evaluation | Merged in #11; all eight CI jobs passed; R0 quality and total monetary benefit remain open |
-| 10 | Restore/revocation, retention, custody and bounded publication | Inherited custody, bounded migration/revocation, FIFO publication and generation GC implemented; deletion, encrypted domains and external restore ledger remain open |
+| 10 | Restore/revocation, retention, custody and bounded publication | Custody/FIFO and generation GC merged in #12–13; current external suppression implemented for bound native restore; deletion and encrypted domains remain open |
 | 11 | Migration, integrations, demo and release evidence | Planned |
 | 12 | Router replay corpus, contracts and training lineage | Planned |
 | 13 | Measured R1 scorer and optional bounded R2 cascade | Planned |
@@ -159,13 +159,24 @@ tool results and checkpoints. Native fixtures cover a 520-edge conversation,
 restricted scopes, historical index reads, restart and restore during revocation,
 legacy custody migration, concurrent capture/revocation and bounded cancellation.
 FIFO queue fixtures cover ordering, capacity, cancellation and publisher failure.
-The capability manifest separates these Rust executors from unresolved encryption,
-physical deletion and external suppression-ledger restore.
+The capability manifest separates these Rust executors from unresolved encryption
+and physical deletion.
 The 181 affected runtime/native/service/server tests, workspace Clippy and
-governance validation pass locally; cross-platform CI remains a separate gate.
+governance validation passed locally; #12 subsequently passed all eight CI jobs.
 
 Bounded raw-generation reclamation removes the three-generation lifetime limit.
 Three native scenarios cover ten successive generations, active/build protection,
 obsolete-build abandonment, interrupted cleanup and restore, pinned physical
 views, byte/work limits and invalid cleanup metadata. Originals remain readable;
 the receipts describe logical row reclamation, without claiming physical erasure.
+Scoped routing also tolerates inherited labels with no scope constraint. The 91
+native tests and all eight CI jobs passed before #13 merged.
+
+Bound native restore now consults a separately retained current suppression
+authority. Native regressions cover an older backup with newer denials, inherited
+restrictions, absent-source ID reuse, pinned views, partial reconciliation,
+real process exit after external Sync, concurrent authority advancement and
+competing native owners. Missing/wrong authority and lost progress fail closed.
+All 97 native tests, workspace Clippy and governance validation pass locally.
+Unbound continuous archives require explicit migration. The local authority is
+not a remote anti-rollback service or a physical-erasure executor.

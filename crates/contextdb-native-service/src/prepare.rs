@@ -516,6 +516,7 @@ impl NativeService {
         if fence.authorization_epoch != self.raw_authorization_epoch(&snapshot, &workspace)? {
             return Err(stale("source authorization changed during preparation"));
         }
+        self.require_suppression_current(&snapshot, &workspace)?;
         for (scope, epoch) in &fence.scopes {
             if self.scope_epoch(&snapshot, &workspace, *scope)? != *epoch {
                 return Err(stale("scope changed during preparation"));

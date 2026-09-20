@@ -362,6 +362,10 @@ impl NativeService {
             self.validate_checkpoint_publication(&transaction, checkpoint)?;
         }
         let event = &request.event;
+        self.require_unsuppressed_identity(
+            &digest_bytes(request.context.request.workspace_id.as_bytes()),
+            event.event_id,
+        )?;
         let position = position_key(producer, event.producer_sequence);
         let event_digest = digest_bytes(event.event_id.to_string().as_bytes());
         if transaction
@@ -649,6 +653,10 @@ impl NativeService {
         context: &AuthenticatedRequestContext,
         id: ObservationId,
     ) -> ServiceResult<StoredObservationPolicy> {
+        self.require_suppression_current(
+            snapshot,
+            &digest_bytes(context.request.workspace_id.as_bytes()),
+        )?;
         let digest = digest_bytes(id.to_string().as_bytes());
         let bytes = snapshot
             .get(&self.keyspaces.observations_policy, digest.as_bytes())
@@ -747,6 +755,7 @@ impl NativeService {
                     && !entry.key.starts_with(b"semantic/")
                     && !entry.key.starts_with(b"catalog/")
                     && !entry.key.starts_with(b"custody/")
+                    && !entry.key.starts_with(b"suppression/")
             })
             .collect::<Vec<_>>();
         if entries.is_empty() {
