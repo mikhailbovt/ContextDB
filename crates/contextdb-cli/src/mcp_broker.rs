@@ -776,13 +776,18 @@ async fn open_client(socket_name: &str) -> io::Result<BrokerClient> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
     let metadata = fs::symlink_metadata(socket_name)?;
-    if !metadata.file_type().is_socket()
-        || metadata.uid() != rustix::process::geteuid().as_raw()
-        || metadata.mode() & 0o077 != 0
-    {
+    if !metadata.file_type().is_socket() || metadata.uid() != rustix::process::geteuid().as_raw() {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "MCP broker socket must be owned by the current user and owner-only",
+        ));
+    }
+    // bind creates the entry before create_server can chmod it. Wait without
+    // connecting until the current owner has finished restricting its socket.
+    if metadata.mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "MCP broker socket is awaiting owner-only permissions",
         ));
     }
     UnixStream::connect(socket_name).await
@@ -859,7 +864,8 @@ where
         // ERROR_PIPE_BUSY means a live owner has no available instance yet.
         // Starting another process here can leave a delayed contender that
         // claims the endpoint after the original owner's authenticated stop.
-        let busy = cfg!(windows) && error.raw_os_error() == Some(231);
+        let busy = error.kind() == io::ErrorKind::WouldBlock
+            || (cfg!(windows) && error.raw_os_error() == Some(231));
         if !absent && !busy && error.kind() != io::ErrorKind::Interrupted {
             return Err(CliError::from(error));
         }
@@ -1395,6 +1401,63 @@ mod tests {
             .expect_err("denial is not absence");
             assert_eq!(starts.get(), 1);
             drop(server);
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_connect_waits_for_owner_only_socket_permissions_without_autostart() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let directory = tempfile::tempdir().expect("private directory");
+        let path = directory.path().join("starting.sock");
+        let name = path.to_str().expect("socket path");
+        runtime.block_on(async {
+            let listener = UnixListener::bind(&path).expect("bound before chmod");
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).expect("startup window");
+            assert_eq!(
+                open_client(name).await.expect_err("not ready").kind(),
+                io::ErrorKind::WouldBlock
+            );
+            let starts = std::cell::Cell::new(0);
+            let mut connecting = Box::pin(connect_broker(
+                name,
+                Some(|| {
+                    starts.set(starts.get() + 1);
+                    Ok(())
+                }),
+            ));
+            std::future::poll_fn(|cx| {
+                assert!(Future::poll(connecting.as_mut(), cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            assert_eq!(starts.get(), 0);
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                .expect("owner hardens socket");
+            let client = tokio::time::timeout(Duration::from_secs(5), &mut connecting)
+                .await
+                .expect("bounded retry")
+                .expect("ready owner");
+            let (server, _) = listener.accept().await.expect("accepted");
+            assert_eq!(starts.get(), 0);
+            drop((client, server, listener));
+            fs::remove_file(&path).expect("remove socket");
+            fs::write(&path, "not a socket").expect("untrusted endpoint type");
+            connect_broker(
+                name,
+                Some(|| {
+                    starts.set(starts.get() + 1);
+                    Ok(())
+                }),
+            )
+            .await
+            .expect_err("wrong file type is permanent denial");
+            assert_eq!(starts.get(), 0);
         });
     }
 
