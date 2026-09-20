@@ -227,13 +227,10 @@ pub(crate) fn run_proxy(
         .build()
         .map_err(CliError::from)?;
 
-    let client = match runtime.block_on(open_client(&pipe_name)) {
-        Ok(client) => client,
-        Err(_) => {
-            spawn_hidden_broker(&canonical_path, reference)?;
-            runtime.block_on(wait_for_broker(&pipe_name))?
-        }
-    };
+    let client = runtime.block_on(connect_broker(
+        &pipe_name,
+        Some(|| spawn_hidden_broker(&canonical_path, reference)),
+    ))?;
     let handshake = build_handshake(
         &pipe_id,
         BrokerOperation::Session,
@@ -779,13 +776,18 @@ async fn open_client(socket_name: &str) -> io::Result<BrokerClient> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
     let metadata = fs::symlink_metadata(socket_name)?;
-    if !metadata.file_type().is_socket()
-        || metadata.uid() != rustix::process::geteuid().as_raw()
-        || metadata.mode() & 0o077 != 0
-    {
+    if !metadata.file_type().is_socket() || metadata.uid() != rustix::process::geteuid().as_raw() {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "MCP broker socket must be owned by the current user and owner-only",
+        ));
+    }
+    // bind creates the entry before create_server can chmod it. Wait without
+    // connecting until the current owner has finished restricting its socket.
+    if metadata.mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "MCP broker socket is awaiting owner-only permissions",
         ));
     }
     UnixStream::connect(socket_name).await
@@ -847,22 +849,41 @@ fn remove_owned_stale_socket(socket_name: &str) -> io::Result<bool> {
     Ok(true)
 }
 
-async fn wait_for_broker(pipe_name: &str) -> CliResult<BrokerClient> {
+async fn connect_broker<F>(pipe_name: &str, mut start: Option<F>) -> CliResult<BrokerClient>
+where
+    F: FnOnce() -> CliResult<()>,
+{
     let started = Instant::now();
     loop {
-        match open_client(pipe_name).await {
+        let error = match open_client(pipe_name).await {
             Ok(client) => return Ok(client),
-            Err(_) if started.elapsed() < BROKER_START_TIMEOUT => {
-                tokio::time::sleep(BROKER_RETRY_INTERVAL).await;
-            }
-            Err(_) => {
-                return Err(unavailable(
-                    "MCP broker did not become ready before the startup deadline",
-                    true,
-                ));
-            }
+            Err(error) => error,
+        };
+        let absent = error.kind() == io::ErrorKind::NotFound
+            || (cfg!(unix) && error.kind() == io::ErrorKind::ConnectionRefused);
+        // ERROR_PIPE_BUSY means a live owner has no available instance yet.
+        // Starting another process here can leave a delayed contender that
+        // claims the endpoint after the original owner's authenticated stop.
+        let busy = error.kind() == io::ErrorKind::WouldBlock
+            || (cfg!(windows) && error.raw_os_error() == Some(231));
+        if !absent && !busy && error.kind() != io::ErrorKind::Interrupted {
+            return Err(CliError::from(error));
         }
+        if absent && let Some(start) = start.take() {
+            start()?;
+        }
+        if started.elapsed() >= BROKER_START_TIMEOUT {
+            return Err(unavailable(
+                "MCP broker did not become ready before the startup deadline",
+                true,
+            ));
+        }
+        tokio::time::sleep(BROKER_RETRY_INTERVAL).await;
     }
+}
+
+async fn wait_for_broker(pipe_name: &str) -> CliResult<BrokerClient> {
+    connect_broker::<fn() -> CliResult<()>>(pipe_name, None).await
 }
 
 #[cfg(windows)]
@@ -1278,6 +1299,167 @@ fn strip_utf8_bom(bytes: &[u8]) -> &[u8] {
 mod tests {
     use super::*;
     use crate::{McpCapabilityArg, McpClearanceArg};
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_busy_pipe_waits_for_its_owner_without_autostart() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let name = format!("{BROKER_PIPE_PREFIX}busy-test-{}", std::process::id());
+            let first = create_server(&name, true).expect("first instance");
+            let occupied = open_client(&name).await.expect("occupy first instance");
+            first.connect().await.expect("connected");
+            assert_eq!(
+                open_client(&name)
+                    .await
+                    .expect_err("all instances occupied")
+                    .raw_os_error(),
+                Some(231)
+            );
+
+            let starts = std::cell::Cell::new(0);
+            let mut connecting = Box::pin(connect_broker(
+                &name,
+                Some(|| {
+                    starts.set(starts.get() + 1);
+                    Ok(())
+                }),
+            ));
+            std::future::poll_fn(|cx| {
+                assert!(Future::poll(connecting.as_mut(), cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            assert_eq!(
+                starts.get(),
+                0,
+                "backpressure must not queue a replacement broker"
+            );
+
+            let available = create_server(&name, false).expect("same owner opens next instance");
+            let client = tokio::time::timeout(Duration::from_secs(5), &mut connecting)
+                .await
+                .expect("retry bounded")
+                .expect("connect to existing owner");
+            available.connect().await.expect("next instance connected");
+            assert_eq!(starts.get(), 0);
+            drop((client, available, occupied, first));
+        });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_missing_pipe_starts_once_and_access_denial_never_starts_an_owner() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let name = format!("{BROKER_PIPE_PREFIX}missing-test-{}", std::process::id());
+            let starts = std::cell::Cell::new(0);
+            let listener = std::cell::RefCell::new(None);
+            let client = connect_broker(
+                &name,
+                Some(|| {
+                    starts.set(starts.get() + 1);
+                    *listener.borrow_mut() = Some(create_server(&name, true).expect("new owner"));
+                    Ok(())
+                }),
+            )
+            .await
+            .expect("absent endpoint starts");
+            assert_eq!(starts.get(), 1);
+            let server = listener.into_inner().expect("started server");
+            server.connect().await.expect("new owner connected");
+            drop((client, server));
+
+            let name = format!("{BROKER_PIPE_PREFIX}denied-test-{}", std::process::id());
+            let server = ServerOptions::new()
+                .first_pipe_instance(true)
+                .access_outbound(false)
+                .reject_remote_clients(true)
+                .create(&name)
+                .expect("inbound-only server");
+            assert_eq!(
+                open_client(&name)
+                    .await
+                    .expect_err("duplex access denied")
+                    .kind(),
+                io::ErrorKind::PermissionDenied
+            );
+            connect_broker(
+                &name,
+                Some(|| {
+                    starts.set(starts.get() + 1);
+                    Ok(())
+                }),
+            )
+            .await
+            .expect_err("denial is not absence");
+            assert_eq!(starts.get(), 1);
+            drop(server);
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_connect_waits_for_owner_only_socket_permissions_without_autostart() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let directory = tempfile::tempdir().expect("private directory");
+        let path = directory.path().join("starting.sock");
+        let name = path.to_str().expect("socket path");
+        runtime.block_on(async {
+            let listener = UnixListener::bind(&path).expect("bound before chmod");
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).expect("startup window");
+            assert_eq!(
+                open_client(name).await.expect_err("not ready").kind(),
+                io::ErrorKind::WouldBlock
+            );
+            let starts = std::cell::Cell::new(0);
+            let mut connecting = Box::pin(connect_broker(
+                name,
+                Some(|| {
+                    starts.set(starts.get() + 1);
+                    Ok(())
+                }),
+            ));
+            std::future::poll_fn(|cx| {
+                assert!(Future::poll(connecting.as_mut(), cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            assert_eq!(starts.get(), 0);
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                .expect("owner hardens socket");
+            let client = tokio::time::timeout(Duration::from_secs(5), &mut connecting)
+                .await
+                .expect("bounded retry")
+                .expect("ready owner");
+            let (server, _) = listener.accept().await.expect("accepted");
+            assert_eq!(starts.get(), 0);
+            drop((client, server, listener));
+            fs::remove_file(&path).expect("remove socket");
+            fs::write(&path, "not a socket").expect("untrusted endpoint type");
+            connect_broker(
+                name,
+                Some(|| {
+                    starts.set(starts.get() + 1);
+                    Ok(())
+                }),
+            )
+            .await
+            .expect_err("wrong file type is permanent denial");
+            assert_eq!(starts.get(), 0);
+        });
+    }
 
     #[cfg(unix)]
     #[test]
