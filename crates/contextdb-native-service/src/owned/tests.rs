@@ -104,7 +104,11 @@ fn fixture(service: &NativeService) -> SaveRunCheckpointRequest {
 #[test]
 fn checkpoint_reopens_exact_state_and_concurrent_publication_has_one_winner() {
     let dir = tempfile::tempdir().expect("directory");
-    let service = NativeService::open(dir.path(), "owned", [7; 32]).expect("open");
+    let (_key_directory, keys) = crate::encryption::tests::authority("owned");
+    let (_ledger_directory, ledger) = crate::suppression::tests::authority("owned");
+    let service =
+        NativeService::open_encrypted(dir.path(), "owned", [7; 32], ledger.clone(), keys.clone())
+            .expect("open");
     let request = fixture(&service);
     let saved = service
         .save_run_checkpoint(request.clone(), &mut budget())
@@ -120,7 +124,9 @@ fn checkpoint_reopens_exact_state_and_concurrent_publication_has_one_winner() {
         .verify_native(true)
         .expect("atomic checkpoint and head");
     drop(service);
-    let service = Arc::new(NativeService::open(dir.path(), "owned", [7; 32]).expect("reopen"));
+    let service = Arc::new(
+        NativeService::open_encrypted(dir.path(), "owned", [8; 32], ledger, keys).expect("reopen"),
+    );
     assert_eq!(
         service
             .load_run_checkpoint(

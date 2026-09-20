@@ -26,9 +26,12 @@ and release verifier—not the presence of an API name—determine completion.
   custody propagation. Legacy continuous stores require explicit custody migration
   and index rebuild; interrupted revocation keeps disclosure closed. Bound native
   restore checks an independently retained current suppression ledger before reads;
-  unbound continuous archives require explicit migration. This local profile cannot
-  detect rollback of both authorities, erase retained payloads or supply encrypted
-  custody domains. Remote authority/key custody and physical deletion remain open.
+  unbound archives containing captures require explicit migration. The optional
+  encrypted Rust profile seals native values and backups using an independently
+  retained key inventory and master key. It does not hide record addresses or
+  detect rollback of all authorities. CLI/MCP key provisioning, plaintext
+  migration, key reclamation, remote authority custody and physical deletion
+  remain open. See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector
   certification shape; E01/E02/E03 remain open.
 - Native Linux x86_64 and Windows x86_64 local-MCP developer previews have distinct

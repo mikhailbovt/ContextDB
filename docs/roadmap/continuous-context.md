@@ -17,7 +17,7 @@ native or model acceptance.
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Merged in #9; all eight CI jobs passed; reader/cache acceptance remains open |
 | 08 | Atomic lease admission, invalidation and action fences | Merged in #10; all eight CI jobs passed; strict transport handoff remains open |
 | 09 | Cache/cost controller and paired runtime evaluation | Merged in #11; all eight CI jobs passed; R0 quality and total monetary benefit remain open |
-| 10 | Restore/revocation, retention, custody and bounded publication | Custody/FIFO and generation GC merged in #12–13; current external suppression implemented for bound native restore; deletion and encrypted domains remain open |
+| 10 | Restore/revocation, retention, custody and bounded publication | Custody/FIFO, generation GC and current suppression merged in #12–14; local encrypted values and backups implemented; deletion closure remains open |
 | 11 | Migration, integrations, demo and release evidence | Planned |
 | 12 | Router replay corpus, contracts and training lineage | Planned |
 | 13 | Measured R1 scorer and optional bounded R2 cascade | Planned |
@@ -159,8 +159,8 @@ tool results and checkpoints. Native fixtures cover a 520-edge conversation,
 restricted scopes, historical index reads, restart and restore during revocation,
 legacy custody migration, concurrent capture/revocation and bounded cancellation.
 FIFO queue fixtures cover ordering, capacity, cancellation and publisher failure.
-The capability manifest separates these Rust executors from unresolved encryption
-and physical deletion.
+The capability manifest identifies available Rust executors and unresolved
+physical deletion.
 The 181 affected runtime/native/service/server tests, workspace Clippy and
 governance validation passed locally; #12 subsequently passed all eight CI jobs.
 
@@ -177,6 +177,16 @@ authority. Native regressions cover an older backup with newer denials, inherite
 restrictions, absent-source ID reuse, pinned views, partial reconciliation,
 real process exit after external Sync, concurrent authority advancement and
 competing native owners. Missing/wrong authority and lost progress fail closed.
-All 97 native tests, workspace Clippy and governance validation pass locally.
-Unbound continuous archives require explicit migration. The local authority is
-not a remote anti-rollback service or a physical-erasure executor.
+All 97 native tests, workspace Clippy and governance validation passed locally;
+#14 subsequently passed all eight CI jobs. Unbound archives containing captures
+require explicit migration. The local authority is not a remote anti-rollback
+service or a physical-erasure executor.
+
+The optional encrypted native profile seals every value and preserves ciphertext
+in v3 backups. Local tests cover actual file/archive bytes, large payload spans,
+semantic state, checkpoint restart, token-key rotation, current suppression after
+restore, wrong authorities, ciphertext relocation, competing key allocation and
+process exit between key Sync and native publication. Selected reads perform one
+key lookup at inventories of 1, 128 and 4,096 entries. This is bounded logical work,
+not a latency SLO. Host provisioning, plaintext migration, key/copy reclamation
+and full deletion closure remain separate gates.

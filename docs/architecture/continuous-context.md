@@ -79,12 +79,12 @@ Restore verifies original/receipt/outbox/producer/scope/stream closure before
 writing a pristine target. A restored receipt remains usable after host-key
 rotation, with fresh authorization and exact stored-receipt equality.
 
-Continuous restore requires `NativeService::open_with_suppression` and the same
+Continuous restore requires a bound native opener and the same
 independently retained `NativeSuppressionLedger` identity. Create that authority
 in a separate directory tree, retain its ID in host recovery configuration, and
 reopen it with `NativeSuppressionLedger::open`; a missing or different authority
 fails closed. Native backups never copy or replace the external ledger. Unbound
-continuous archives remain verifiable archival data and require explicit migration
+archives containing captures remain verifiable archival data and require explicit migration
 before restore; supplying a newly created empty ledger cannot establish freshness.
 
 Original revocations synchronize the external denial before native publication.
@@ -97,10 +97,33 @@ these gates pass. New denials after restore close them again. Independent captur
 can continue, but an externally denied source ID cannot be recaptured. Competing
 native owners compare the external head under its publication owner before append.
 
-This local profile requires custody of the current external directory. It does
-not detect rollback of both independent authorities, provide a remote monotonic
-anchor, encrypt source payloads or erase uncontrolled copies. Native receipts
-and external denial entries contain source identities/digests, not source bytes.
+`NativeService::open_with_suppression` retains plaintext native values.
+`NativeService::open_encrypted` additionally requires `NativeCustodyKeys` and seals
+every native value, including original bodies, chunks, index documents, accepted
+semantic batches and captured checkpoints. Each value address has a random data
+key; XChaCha20-Poly1305 binds ciphertext to the database, authority, keyspace,
+record address and key identity. New keys synchronize in one bounded batch before
+native publication. An interrupted publication may leave unused keys, never an
+acknowledged original without its durable key. Ordinary reads fetch one key
+descriptor; complete key-inventory verification happens when opening the authority.
+
+Create the key inventory in its own directory and independently retain its ID and
+host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never
+derive that master key from the rotatable token key. Encrypted backups use
+`contextdb.native-fjall.encrypted-backup.v3`, preserve ciphertext and require the
+same current key and suppression authorities. Neither authority nor the master key
+is included. Restore checks logical closure before publishing freshly sealed values.
+Wrong/missing keys and plaintext/encrypted format mismatches fail without fallback.
+Existing plaintext stores require a separate explicit migration.
+
+These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
+profile. Record addresses, sizes, lexical hashes and archive metadata remain
+visible. Values are limited to 16 MiB before encryption; each envelope adds 64
+bytes, counted against scan and backup limits. Inventory growth is incremental;
+key reclamation, key rotation and deletion closure remain open. This profile
+requires retention of the current independent directories and does not detect
+rollback of all authorities, provide a remote monotonic anchor or prove physical
+erasure. Native receipts and external denials contain source identities/digests.
 
 `contextdb-capture` adds host adapters for tools, complete artifact versions and
 model requests. `PayloadPort` stages up to 64 MiB in synchronized 256 KiB chunks
