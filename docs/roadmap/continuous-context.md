@@ -173,7 +173,8 @@ These foundations passed cross-platform CI before their respective merges.
 Removal requests retain complete captured-source lineage, including shared owners
 and independently owned novel blocks that must survive. Cleanup prepares source
 controls, rebuilds and reclaims raw indexes, removes source-supported assertions
-from mixed batches, then prunes primary bodies and staged chunks. Independent
+from mixed batches and affected generic revisions, then prunes primary bodies
+and staged chunks. Independent
 semantic mutations remain byte-exact. Control metadata preserves replay and
 negative relationships without retaining removed values or envelopes. Old full,
 partially pruned and cleaned archives verify their actual remaining logical rows
@@ -183,8 +184,8 @@ Native tests pass on Windows. Fixtures
 cover actual partial restart, overlapping removal requests, shared blocks, mixed
 semantic batches, supersession/retraction targets, original receipt retries,
 missing controls, resurrected content and concurrent publication. This is local
-logical-copy cleanup, not physical or key erasure. Generic-record cleanup,
-complete copy inventory, old-replica reconciliation, verified local completion,
+logical-copy cleanup, not physical or key erasure. Complete copy inventory,
+legacy migration, old-replica reconciliation, verified local completion,
 key disablement and external-copy dispositions remain open. Disclosure stays
 closed after a removal request until a verified completion executor exists.
 
@@ -209,18 +210,18 @@ retaining completed page progress in a bounded process-local cache. Tests cover
 changing frontiers, interleaved workspaces, older encrypted restore, corrupt or
 missing controls, budget interruption, and actual runtime start/reopen/resume.
 Host classification remains trusted. Durable recovery progress, measured backlog
-limits, larger origin ancestry, generic-record pruning and migration remain open.
+limits, larger origin ancestry and migration remain open.
 
-New generic births and closures atomically bind controls without copying arbitrary
-record bodies. Tests cover correction/retraction, exact old receipts, mixed legacy
-archives and new control activation, restore, and missing/forged/orphaned metadata.
-Scope replay uses the controls; an unpruned missing body still fails verification.
-Older full mutation groups can now retain controls through a separate accepted
-preparation, preserving their original history and receipts across restore.
-Preparation checks access, budgets and workspace CAS; missing/forged controls or
-declarations fail closed. Classified revisions can now retain complete removal
-witnesses in the independent authority, including graph roles and hashed
-provenance. Tests cover old native restore, explicit legacy preparation, lost
-acknowledgements, CAS, invalid mutation owners and changed or missing metadata.
-Native bodies remain mandatory; generic-copy pruning and hash-only migration
-remain unfinished.
+Generic births and closures bind compact controls; older full mutation groups
+prepare them through separate acceptance. Classified revisions retain removal
+witnesses in the independent authority before their primary and journal bodies
+are erased atomically. Complete source-aware groups are verified before their
+first removal and bound to independent validation commitments. Graph, provenance
+and history remain verifiable through partial cleanup and restore; original
+receipts and independent records survive. Primary source cleanup now requires
+every affected generic revision to be pruned and rejects unknown origins.
+Tests cover copied correction edges, candidate graphs, historical revisions,
+full/partial/cleaned archives, actual reopen, lost acknowledgement, CAS and
+missing, forged or resurrected data. Unpruned bodies remain mandatory.
+Hash-only migration and administrative preparation of non-retrievable legacy
+records remain open.

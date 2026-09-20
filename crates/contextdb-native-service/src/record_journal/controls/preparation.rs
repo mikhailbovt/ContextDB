@@ -321,19 +321,25 @@ impl NativeService {
                     false,
                 ));
             }
-            let bytes =
-                required_bytes(snapshot, &self.keyspaces.continuous, &reference.key, budget)?;
-            body_bytes = body_bytes.saturating_add(bytes.len());
-            if body_bytes > MAX_BYTES {
-                return Err(exhausted(
-                    "record preparation bodies exceed the group bound",
-                ));
-            }
-            if digest_bytes(&bytes) != reference.digest {
-                return Err(integrity("record preparation body differs from acceptance"));
-            }
-            let record: MemoryRecord = decode(&bytes, "record preparation original")?;
-            let control = RecordControl::from_record(&record)?;
+            let control = if let Some(pruned) =
+                self.pruned_record(snapshot, record_digest, revision, budget)?
+            {
+                pruned.witness.control(source.global_commit)?.clone()
+            } else {
+                let bytes =
+                    required_bytes(snapshot, &self.keyspaces.continuous, &reference.key, budget)?;
+                body_bytes = body_bytes.saturating_add(bytes.len());
+                if body_bytes > MAX_BYTES {
+                    return Err(exhausted(
+                        "record preparation bodies exceed the group bound",
+                    ));
+                }
+                if digest_bytes(&bytes) != reference.digest {
+                    return Err(integrity("record preparation body differs from acceptance"));
+                }
+                let record: MemoryRecord = decode(&bytes, "record preparation original")?;
+                RecordControl::from_record(&record)?
+            };
             control.validate_binding(source, reference)?;
             if control.policy.access != policy.access {
                 return Err(integrity(

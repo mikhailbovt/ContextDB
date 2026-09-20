@@ -782,6 +782,7 @@ impl NativeService {
                     && !entry.key.starts_with(b"record-write/")
                     && !entry.key.starts_with(b"record-control/")
                     && !entry.key.starts_with(b"record-prepared/")
+                    && !entry.key.starts_with(b"record-pruned/")
                     && !entry.key.starts_with(b"catalog/")
                     && !entry.key.starts_with(b"custody/")
                     && !entry.key.starts_with(b"suppression/")

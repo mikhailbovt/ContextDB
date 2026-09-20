@@ -138,3 +138,98 @@ fn endpoints(document: &MemoryDocument) -> ServiceResult<(&str, &str)> {
     }
     Ok((source, target))
 }
+
+impl NativeService {
+    pub(crate) fn verify_record_graph<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<()> {
+        let mut active = BTreeMap::new();
+        let mut budget = retention::audit_budget();
+        for row in snapshot
+            .scan_prefix(&self.keyspaces.policy_head, b"")
+            .map_err(storage_error)?
+        {
+            let policy: StoredPolicy = decode(&row.value, "native active graph policy")?;
+            if policy.transaction_to.is_some() || policy.lifecycle != MemoryLifecycle::Active {
+                continue;
+            }
+            let (control, graph) = if let Some(pruned) = self.pruned_record(
+                snapshot,
+                &policy.record_digest,
+                policy.revision,
+                &mut budget,
+            )? {
+                (
+                    pruned.witness.control(policy.transaction_from)?.clone(),
+                    pruned.witness.graph,
+                )
+            } else {
+                let record = self.load_content(snapshot, &policy)?;
+                (
+                    RecordControl::from_record(&record)?,
+                    GraphControl::from_document(&record.document)?,
+                )
+            };
+            if control.policy != policy {
+                return Err(integrity(
+                    "active graph policy differs from verified metadata",
+                ));
+            }
+            graph.validate(&control)?;
+            if active
+                .insert(policy.record_digest.clone(), (control, graph))
+                .is_some()
+            {
+                return Err(integrity("active graph identity is duplicated"));
+            }
+        }
+        let hierarchy_predicate = digest_bytes(HIERARCHY_PARENT_PREDICATE.as_bytes());
+        let mut hierarchy_edges = Vec::new();
+        let mut candidate_edges = Vec::new();
+        for (control, graph) in active.values() {
+            let candidate = graph.candidate_role == Some(CandidateRole::Edge);
+            let hierarchy = control.policy.kind == MemoryRecordKind::Edge
+                && control.links.predicate.as_ref() == Some(&hierarchy_predicate);
+            if !candidate && !hierarchy {
+                continue;
+            }
+            let (Some(source), Some(target)) = (&control.links.source, &control.links.target)
+            else {
+                return Err(integrity("active graph endpoints absent"));
+            };
+            let (source_control, source_graph) = active
+                .get(source)
+                .ok_or_else(|| integrity("active graph source absent"))?;
+            let (target_control, target_graph) = active
+                .get(target)
+                .ok_or_else(|| integrity("active graph target absent"))?;
+            if source_control.policy.access != control.policy.access
+                || target_control.policy.access != control.policy.access
+            {
+                return Err(integrity("active graph edge crosses policy"));
+            }
+            if candidate {
+                if source_graph.candidate_role != Some(CandidateRole::Memory)
+                    || target_graph.candidate_role != Some(CandidateRole::Memory)
+                    || graph.provenance_digest != target_graph.provenance_digest
+                {
+                    return Err(integrity(
+                        "active candidate link crosses roles or changes child provenance",
+                    ));
+                }
+                candidate_edges.push((source.clone(), target.clone()));
+            } else {
+                if matches!(
+                    source_control.policy.kind,
+                    MemoryRecordKind::Edge | MemoryRecordKind::Candidate
+                ) || matches!(
+                    target_control.policy.kind,
+                    MemoryRecordKind::Edge | MemoryRecordKind::Candidate
+                ) {
+                    return Err(integrity("active hierarchy edge crosses record families"));
+                }
+                hierarchy_edges.push((source.clone(), target.clone()));
+            }
+        }
+        verify_acyclic_graph("hierarchy", &hierarchy_edges)?;
+        verify_acyclic_graph("candidate hierarchy", &candidate_edges)
+    }
+}

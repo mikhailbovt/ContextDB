@@ -2,6 +2,7 @@
 //! a separate journal-bound completion keep interrupted groups undisclosed.
 
 use super::*;
+mod pruning;
 use contextdb_core::ContentDigest;
 
 mod discovery;
@@ -95,7 +96,7 @@ pub struct NativeRecordWriteReceipt {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordWriteRef {
-    digest: String,
+    pub(crate) digest: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -114,7 +114,9 @@ impl NativeService {
     ) -> ServiceResult<()> {
         let activated: Option<u64> = self.raw_value(snapshot, ACTIVATED)?;
         let mut expected_keys = BTreeSet::new();
-        let mut latest = BTreeMap::<Vec<u8>, MemoryRecord>::new();
+        let mut latest = BTreeMap::<Vec<u8>, (StoredPolicy, Option<MemoryRecord>)>::new();
+        let mut all_mutations = BTreeSet::new();
+        let mut pruning_budget = retention::audit_budget();
         let control_activation = self.record_control_activation(snapshot)?;
         let mut expected_controls = BTreeSet::new();
         let mut first_control = None;
@@ -154,13 +156,27 @@ impl NativeService {
                 return Err(integrity("record journal exceeds its publication bound"));
             }
             for reference in &event.accepted_records {
-                let bytes = snapshot
-                    .get(&self.keyspaces.continuous, &reference.key)
-                    .map_err(storage_error)?
-                    .ok_or_else(|| integrity("accepted record payload absent"))?;
-                let record: MemoryRecord = decode(&bytes, "accepted record mutation")?;
-                let policy = policy_for(&record)?;
-                validate_stored_policy(&policy)?;
+                let (identity, revision) = controls::witness::pruning::mutation_identity(
+                    event.global_commit,
+                    &reference.key,
+                )?;
+                let pruned =
+                    self.pruned_record(snapshot, identity, revision, &mut pruning_budget)?;
+                let (observed, record) = if let Some(pruned) = pruned {
+                    (pruned.witness.control(event.global_commit)?.clone(), None)
+                } else {
+                    let bytes = snapshot
+                        .get(&self.keyspaces.continuous, &reference.key)
+                        .map_err(storage_error)?
+                        .ok_or_else(|| integrity("accepted record payload absent"))?;
+                    if digest_bytes(&bytes) != reference.digest {
+                        return Err(integrity("accepted record payload digest differs"));
+                    }
+                    let record: MemoryRecord = decode(&bytes, "accepted record mutation")?;
+                    (controls::RecordControl::from_record(&record)?, Some(record))
+                };
+                observed.validate_binding(&event, reference)?;
+                let policy = observed.policy.clone();
                 let control =
                     self.record_mutation_control(snapshot, &event, reference, control_activation)?;
                 if control.is_some() {
@@ -168,21 +184,20 @@ impl NativeService {
                     first_control.get_or_insert(event.global_commit);
                 }
                 if let Some(control) = control.as_ref().or_else(|| prepared.get(&reference.key))
-                    && *control != controls::RecordControl::from_record(&record)?
+                    && *control != observed
                 {
                     return Err(integrity("record control differs from accepted payload"));
                 }
-                if reference.digest != digest_bytes(&bytes)
-                    || mutation_key(event.global_commit, &record) != reference.key
-                    || record.transaction_to.unwrap_or(record.transaction_from)
-                        != event.global_commit
-                    || digest_bytes(record.document.access.workspace_id.as_bytes())
-                        != event.workspace_digest
-                    || !expected_keys.insert(reference.key.clone())
-                {
+                if !all_mutations.insert(reference.key.clone()) {
                     return Err(integrity("accepted record mutation binding invalid"));
                 }
-                latest.insert(history_key(&policy.record_digest, policy.revision), record);
+                if record.is_some() {
+                    expected_keys.insert(reference.key.clone());
+                }
+                latest.insert(
+                    history_key(&policy.record_digest, policy.revision),
+                    (policy, record),
+                );
             }
         }
         let actual = snapshot
@@ -203,7 +218,19 @@ impl NativeService {
             ));
         }
         self.verify_record_control_keys(snapshot, &expected_controls, control_activation)?;
-        for (key, record) in latest {
+        for (key, (policy, record)) in latest {
+            let Some(record) = record else {
+                if snapshot
+                    .get(&self.keyspaces.policy_history, &key)
+                    .map_err(storage_error)?
+                    != Some(encode(&policy)?)
+                {
+                    return Err(integrity(
+                        "pruned record projection differs from its accepted latest mutation",
+                    ));
+                }
+                continue;
+            };
             let stored: StoredContent = decode(
                 &snapshot
                     .get(&self.keyspaces.content_history, &key)
@@ -250,6 +277,14 @@ impl NativeService {
             .map_err(storage_error)?
         {
             let event: StoredEvent = decode(&entry.value, "record scope event")?;
+            if let Some(publication) = &event.accepted_record_pruning {
+                for scope in &publication.scopes {
+                    let epoch = epochs
+                        .entry(capture::scope_key(&event.workspace_digest, scope))
+                        .or_default();
+                    *epoch = (*epoch).max(event.workspace_commit);
+                }
+            }
             if let Some(publication) = &event.accepted_record_sources {
                 for scope in &publication.scopes {
                     let epoch = epochs

@@ -227,7 +227,7 @@ impl NativeService {
         .map_err(storage_error)
     }
 
-    fn record_group_records<S: ReadSnapshot>(
+    pub(super) fn record_group_records<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         global: u64,
@@ -288,21 +288,23 @@ impl NativeService {
             .group
             .as_ref()
             .ok_or_else(|| integrity("record group metadata absent"))?;
-        let records = self.record_group_records(
-            snapshot,
-            event.global_commit,
-            &event.workspace_digest,
-            &intent.records,
-            budget,
-        )?;
-        if group.origins(
-            &event.operation,
-            event.global_commit,
-            &event.workspace_digest,
-            &records,
-        )? != intent.origins
-        {
-            return Err(integrity("record group omits copied content origins"));
+        if !self.record_write_has_pruned_members(snapshot, event, budget)? {
+            let records = self.record_group_records(
+                snapshot,
+                event.global_commit,
+                &event.workspace_digest,
+                &intent.records,
+                budget,
+            )?;
+            if group.origins(
+                &event.operation,
+                event.global_commit,
+                &event.workspace_digest,
+                &records,
+            )? != intent.origins
+            {
+                return Err(integrity("record group omits copied content origins"));
+            }
         }
         for (id, digest) in &group.inputs {
             let source = self.verified_capture_control(snapshot, *id, budget)?;

@@ -1,7 +1,6 @@
 //! Logical primary-body removal. Other copy classes and erasure remain pending.
 
 use contextdb_core::ContentDigest;
-use contextdb_storage::ScanPageRequest;
 
 use super::*;
 
@@ -44,8 +43,8 @@ pub struct NativeSourcePruningReceipt {
 
 impl NativeService {
     /// Remove 1..256 primary body rows after verified preparation and raw-copy
-    /// reclamation. Affected assertions must be pruned first. Workspaces with
-    /// generic-record publications still require a separate cleanup executor.
+    /// reclamation. Affected assertions and generic revisions must be pruned
+    /// first; unclassified generic revisions block removal of primary originals.
     /// All other retention gates remain closed after this operation.
     pub fn prune_original_sources(
         &self,
@@ -427,7 +426,7 @@ impl NativeService {
     }
 
     // Semantic originals may disappear only after every affected mutation has
-    // a verified pruned representation. Generic record cleanup remains separate.
+    // a verified pruned representation and no unclassified copy remains.
     fn require_primary_pruning_semantics_ready<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -435,35 +434,7 @@ impl NativeService {
         sources: &BTreeSet<ObservationId>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
-        let mut after = None;
-        loop {
-            let page = snapshot
-                .scan_prefix_page(
-                    &self.keyspaces.events,
-                    ScanPageRequest {
-                        prefix: b"",
-                        start_after: after.as_deref(),
-                        max_entries: 256,
-                        max_bytes: 1024 * 1024,
-                    },
-                )
-                .map_err(storage_error)?;
-            for row in page.entries {
-                budget
-                    .charge(1, row.value.len() as u64)
-                    .map_err(raw_index::budget_error)?;
-                let event: StoredEvent = decode(&row.value, "primary pruning semantic inventory")?;
-                if event.workspace_digest == workspace && !event.accepted_records.is_empty() {
-                    return Err(unsupported(
-                        "primary pruning requires generic-record copy cleanup, which is not yet implemented",
-                    ));
-                }
-                after = Some(row.key);
-            }
-            if page.continuation.is_none() {
-                break;
-            }
-        }
+        self.require_record_copies_pruned(snapshot, workspace, sources, budget)?;
         if !self
             .verify_assertion_records_budget(snapshot, budget)?
             .is_disjoint(sources)

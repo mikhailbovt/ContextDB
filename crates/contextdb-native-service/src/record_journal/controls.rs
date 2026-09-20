@@ -1,5 +1,5 @@
 //! Accepted metadata for a record birth or closure, without its arbitrary bodies.
-//! Bodies remain mandatory until a separate verified pruning transition exists.
+//! Unpruned bodies remain mandatory; removal requires an independent witness.
 
 use contextdb_service::{DomainTimeRange, MemoryLinks};
 
@@ -19,9 +19,9 @@ const ACTIVATED: &[u8] = b"record-control/activated";
 /// values, lexical text, vectors and extension attributes are committed by hash.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RecordControl {
+pub(crate) struct RecordControl {
     version: u16,
-    pub(super) policy: StoredPolicy,
+    pub(crate) policy: StoredPolicy,
     document_digest: String,
     valid_time: DomainTimeRange,
     /// Every string is a digest; the original IDs/predicates are never copied.
@@ -98,7 +98,7 @@ impl RecordControl {
         Ok(())
     }
 
-    fn validate_binding(
+    pub(in crate::record_journal) fn validate_binding(
         &self,
         event: &StoredEvent,
         reference: &RecordMutationRef,

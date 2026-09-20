@@ -116,7 +116,25 @@ impl NativeService {
         {
             return Err(permission_denied());
         }
-        let birth = self.record_birth(&snapshot, &policy, budget)?;
+        let (birth_digest, document_digest) = if let Some(pruned) =
+            self.pruned_record(&snapshot, &record_digest, revision, budget)?
+        {
+            let binding = ledger
+                .retained_record_sources(&workspace, &record_digest, revision)?
+                .ok_or_else(|| integrity("pruned record lost its classified origin"))?;
+            let control = binding.record_control()?;
+            pruned.witness.validate_origin(control)?;
+            (
+                control.birth_digest.clone(),
+                control.document_digest.clone(),
+            )
+        } else {
+            let birth = self.record_birth(&snapshot, &policy, budget)?;
+            (
+                canonical_digest(&birth)?,
+                canonical_digest(&birth.document)?,
+            )
+        };
         self.require_custody_rebuilt(&snapshot, &workspace)?;
         let mut controls = BTreeMap::new();
         for id in sources {
@@ -154,8 +172,8 @@ impl NativeService {
             record_digest,
             revision,
             transaction_from: policy.transaction_from,
-            birth_digest: digest_bytes(&encode(&birth)?),
-            document_digest: canonical_digest(&birth.document)?,
+            birth_digest,
+            document_digest,
             scopes: policy.access.scopes.clone(),
             sources: controls,
         };
@@ -475,7 +493,7 @@ impl NativeService {
         Ok(())
     }
 
-    fn verify_local_record_origin<S: ReadSnapshot>(
+    pub(crate) fn verify_local_record_origin<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         control: &RecordSourceControl,
@@ -510,14 +528,20 @@ impl NativeService {
                 "record provenance acceptance differs from local history",
             ));
         }
-        let birth = self.record_birth(snapshot, &policy, budget)?;
-        if digest_bytes(&encode(&birth)?) != control.birth_digest
-            || canonical_digest(&birth.document)? != control.document_digest
-            || birth.document.access.scopes != control.scopes
+        if let Some(pruned) =
+            self.pruned_record(snapshot, &control.record_digest, control.revision, budget)?
         {
-            return Err(integrity(
-                "record content differs from its retained provenance",
-            ));
+            pruned.witness.validate_origin(control)?;
+        } else {
+            let birth = self.record_birth(snapshot, &policy, budget)?;
+            if digest_bytes(&encode(&birth)?) != control.birth_digest
+                || canonical_digest(&birth.document)? != control.document_digest
+                || birth.document.access.scopes != control.scopes
+            {
+                return Err(integrity(
+                    "record content differs from its retained provenance",
+                ));
+            }
         }
         for (id, digest) in &control.sources {
             let origin = self.verified_capture_control(snapshot, *id, budget)?;

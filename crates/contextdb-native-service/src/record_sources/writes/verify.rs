@@ -112,6 +112,10 @@ impl NativeService {
             self.verified_record_group(snapshot, event, &intent, budget)?;
             return Ok(intent);
         }
+        if self.record_write_has_pruned_members(snapshot, event, budget)? {
+            self.verify_local_record_origin(snapshot, &intent.origins[0], budget)?;
+            return Ok(intent);
+        }
         let control = &intent.origins[0];
         let reference = &intent.records[0];
         let bytes = snapshot

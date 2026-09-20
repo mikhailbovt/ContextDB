@@ -19,6 +19,78 @@ fn seed(service: &NativeService) -> Fixture {
     seed_with_left_origins(service, 1)
 }
 
+#[test]
+fn record_pruning_preserves_correction_copy_proofs_and_independent_successors() {
+    let root = tempfile::tempdir().expect("root");
+    let (_ledger_directory, ledger) = suppression::tests::authority("pruned-correction");
+    let service = NativeService::open_with_suppression(
+        root.path().join("native"),
+        "pruned-correction",
+        [7; 32],
+        ledger,
+    )
+    .expect("native");
+    let f = seed(&service);
+    let inputs = BTreeSet::from([f.sources[3]]);
+    let mut original = service
+        .correct_memory_from_sources(f.request.clone(), &inputs, &mut budget())
+        .expect("correct");
+    original.replayed = true;
+    let new_left = hierarchy_edge_id("parent", "new").expect("left");
+    let new_right = hierarchy_edge_id("new", "child").expect("right");
+    let before = service
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("snapshot");
+    let independent: Vec<_> = ["new", new_right.as_str(), f.edges[1].id.as_str()]
+        .into_iter()
+        .map(|id| {
+            let key = history_key(&digest_bytes(id.as_bytes()), 1);
+            let bytes = before
+                .get(&service.keyspaces.content_history, &key)
+                .expect("independent");
+            (key, bytes)
+        })
+        .collect();
+    let removal = service
+        .request_original_removal(
+            &f.context,
+            &BTreeSet::from([f.sources[1]]),
+            "remove-left",
+            &mut budget(),
+        )
+        .expect("request");
+    for id in [new_left.as_str(), f.edges[0].id.as_str()] {
+        let witness = service
+            .prepare_record_removal(&f.context, &removal, id, 1, f.sources[1], &mut budget())
+            .expect("witness");
+        service
+            .prune_record_revision(&f.context, &witness, &mut budget())
+            .expect("prune copied edge");
+        service
+            .verify_native(true)
+            .expect("correction copy proof after each erasure");
+    }
+    let after = service
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("snapshot");
+    for (key, bytes) in independent {
+        assert_eq!(
+            after
+                .get(&service.keyspaces.content_history, &key)
+                .expect("independent"),
+            bytes
+        );
+    }
+    assert_eq!(
+        service
+            .correct_memory_from_sources(f.request, &inputs, &mut budget())
+            .expect("original correction receipt"),
+        original
+    );
+}
+
 fn seed_with_left_origins(service: &NativeService, left_origins: usize) -> Fixture {
     let context = input(1, "original").context;
     let mut sources = Vec::new();

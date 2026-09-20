@@ -8,6 +8,7 @@ use super::*;
 use crate::suppression::{RecordSourceControl, RemovalCheckpoint};
 
 mod graph;
+pub(crate) mod pruning;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -43,6 +44,33 @@ pub(crate) struct RecordRemovalWitness {
 }
 
 impl RecordRemovalWitness {
+    pub(crate) fn controls(&self) -> impl Iterator<Item = &RecordControl> {
+        std::iter::once(&self.birth).chain(self.closure.iter())
+    }
+
+    pub(crate) fn control(&self, global: u64) -> ServiceResult<&RecordControl> {
+        self.controls()
+            .find(|control| {
+                control
+                    .policy
+                    .transaction_to
+                    .unwrap_or(control.policy.transaction_from)
+                    == global
+            })
+            .ok_or_else(|| integrity("removed revision has no witness for this mutation"))
+    }
+
+    pub(crate) fn validate_origin(&self, origin: &RecordSourceControl) -> ServiceResult<()> {
+        self.validate(origin)
+    }
+    pub(crate) fn covers_mutation(&self, global: u64) -> bool {
+        self.birth.policy.transaction_from == global
+            || self
+                .closure
+                .as_ref()
+                .is_some_and(|control| control.policy.transaction_to == Some(global))
+    }
+
     pub(crate) fn policy(&self) -> &StoredPolicy {
         &self.closure.as_ref().unwrap_or(&self.birth).policy
     }
@@ -159,7 +187,13 @@ impl NativeService {
         if !policy_allows(&context.request, &access) {
             return Err(permission_denied());
         }
-        let witness = self.record_removal_witness(&snapshot, &policy, budget)?;
+        let witness = if let Some(pruned) =
+            self.pruned_record(&snapshot, &record_digest, revision, budget)?
+        {
+            pruned.witness
+        } else {
+            self.record_removal_witness(&snapshot, &policy, budget)?
+        };
         witness.validate(origin.record_control()?)?;
         #[cfg(test)]
         BEFORE_PUBLICATION.with(|hook| {
@@ -204,7 +238,7 @@ impl NativeService {
         })
     }
 
-    fn record_removal_witness<S: ReadSnapshot>(
+    pub(crate) fn record_removal_witness<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         policy: &StoredPolicy,

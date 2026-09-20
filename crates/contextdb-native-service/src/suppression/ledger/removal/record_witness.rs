@@ -5,6 +5,8 @@ use super::*;
 use crate::record_journal::controls::witness::{MAX_WITNESS_BYTES, RecordRemovalWitness};
 use crate::suppression::ledger::record_sources::RecordSourceEntry;
 
+pub(super) mod validation;
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RecordWitnessDeclaration {
@@ -83,7 +85,16 @@ impl NativeSuppressionLedger {
         let _guard = self.writes.enter(|| budget.check().map_err(budget_error))?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
         self.verify_record_witness_origin(&tx, &declaration, witness, budget)?;
-        if let Some((checkpoint, previous)) = self.find_record_witness(&tx, &declaration, budget)? {
+        if let Some((checkpoint, operation)) = self.find_record_control(
+            &tx,
+            &declaration.workspace,
+            &declaration.request,
+            &declaration.key(),
+            budget,
+        )? {
+            let Operation::RecordWitness { witness: previous } = operation else {
+                return Err(integrity("record witness locator has another operation"));
+            };
             if previous != declaration {
                 return Err(ServiceError::new(
                     ErrorCode::IdempotencyConflict,
@@ -120,46 +131,50 @@ impl NativeSuppressionLedger {
 
     // Follow the accepted suffix even on retries: a lost index is never absence
     // evidence. No history is restarted, and all work shares the caller's budget.
-    fn find_record_witness<S: ReadSnapshot>(
+    fn find_record_control<S: ReadSnapshot>(
         &self,
         snapshot: &S,
-        wanted: &RecordWitnessDeclaration,
+        workspace: &str,
+        requested: &RemovalCheckpoint,
+        key: &[u8],
         budget: &mut QueryBudget,
-    ) -> ServiceResult<Option<(RemovalCheckpoint, RecordWitnessDeclaration)>> {
+    ) -> ServiceResult<Option<(RemovalCheckpoint, Operation)>> {
         let head = self.removal_global_head(snapshot)?;
-        if wanted.request.sequence == 0 || wanted.request.sequence > head.sequence {
+        if requested.sequence == 0 || requested.sequence > head.sequence {
             return Err(integrity(
                 "record witness removal request is outside retained history",
             ));
         }
-        let request = self.budgeted_removal_event(snapshot, wanted.request.sequence, budget)?;
-        if request.checkpoint() != wanted.request
-            || !matches!(&request.operation, Operation::Request { intent, .. } if intent.workspace == wanted.workspace)
+        let request = self.budgeted_removal_event(snapshot, requested.sequence, budget)?;
+        if request.checkpoint() != *requested
+            || !matches!(&request.operation, Operation::Request { intent, .. } if intent.workspace == workspace)
         {
             return Err(integrity("record witness removal request differs"));
         }
-        let key = wanted.key();
         let mut previous = request.checkpoint();
         let mut found = None;
-        for sequence in wanted.request.sequence..head.sequence {
+        for sequence in requested.sequence..head.sequence {
             let event = self.budgeted_removal_event(snapshot, sequence + 1, budget)?;
             if event.previous != previous.digest {
                 return Err(integrity("record witness retained suffix is discontinuous"));
             }
-            if let Operation::RecordWitness { witness } = &event.operation
-                && witness.key() == key
-            {
+            let matches = match &event.operation {
+                Operation::RecordWitness { witness } => witness.key() == key,
+                Operation::RecordValidation { validation } => validation.key() == key,
+                _ => false,
+            };
+            if matches {
                 if found.is_some() {
                     return Err(integrity("duplicate retained record witness"));
                 }
-                found = Some((event.checkpoint(), witness.clone()));
+                found = Some((event.checkpoint(), event.operation.clone()));
             }
             previous = event.checkpoint();
         }
         if previous != head {
             return Err(integrity("record witness retained terminal differs"));
         }
-        let locator = snapshot.get(&self.rows, &key).map_err(storage_error)?;
+        let locator = snapshot.get(&self.rows, key).map_err(storage_error)?;
         if let Some(bytes) = &locator {
             budget.charge(1, bytes.len() as u64).map_err(budget_error)?;
         }
@@ -174,6 +189,66 @@ impl NativeSuppressionLedger {
             ));
         }
         Ok(found)
+    }
+
+    pub(crate) fn read_record_removal_witness(
+        &self,
+        receipt: &NativeRecordRemovalWitnessReceipt,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<RecordRemovalWitness> {
+        self.require_removal_authority()?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        let checkpoint = RemovalCheckpoint {
+            sequence: receipt.witness_sequence,
+            digest: receipt.digest.clone(),
+        };
+        let (declaration, witness) = self.record_witness_at(&snapshot, &checkpoint, budget)?;
+        if receipt.authority_id != self.authority_id()
+            || receipt.removal_sequence != declaration.request.sequence
+            || receipt.record_digest != declaration.record_digest
+            || receipt.revision != declaration.revision
+            || receipt.mutation_commit != declaration.mutation_commit
+        {
+            return Err(integrity(
+                "record witness receipt differs from retained acceptance",
+            ));
+        }
+        Ok(witness)
+    }
+
+    fn record_witness_at<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        checkpoint: &RemovalCheckpoint,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(RecordWitnessDeclaration, RecordRemovalWitness)> {
+        let event = self.budgeted_removal_event(snapshot, checkpoint.sequence, budget)?;
+        let Operation::RecordWitness {
+            witness: declaration,
+        } = &event.operation
+        else {
+            return Err(integrity("record witness receipt has another operation"));
+        };
+        if event.checkpoint() != *checkpoint
+            || self.find_record_control(
+                snapshot,
+                &declaration.workspace,
+                &declaration.request,
+                &declaration.key(),
+                budget,
+            )? != Some((checkpoint.clone(), event.operation.clone()))
+        {
+            return Err(integrity(
+                "record witness receipt has no exact retained acceptance",
+            ));
+        }
+        Ok((
+            declaration.clone(),
+            self.load_record_witness(snapshot, checkpoint, declaration, budget)?,
+        ))
     }
 
     fn budgeted_removal_event<S: ReadSnapshot>(

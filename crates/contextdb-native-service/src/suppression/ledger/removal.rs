@@ -46,6 +46,9 @@ enum Operation {
     RecordWitness {
         witness: record_witness::RecordWitnessDeclaration,
     },
+    RecordValidation {
+        validation: record_witness::validation::RecordWriteValidation,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -428,6 +431,7 @@ impl NativeSuppressionLedger {
         match &event.operation {
             Operation::Register { workspace } => valid_digest(workspace)?,
             Operation::RecordWitness { witness } => witness.validate(sequence)?,
+            Operation::RecordValidation { validation } => validation.validate(sequence)?,
             Operation::Request {
                 intent,
                 source_pages,
@@ -519,6 +523,9 @@ impl NativeSuppressionLedger {
             match &event.operation {
                 Operation::RecordWitness { witness } => {
                     self.verify_record_witness_rows(snapshot, &event, witness, expected)?;
+                }
+                Operation::RecordValidation { validation } => {
+                    self.verify_record_validation_rows(snapshot, &event, validation, expected)?;
                 }
                 Operation::Register { workspace } => {
                     if workspaces

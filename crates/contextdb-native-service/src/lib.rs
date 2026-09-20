@@ -32,6 +32,7 @@ mod raw_index;
 mod record_journal;
 pub use record_journal::NativeRecordControlPreparationReceipt;
 pub use record_journal::controls::witness::NativeRecordRemovalWitnessReceipt;
+pub use record_journal::controls::witness::pruning::NativeRecordPruningReceipt;
 mod record_sources;
 pub use record_sources::{
     NativePendingRecordWrites, NativeRecordSourceProgress, NativeRecordSourceReceipt,
@@ -345,6 +346,9 @@ struct StoredEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_record_control_preparation:
         Option<record_journal::controls::preparation::ControlPreparation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_pruning:
+        Option<record_journal::controls::witness::pruning::RecordPruningPublication>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -773,6 +777,11 @@ impl NativeService {
             } else {
                 None
             },
+            accepted_record_pruning: if operation == "record_prune" {
+                Some(decode(&response_bytes, "record pruning publication")?)
+            } else {
+                None
+            },
         };
         event.event_digest = event_digest(&event)?;
         let idempotency = StoredIdempotency {
@@ -1146,7 +1155,17 @@ impl NativeService {
             if entry.key != history_key(&policy.record_digest, policy.revision) {
                 return Err(integrity("native historical policy key is invalid"));
             }
-            let _ = self.load_content(snapshot, &policy)?;
+            if self
+                .pruned_record(
+                    snapshot,
+                    &policy.record_digest,
+                    policy.revision,
+                    &mut retention::audit_budget(),
+                )?
+                .is_none()
+            {
+                let _ = self.load_content(snapshot, &policy)?;
+            }
         }
         for entry in snapshot
             .scan_prefix(&self.keyspaces.policy_head, b"")
@@ -1278,6 +1297,7 @@ impl NativeService {
         self.verify_raw_index_records(snapshot)?;
         self.verify_assertion_records(snapshot)?;
         self.verify_record_mutations(snapshot)?;
+        self.verify_record_pruning(snapshot)?;
         self.verify_record_source_progress(snapshot)?;
         self.verify_record_writes(snapshot)?;
         for entry in snapshot
@@ -1309,152 +1329,7 @@ impl NativeService {
     }
 
     fn verify_active_graph_invariants<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<()> {
-        let mut active = BTreeMap::<String, (StoredPolicy, MemoryRecord)>::new();
-        for entry in snapshot
-            .scan_prefix(&self.keyspaces.policy_head, b"")
-            .map_err(storage_error)?
-        {
-            let policy: StoredPolicy = decode(&entry.value, "native active graph policy")?;
-            if policy.transaction_to.is_some() || policy.lifecycle != MemoryLifecycle::Active {
-                continue;
-            }
-            let record = self.load_content(snapshot, &policy)?;
-            if record.document.lifecycle != MemoryLifecycle::Active {
-                return Err(integrity(
-                    "active graph policy and content lifecycle disagree",
-                ));
-            }
-            if active
-                .insert(record.document.id.clone(), (policy, record))
-                .is_some()
-            {
-                return Err(integrity("active graph record identity is duplicated"));
-            }
-        }
-
-        let mut hierarchy_edges = Vec::new();
-        let mut candidate_edges = Vec::new();
-        for (id, (policy, record)) in &active {
-            let document = &record.document;
-            if document.kind == MemoryRecordKind::Edge
-                && document.links.predicate.as_deref() == Some(HIERARCHY_PARENT_PREDICATE)
-            {
-                let (Some(source), Some(target)) = (
-                    document.links.source.as_ref(),
-                    document.links.target.as_ref(),
-                ) else {
-                    return Err(integrity("active hierarchy edge endpoints are absent"));
-                };
-                if source == target || *id != hierarchy_edge_id(source, target)? {
-                    return Err(integrity(
-                        "active hierarchy edge identity or endpoints are invalid",
-                    ));
-                }
-                let Some((source_policy, source_record)) = active.get(source) else {
-                    return Err(integrity("active hierarchy edge source is absent"));
-                };
-                let Some((target_policy, target_record)) = active.get(target) else {
-                    return Err(integrity("active hierarchy edge target is absent"));
-                };
-                if source_policy.access != policy.access
-                    || target_policy.access != policy.access
-                    || matches!(
-                        source_record.document.kind,
-                        MemoryRecordKind::Edge | MemoryRecordKind::Candidate
-                    )
-                    || matches!(
-                        target_record.document.kind,
-                        MemoryRecordKind::Edge | MemoryRecordKind::Candidate
-                    )
-                {
-                    return Err(integrity(
-                        "active hierarchy edge crosses policy or record families",
-                    ));
-                }
-                hierarchy_edges.push((source.clone(), target.clone()));
-            }
-
-            if document.kind != MemoryRecordKind::Candidate {
-                if candidate_role(document).is_some()
-                    || document.links.predicate.as_deref()
-                        == Some(CANDIDATE_HIERARCHY_PARENT_PREDICATE)
-                {
-                    return Err(integrity(
-                        "candidate hierarchy metadata is attached to a canonical record",
-                    ));
-                }
-                continue;
-            }
-
-            match candidate_role(document) {
-                Some(CANDIDATE_MEMORY_ROLE) => {
-                    validate_candidate_proposal_document(document)?;
-                }
-                Some(CANDIDATE_EDGE_ROLE) => {
-                    validate_candidate_provenance_attributes(document)?;
-                    let (Some(source), Some(target), Some(predicate)) = (
-                        document.links.source.as_ref(),
-                        document.links.target.as_ref(),
-                        document.links.predicate.as_ref(),
-                    ) else {
-                        return Err(integrity("active candidate hierarchy link is malformed"));
-                    };
-                    if predicate != CANDIDATE_HIERARCHY_PARENT_PREDICATE
-                        || source == target
-                        || *id != candidate_hierarchy_edge_id(source, target)?
-                    {
-                        return Err(integrity(
-                            "active candidate hierarchy link identity is invalid",
-                        ));
-                    }
-                    let Some((source_policy, source_record)) = active.get(source) else {
-                        return Err(integrity(
-                            "active candidate hierarchy link source is absent",
-                        ));
-                    };
-                    let Some((target_policy, target_record)) = active.get(target) else {
-                        return Err(integrity(
-                            "active candidate hierarchy link target is absent",
-                        ));
-                    };
-                    if source_policy.access != policy.access
-                        || target_policy.access != policy.access
-                        || source_record.document.kind != MemoryRecordKind::Candidate
-                        || target_record.document.kind != MemoryRecordKind::Candidate
-                        || candidate_role(&source_record.document) != Some(CANDIDATE_MEMORY_ROLE)
-                        || candidate_role(&target_record.document) != Some(CANDIDATE_MEMORY_ROLE)
-                    {
-                        return Err(integrity(
-                            "active candidate hierarchy link crosses policy or candidate roles",
-                        ));
-                    }
-                    for attribute in [
-                        "contextdb.proposal.schema_version",
-                        "contextdb.proposal.state",
-                        "contextdb.proposal.input_digest",
-                        "contextdb.proposal.actor_id",
-                        "contextdb.proposal.agent_id",
-                        "contextdb.proposal.session_id",
-                        "contextdb.proposal.request_id",
-                        "contextdb.proposal.schema_id",
-                    ] {
-                        if document.attributes.get(attribute)
-                            != target_record.document.attributes.get(attribute)
-                        {
-                            return Err(integrity(
-                                "candidate hierarchy link provenance differs from its child",
-                            ));
-                        }
-                    }
-                    candidate_edges.push((source.clone(), target.clone()));
-                }
-                Some(_) | None => {
-                    return Err(integrity("active candidate role is absent or invalid"));
-                }
-            }
-        }
-        verify_acyclic_graph("hierarchy", &hierarchy_edges)?;
-        verify_acyclic_graph("candidate hierarchy", &candidate_edges)
+        self.verify_record_graph(snapshot)
     }
 }
 
@@ -3505,6 +3380,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != record_journal::RECORD_FEATURE
                 && feature != record_journal::CONTROL_FEATURE
                 && feature != record_journal::controls::preparation::FEATURE
+                && feature != record_journal::controls::witness::pruning::FEATURE
                 && feature != record_sources::FEATURE
                 && feature != record_sources::writes::WRITE_FEATURE
                 && feature != record_sources::writes::GROUP_FEATURE
@@ -3543,6 +3419,11 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 || manifest.suppression_authority.is_none()))
         || (manifest.features.contains(retention::RETENTION_FEATURE)
             && manifest.suppression_authority.is_none())
+        || (manifest
+            .features
+            .contains(record_journal::controls::witness::pruning::FEATURE)
+            && (!manifest.features.contains(record_journal::RECORD_FEATURE)
+                || !manifest.features.contains(retention::RETENTION_FEATURE)))
         || (manifest.features.contains(raw_index::REMOVAL_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || (manifest.features.contains(retention::PRUNING_FEATURE)

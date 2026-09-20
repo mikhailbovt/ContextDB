@@ -65,8 +65,7 @@ time, with hashes for record/link identifiers, values, text, vectors and
 attributes. Scope reconstruction can use these accepted controls. Their complete
 family and exact match to full bodies are verified across reopen and restore;
 missing controls cannot fall back to legacy behavior. Old references keep their
-encoding and receipts. Full bodies remain required until generic-record pruning
-is implemented. Controls have a separate
+encoding and receipts. Unpruned bodies remain required. Controls have a separate
 16 MiB bound per mutation group; overflow rejects the complete publication.
 
 `prepare_record_controls` adds verified controls for one older full mutation group
@@ -74,7 +73,8 @@ through a separate accepted publication (`continuous-record-control-preparation-
 It requires Admin and each revision's access policy, uses bounded analysis and a
 workspace CAS, and preserves original events and receipts. Retries validate the
 accepted history; a missing locator cannot create another preparation. Prepared
-controls support scope reconstruction without bodies, but do not permit pruning.
+controls support scope reconstruction; deletion also requires an independent
+removal witness and an accepted pruning publication.
 Hash-only history and unknown source provenance still require explicit migration.
 
 `prepare_record_removal` verifies one classified revision's accepted birth and
@@ -87,6 +87,15 @@ policy, bounded analysis and a workspace CAS precede external Sync. Retries
 check accepted history even when a locator is missing. The witness survives
 native restore; it neither erases bodies nor completes removal. Older full
 mutations require explicit control preparation first.
+
+`prune_record_revision` removes a classified revision's primary projection and
+every accepted birth/closure body in one native Sync. Its retained witness, current
+policy and workspace CAS bind the operation. Before the first member of a
+source-aware group disappears, the complete group's validation is independently
+committed against its exact event and origin intent. Deep verification then uses
+the retained controls and typed graph facts, checks all remaining bodies and
+rejects missing metadata or resurrected copies. Original receipts and hashed
+identity reservations survive partial cleanup, reopen and native restore.
 
 The first native capture implementation exposes `CapturePort` and the
 `NativeConversationCapture` host adapter (`contextdb-chat/service-adapter`).
@@ -231,9 +240,13 @@ The current local maintenance sequence is:
    relationships without values or envelopes. Explicit host authority policies
    remain schema configuration. Pruned labels permanently report unavailable
    support, so an erased negative transition cannot revive an old current value.
-4. `prune_original_sources` removes up to 256 primary body rows per Sync, retaining
+4. `prepare_record_removal` and `prune_record_revision` remove affected generic
+   revisions, including copied edges and historical bodies. Primary removal
+   checks the complete revision inventory; unknown origins or unaccepted copies
+   block cleanup, while independently sourced records remain intact.
+5. `prune_original_sources` removes up to 256 primary body rows per Sync, retaining
    exact policy/control commitments and journal-bound tombstones.
-5. `prune_original_payload` removes up to 32 staged chunks (8 MiB) per Sync after
+6. `prune_original_payload` removes up to 32 staged chunks (8 MiB) per Sync after
    all affected primary bodies are pruned. Starting a block checks fresh ownership
    and its full original, at most 64 MiB; continuation verifies the accepted progress
    chain and the next batch. The immutable staging header remains available.
@@ -245,10 +258,10 @@ fail verification. A backup made during cleanup hashes the actual remaining rows
 with the existing deep-digest algorithm; old full archives remain verifiable under
 the retained keys and restore behind current suppression.
 
-This executor is incomplete: primary pruning rejects affected live assertions
-and workspaces with generic-record publications that still require copy cleanup.
+This executor is incomplete: primary pruning rejects affected assertions or
+generic revisions whose body copies remain, and records with unknown origins.
 No local completion/admission publication exists, so removal requests continue to
-close disclosure. Complete copy inventory, generic-record cleanup, key disablement and
+close disclosure. Complete copy inventory, legacy migration, key disablement and
 physical/provider/export/backup dispositions remain open. These Rust APIs do not
 claim completed hard deletion or expose a model-facing deletion tool.
 
