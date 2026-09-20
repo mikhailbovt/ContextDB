@@ -87,6 +87,7 @@ impl NativeService {
         &self,
         snapshot: &S,
     ) -> ServiceResult<()> {
+        self.verify_raw_copy_publications(snapshot)?;
         let actual = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"raw/")
             .map_err(storage_error)?;

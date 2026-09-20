@@ -321,6 +321,18 @@ keys can still be needed, so this allocation report grants no permission to disa
 them. Witnesses are limited to 5 MiB; preparation and readback use shared budgets
 and may scan accepted semantic history or the retained removal suffix.
 
+With a current removal authority, `reclaim_raw_generations` independently retains
+each page's copy addresses and source controls before deleting it. Document and
+route rows are checked against their original; shared policy/scope rows have no
+single source owner. Witnesses retain value commitments and authenticated
+ciphertext/key identities, with no normalized words or payloads. Native progress
+binds the witness to its observed history and preceding page. Admin
+`read_raw_copy_witness` survives source pruning and older encrypted restore.
+Pages contain at most 1,024 rows plus the final manifest and occupy at most 1 MiB.
+Cancellation after independent Sync can leave a valid observation without a
+completed GC. Untracked older prefixes and unknown rows remain unresolved;
+these witnesses neither cover all historical copies nor authorize key retirement.
+
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never
 derive that master key from the rotatable token key. Encrypted backups use

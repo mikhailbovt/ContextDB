@@ -8,6 +8,7 @@ use super::*;
 mod assertion_witness;
 mod controls;
 mod inventory;
+mod raw_copies;
 mod record_witness;
 #[cfg(test)]
 mod tests;
@@ -53,6 +54,9 @@ enum Operation {
     },
     RecordValidation {
         validation: record_witness::validation::RecordWriteValidation,
+    },
+    RawCopies {
+        observation: raw_copies::RawCopyDeclaration,
     },
 }
 
@@ -438,6 +442,7 @@ impl NativeSuppressionLedger {
             Operation::RecordWitness { witness } => witness.validate(sequence)?,
             Operation::AssertionWitness { witness } => witness.validate(sequence)?,
             Operation::RecordValidation { validation } => validation.validate(sequence)?,
+            Operation::RawCopies { observation } => observation.validate()?,
             Operation::Request {
                 intent,
                 source_pages,
@@ -535,6 +540,14 @@ impl NativeSuppressionLedger {
                 }
                 Operation::RecordValidation { validation } => {
                     self.verify_record_validation_rows(snapshot, &event, validation, expected)?;
+                }
+                Operation::RawCopies { observation } => {
+                    if !workspaces.contains_key(&observation.workspace) {
+                        return Err(integrity(
+                            "raw copy observation precedes workspace registration",
+                        ));
+                    }
+                    self.verify_raw_copy_rows(snapshot, &event, observation, expected)?;
                 }
                 Operation::Register { workspace } => {
                     if workspaces

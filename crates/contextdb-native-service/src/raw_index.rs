@@ -1,7 +1,12 @@
 //! Persistent raw-source generations, advanced from the native capture outbox.
 
+pub(crate) mod copies;
 mod gc;
 mod verify;
+pub use copies::{
+    NativeRawCopyKind, NativeRawCopyObservation, NativeRawCopyReceipt, NativeRawCopyWitness,
+    NativeRawSourceControl, NativeRawValueVersion,
+};
 pub use gc::RawReclaimProgress;
 pub(super) use gc::retained_generations;
 
@@ -25,6 +30,7 @@ use super::{
 
 pub(super) const INDEX_FEATURE: &str = "continuous-raw-index-v1";
 pub(super) const GC_FEATURE: &str = "continuous-raw-generation-gc-v1";
+pub(crate) const COPY_FEATURE: &str = "continuous-raw-copy-witness-v1";
 pub(super) const REMOVAL_FEATURE: &str = "continuous-raw-removal-v1";
 pub(super) const MAX_DOMAINS: usize = 1024;
 pub(super) const MAX_TAIL: usize = 128;

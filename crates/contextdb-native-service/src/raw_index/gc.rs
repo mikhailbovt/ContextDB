@@ -13,6 +13,8 @@ const MAX_RECLAIM_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) struct Reclaiming {
     pub generation: u64,
     pub removed_rows: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copies: Option<NativeRawCopyReceipt>,
 }
 
 /// Logical index-row reclamation, not a physical erasure receipt.
@@ -29,6 +31,10 @@ pub struct RawReclaimProgress {
     pub finished: bool,
     /// Remaining manifests, including an unfinished reclamation job.
     pub retained_generations: u32,
+    /// Independently retained pre-deletion observations, when an authority is
+    /// available. Absence on a legacy page is not proof of historical coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copies: Option<NativeRawCopyReceipt>,
 }
 
 impl NativeService {
@@ -84,6 +90,7 @@ impl NativeService {
                 selected = Some(Reclaiming {
                     generation: number,
                     removed_rows: 0,
+                    copies: None,
                 });
                 break;
             }
@@ -96,6 +103,7 @@ impl NativeService {
                 total_removed_rows: 0,
                 finished: true,
                 retained_generations: retained.len() as u32,
+                copies: None,
             });
         };
         let prefix = generation_prefix(&workspace, job.generation);
@@ -116,19 +124,41 @@ impl NativeService {
                 .map_err(budget_error)?;
         }
         let finished = page.continuation.is_none();
+        let observation = self
+            .suppression
+            .as_ref()
+            .filter(|ledger| ledger.supports_removal())
+            .map(|_| {
+                self.observe_raw_copies(
+                    &snapshot,
+                    &context.request.workspace_id,
+                    &job,
+                    &page.entries,
+                    finished,
+                    budget,
+                )
+            })
+            .transpose()?;
         let removed_rows = page.entries.len() as u32;
         job.removed_rows = job
             .removed_rows
             .checked_add(u64::from(removed_rows))
             .ok_or_else(|| exhausted("raw reclamation row count overflow"))?;
-        let progress = RawReclaimProgress {
+        let mut progress = RawReclaimProgress {
             generation: Some(job.generation),
             removed_rows,
             total_removed_rows: job.removed_rows,
             finished,
             retained_generations: (retained.len() - usize::from(finished)) as u32,
+            copies: None,
         };
         drop(snapshot);
+        #[cfg(test)]
+        BEFORE_COPY_PUBLICATION.with(|hook| {
+            if let Some(hook) = hook.take() {
+                hook();
+            }
+        });
         let _guard = self.lock_index_publication(budget)?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
         let current: IndexState = self
@@ -136,6 +166,19 @@ impl NativeService {
             .unwrap_or_default();
         if current != expected {
             return Err(stale_index());
+        }
+        if let Some(observation) = &observation {
+            if self.global_head(&tx)? != observation.native_commit {
+                return Err(stale_index());
+            }
+            self.enable_capture_extension(&mut tx, COPY_FEATURE)?;
+            let receipt = self
+                .suppression
+                .as_ref()
+                .ok_or_else(|| integrity("raw copy authority absent"))?
+                .retain_raw_copy_witness(observation, budget)?;
+            job.copies = Some(receipt.clone());
+            progress.copies = Some(receipt);
         }
         self.enable_capture_extension(&mut tx, GC_FEATURE)?;
         for entry in page.entries {
@@ -167,7 +210,11 @@ impl NativeService {
         self.finish_frame(
             &mut tx,
             &frame,
-            "raw_reclamation",
+            if progress.copies.is_some() {
+                "raw_reclamation_with_copies"
+            } else {
+                "raw_reclamation"
+            },
             digest.as_bytes(),
             &digest,
             &progress,
@@ -207,4 +254,9 @@ pub(crate) fn retained_generations(state: &IndexState) -> ServiceResult<BTreeSet
         return Err(integrity("raw generation retention state invalid"));
     }
     Ok(retained)
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static BEFORE_COPY_PUBLICATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }

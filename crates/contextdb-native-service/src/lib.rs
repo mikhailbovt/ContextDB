@@ -62,7 +62,11 @@ pub use payload::{
     CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS, NativePayloadKeyInventory,
     NativePayloadPruningProgress,
 };
-pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
+pub use raw_index::{
+    NativeRawCopyKind, NativeRawCopyObservation, NativeRawCopyReceipt, NativeRawCopyWitness,
+    NativeRawSourceControl, NativeRawValueVersion, OriginalRevocationReceipt,
+    RawProjectionProgress, RawReclaimProgress,
+};
 pub use retention::{
     NativePrimaryKeyInventory, NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt,
     NativeSourcePruningReceipt,
@@ -331,6 +335,8 @@ struct StoredEvent {
     accepted_payload: Option<contextdb_core::OriginalPayloadRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_original_revocation: Option<OriginalRevocationReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_raw_reclamation: Option<RawReclaimProgress>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_assertions: Option<contextdb_service::AssertionReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -735,6 +741,11 @@ impl NativeService {
             event_digest: String::new(),
             accepted_original_revocation: if operation == "original_revocation" {
                 Some(decode(&response_bytes, "original revocation receipt")?)
+            } else {
+                None
+            },
+            accepted_raw_reclamation: if operation == "raw_reclamation_with_copies" {
+                Some(decode(&response_bytes, "raw reclamation progress")?)
             } else {
                 None
             },
@@ -3381,6 +3392,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != payload::REQUEST_TRANSFORM_FEATURE
                 && feature != raw_index::INDEX_FEATURE
                 && feature != raw_index::GC_FEATURE
+                && feature != raw_index::COPY_FEATURE
                 && feature != raw_index::REMOVAL_FEATURE
                 && feature != assertions::STATE_FEATURE
                 && feature != assertions::PRUNING_FEATURE

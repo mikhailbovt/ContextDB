@@ -81,6 +81,33 @@ pub(super) fn address(space: &Keyspace, key: &[u8]) -> String {
     hash.finalize().to_hex().to_string()
 }
 
+pub(crate) fn observe_value_version(
+    keys: &NativeCustodyKeys,
+    space: &Keyspace,
+    key: &[u8],
+    ciphertext: &[u8],
+    plaintext: &[u8],
+) -> contextdb_service::ServiceResult<crate::NativeRawValueVersion> {
+    if keys
+        .open_value(space, key, ciphertext, None)
+        .map_err(crate::storage_error)?
+        != plaintext
+    {
+        return Err(crate::integrity(
+            "raw copy ciphertext differs from its decoded snapshot",
+        ));
+    }
+    // open_value authenticated the complete envelope and its address before its
+    // identity is retained. Merely parsing a UUID is not observation evidence.
+    let key_id = uuid::Uuid::from_slice(&ciphertext[VALUE_MAGIC.len()..VALUE_MAGIC.len() + 16])
+        .map_err(|_| crate::integrity("raw copy key identity invalid"))?;
+    Ok(crate::NativeRawValueVersion {
+        authority_id: keys.authority_id(),
+        key_id,
+        ciphertext_digest: crate::digest_bytes(ciphertext),
+    })
+}
+
 fn random_key() -> contextdb_storage::Result<Zeroizing<[u8; 32]>> {
     let mut key = Zeroizing::new([0; 32]);
     getrandom::fill(key.as_mut()).map_err(|_| failure("custody entropy source unavailable"))?;

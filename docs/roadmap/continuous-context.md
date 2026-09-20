@@ -250,5 +250,12 @@ reopen and encrypted restore, including archives predating the batch. Tests cove
 independent data, retractions, policy, lost acknowledgement, publication races,
 missing witnesses and rehashed false selection. Shared and cleaned replacement
 keys remain available; this does not establish safe key retirement.
+Raw generation reclamation now retains source/address and observed ciphertext
+evidence before each page is deleted. Native verification binds that evidence to
+the accepted GC history; shared metadata stays distinct from source-owned rows.
+Tests cover pruning, actual authority/native reopen, empty/full/partial encrypted
+archives, lost acknowledgement, concurrent publication and damaged page chains.
+Older untracked prefixes, current-generation inventory and unobserved historical
+versions remain open; observation does not establish erasure or key retirement.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.
