@@ -211,9 +211,60 @@ fn nonretrievable_legacy_cleanup_preserves_policy_and_encrypted_archive_recovery
             &mut budget(),
         )
         .expect("witness");
+    let record_keys = native
+        .read_record_key_inventory(&context, &witness, &mut budget())
+        .expect("denied legacy body keys");
+    assert_eq!(record_keys.bodies.len(), 2);
+    assert!(
+        record_keys
+            .bodies
+            .values()
+            .all(|versions| !versions.is_empty())
+    );
+    for restriction in ["admin", "scope", "purpose", "audience", "clearance"] {
+        let mut denied = context.clone();
+        match restriction {
+            "admin" => {
+                denied.capability_grants.remove(&Capability::Admin);
+            }
+            "scope" => denied.request.scopes = BTreeSet::from(["outside".into()]),
+            "purpose" => denied.request.purpose = "outside".into(),
+            "audience" => {
+                denied.request.subject_id = "outsider".into();
+                denied.request.audiences.clear();
+            }
+            "clearance" => denied.request.clearance = Sensitivity::Public,
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            native
+                .read_record_key_inventory(&denied, &witness, &mut budget())
+                .expect_err("record policy still applies")
+                .code,
+            if restriction == "admin" {
+                ErrorCode::Unauthorized
+            } else {
+                ErrorCode::PermissionDenied
+            }
+        );
+    }
+    let mut forged = witness.clone();
+    forged.revision += 1;
+    assert!(
+        native
+            .read_record_key_inventory(&context, &forged, &mut budget())
+            .is_err()
+    );
     native
         .prune_record_revision(&context, &witness, &mut budget())
         .expect("prune denied revision");
+    assert_eq!(
+        native
+            .read_record_key_inventory(&context, &witness, &mut budget())
+            .expect("pruned record keys")
+            .bodies,
+        record_keys.bodies
+    );
     assert_eq!(
         native
             .bind_record_sources(&context, "denied-record", 1, &targets, &mut budget())
@@ -288,6 +339,13 @@ fn nonretrievable_legacy_cleanup_preserves_policy_and_encrypted_archive_recovery
                 digest: archive.digest,
             })
             .expect("encrypted restore with current authority");
+        assert_eq!(
+            restored
+                .read_record_key_inventory(&context, &witness, &mut budget())
+                .expect("record key families survive old and cleaned restore")
+                .bodies,
+            record_keys.bodies
+        );
         restored
             .prepare_record_controls(&context, response.commit_seq, &mut budget())
             .expect("prepare or retry restored denied revision");

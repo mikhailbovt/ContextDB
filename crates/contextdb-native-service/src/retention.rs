@@ -6,7 +6,7 @@ use suppression::{RemovalCheckpoint, RemovalIntent};
 
 use super::*;
 
-mod keys;
+pub(crate) mod keys;
 mod preparation;
 mod pruning;
 pub use keys::NativePrimaryKeyInventory;

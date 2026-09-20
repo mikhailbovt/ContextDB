@@ -90,6 +90,11 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
     )
     .expect("native");
     let setup = request(1, "setup");
+    let empty = native
+        .create_backup(CreateBackupRequest {
+            context: setup.context.clone(),
+        })
+        .expect("archive before block staging");
     let source_bytes = b"privateblockplaintextq "
         .iter()
         .copied()
@@ -169,6 +174,44 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
             &mut budget(),
         )
         .expect("request");
+    let chunk_keys = native
+        .read_payload_key_inventory(&selected.context, &removal, block.block_id, &mut budget())
+        .expect("selected block key inventory");
+    assert_eq!(chunk_keys.payload, block);
+    assert_eq!(chunk_keys.chunks.len(), 4);
+    assert!(
+        chunk_keys
+            .chunks
+            .values()
+            .all(|versions| versions.len() == 1)
+    );
+    assert!(
+        native
+            .read_payload_key_inventory(&selected.context, &removal, keep.block_id, &mut budget())
+            .is_err(),
+        "independently shared blocks cannot enter the key selection"
+    );
+    let novel_keys = native
+        .read_payload_key_inventory(&selected.context, &removal, orphan.block_id, &mut budget())
+        .expect("request-only novel block with verified absence of independent owners");
+    assert_eq!(novel_keys.chunks.len(), 1);
+    assert_eq!(novel_keys.chunks[&0].len(), 1);
+    let mut denied = selected.context.clone();
+    denied.capability_grants.remove(&Capability::Admin);
+    assert_eq!(
+        native
+            .read_payload_key_inventory(&denied, &removal, block.block_id, &mut budget())
+            .expect_err("admin required")
+            .code,
+        ErrorCode::Unauthorized
+    );
+    let mut forged = removal.clone();
+    forged.inspected_workspace_commit += 1;
+    assert!(
+        native
+            .read_payload_key_inventory(&selected.context, &forged, block.block_id, &mut budget())
+            .is_err()
+    );
     let ids = prepare(&native, &selected, &removal);
     assert_eq!(
         ids.len(),
@@ -223,6 +266,13 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
         keys.clone(),
     )
     .expect("reopen unfinished cleanup");
+    assert_eq!(
+        native
+            .read_payload_key_inventory(&selected.context, &removal, block.block_id, &mut budget())
+            .expect("chunk keys survive partial cleanup and reopen")
+            .chunks,
+        chunk_keys.chunks
+    );
     native
         .verify_native(true)
         .expect("exact missing prefix and remaining chunk suffix");
@@ -269,6 +319,13 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
         }
     }
     assert!(last.complete);
+    assert_eq!(
+        native
+            .read_payload_key_inventory(&selected.context, &removal, block.block_id, &mut budget())
+            .expect("complete logical chunk removal preserves key inventory")
+            .chunks,
+        chunk_keys.chunks
+    );
     assert_eq!(
         native
             .prune_original_payload(
@@ -334,6 +391,29 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
             context: selected.context.clone(),
         })
         .expect("fully pruned local archive");
+    let empty_restore = NativeService::open_encrypted(
+        root.path().join("empty"),
+        "payload-cleanup",
+        [9; 32],
+        ledger.clone(),
+        keys.clone(),
+    )
+    .expect("empty restore target");
+    empty_restore
+        .restore_backup(RestoreBackupRequest {
+            context: selected.context.clone(),
+            format: empty.format,
+            bytes: empty.bytes,
+            digest: empty.digest,
+        })
+        .expect("restore archive predating the block");
+    assert_eq!(
+        empty_restore
+            .read_payload_key_inventory(&selected.context, &removal, block.block_id, &mut budget())
+            .expect("retained block keys when native header and chunks are absent")
+            .chunks,
+        chunk_keys.chunks
+    );
     for (name, archive) in [("old", old), ("partial", partial), ("complete", complete)] {
         let restored = NativeService::open_encrypted(
             root.path().join(name),
@@ -351,6 +431,30 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
                 digest: archive.digest,
             })
             .expect("restore exact remaining rows");
+        assert_eq!(
+            restored
+                .read_payload_key_inventory(
+                    &selected.context,
+                    &removal,
+                    block.block_id,
+                    &mut budget()
+                )
+                .expect("old/partial/cleaned archive key inventory")
+                .chunks,
+            chunk_keys.chunks
+        );
+        assert_eq!(
+            restored
+                .read_payload_key_inventory(
+                    &selected.context,
+                    &removal,
+                    orphan.block_id,
+                    &mut budget()
+                )
+                .expect("novel block keys survive their body removal")
+                .chunks,
+            novel_keys.chunks
+        );
         restored
             .verify_native(true)
             .expect("restored payload closure");

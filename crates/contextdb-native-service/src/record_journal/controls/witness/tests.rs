@@ -5,6 +5,7 @@ use std::sync::Arc;
 use super::*;
 use crate::record_sources::tests::{budget, input, publication};
 
+mod key_inventory;
 mod legacy;
 mod nonretrievable;
 
@@ -21,15 +22,28 @@ pub(crate) struct Fixture {
 }
 
 pub(crate) fn fixture() -> Fixture {
+    fixture_with_keys(None)
+}
+
+fn fixture_with_keys(keys: Option<Arc<NativeCustodyKeys>>) -> Fixture {
     let root = tempfile::tempdir().expect("root");
     let (ledger_directory, ledger) = suppression::tests::authority("record-witness");
     let service = Arc::new(
-        NativeService::open_with_suppression(
-            root.path().join("native"),
-            "record-witness",
-            [7; 32],
-            ledger.clone(),
-        )
+        match keys {
+            Some(keys) => NativeService::open_encrypted(
+                root.path().join("native"),
+                "record-witness",
+                [7; 32],
+                ledger.clone(),
+                keys,
+            ),
+            None => NativeService::open_with_suppression(
+                root.path().join("native"),
+                "record-witness",
+                [7; 32],
+                ledger.clone(),
+            ),
+        }
         .expect("native"),
     );
     let first = input(1, "PRIVATE-WITNESS-ORIGINAL");

@@ -237,5 +237,11 @@ Budgeted catalog pages bind the complete allocation chain and retain authenticat
 continuations across reopen. Administrative primary-key inventory joins retained
 source lineage to historical allocations after pruning or older restore, including
 descendants absent from that archive, and excludes independent source addresses.
+Selected block keys remain identifiable from retained metadata after chunk cleanup
+or restore of an archive predating staging; independent shared blocks are excluded.
+Record inventory identifies all historical primary, birth and closure keys from
+independent revision witnesses after pruning, reopen and encrypted restore, with
+stored access labels still enforced. Allocated keys do not prove native use or
+physical absence.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

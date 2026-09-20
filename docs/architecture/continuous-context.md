@@ -298,10 +298,15 @@ This is allocation evidence, including potentially unused keys after interruptio
 
 Admin `read_original_key_inventory` joins that catalog to the selected request's
 retained roots and descendants, including historical primary keys after pruning
-or old-native restore. Independent source addresses are excluded. The complete
-scan admits at most 65,536 selected allocations and 32 MiB of output. This report
-does not prove native use or physical absence, cover other copy classes, retire
-keys or reopen disclosure.
+or old-native restore. `read_payload_key_inventory` identifies each selected
+block's chunk keys from retained ownership and length, even if an older archive
+predates staging. Independent source addresses and retained shared blocks are
+excluded. `read_record_key_inventory` uses an independent revision witness to
+identify its historical primary, accepted birth and optional closure keys; Admin
+and all other stored access labels remain required for non-retrievable revisions.
+Each complete scan admits at most 65,536 selected allocations and 32 MiB of output.
+These reports do not prove native use or physical absence, cover all copy classes,
+retire keys or reopen disclosure.
 
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never

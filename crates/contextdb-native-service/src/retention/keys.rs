@@ -6,6 +6,26 @@ use super::*;
 const MAX_ALLOCATIONS: usize = 65_536;
 const MAX_REPORT_BYTES: usize = 32 * 1024 * 1024;
 
+pub(crate) struct KeyAllocationSelection<T> {
+    pub authority_id: uuid::Uuid,
+    pub revision: u64,
+    pub digest: Option<String>,
+    pub owners: BTreeMap<T, Vec<NativeKeyAllocation>>,
+}
+
+pub(crate) fn charge_report<T: Serialize>(
+    report: &T,
+    budget: &mut QueryBudget,
+) -> ServiceResult<()> {
+    let bytes = encode(report)?;
+    if bytes.len() > MAX_REPORT_BYTES {
+        return Err(exhausted("key inventory exceeds 32 MiB"));
+    }
+    budget
+        .charge(0, bytes.len() as u64)
+        .map_err(raw_index::budget_error)
+}
+
 /// Primary-value key allocations selected by a retained removal request.
 /// Allocations may precede interrupted native writes. An empty source list proves
 /// no physical absence, and this report authorizes neither key retirement nor
@@ -48,11 +68,7 @@ impl NativeService {
         // Authenticate the retained request and workspace before inspecting any
         // descriptor, including requests for sources absent from an old replica.
         let lineage = self.read_original_removal_inventory(context, receipt, budget)?;
-        let keys = self.engine.keys.as_ref().ok_or_else(|| {
-            unsupported("primary key inventory requires independently retained encrypted custody")
-        })?;
         let mut addresses = BTreeMap::new();
-        let mut sources = BTreeMap::new();
         for source in lineage.sources {
             let id = source.receipt.event_id;
             let address = encryption::address(
@@ -62,10 +78,42 @@ impl NativeService {
             budget
                 .charge(1, (address.len() + 16) as u64)
                 .map_err(raw_index::budget_error)?;
-            if addresses.insert(address, id).is_some() || sources.insert(id, Vec::new()).is_some() {
+            if addresses.insert(address, id).is_some() {
                 return Err(integrity("primary source key addresses are ambiguous"));
             }
         }
+        let selected = self.select_key_allocations(addresses, budget)?;
+        let report = NativePrimaryKeyInventory {
+            database_id: self.database_id.clone(),
+            workspace_id: context.request.workspace_id.clone(),
+            request: receipt.clone(),
+            custody_authority_id: selected.authority_id,
+            allocation_revision: selected.revision,
+            allocation_digest: selected.digest,
+            sources: selected.owners,
+        };
+        charge_report(&report, budget)?;
+        Ok(report)
+    }
+
+    // Callers authenticate retained ownership before selecting any descriptors.
+    // One traversal keeps all requested copy addresses at one allocation revision.
+    pub(crate) fn select_key_allocations<T: Ord + Clone>(
+        &self,
+        addresses: BTreeMap<String, T>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<KeyAllocationSelection<T>> {
+        if addresses.len() > MAX_ALLOCATIONS {
+            return Err(exhausted("key inventory exceeds 65536 addresses"));
+        }
+        let keys = self.engine.keys.as_ref().ok_or_else(|| {
+            unsupported("key inventory requires independently retained encrypted custody")
+        })?;
+        let mut owners: BTreeMap<_, Vec<_>> = addresses
+            .values()
+            .cloned()
+            .map(|owner| (owner, Vec::new()))
+            .collect();
         let mut cursor = None;
         let mut count = 0;
         let last = loop {
@@ -73,14 +121,14 @@ impl NativeService {
             for entry in &page.entries {
                 if let Some(id) = addresses.get(&entry.address_digest) {
                     if count == MAX_ALLOCATIONS {
-                        return Err(exhausted("primary key inventory exceeds 65536 allocations"));
+                        return Err(exhausted("key inventory exceeds 65536 allocations"));
                     }
                     budget
                         .charge(1, encode(entry)?.len() as u64)
                         .map_err(raw_index::budget_error)?;
-                    sources
+                    owners
                         .get_mut(id)
-                        .ok_or_else(|| integrity("primary source key owner is absent"))?
+                        .ok_or_else(|| integrity("key inventory owner is absent"))?
                         .push(entry.clone());
                     count += 1;
                 }
@@ -90,22 +138,11 @@ impl NativeService {
             };
             cursor = Some(next);
         };
-        let report = NativePrimaryKeyInventory {
-            database_id: self.database_id.clone(),
-            workspace_id: context.request.workspace_id.clone(),
-            request: receipt.clone(),
-            custody_authority_id: last.authority_id,
-            allocation_revision: last.revision,
-            allocation_digest: last.revision_digest,
-            sources,
-        };
-        let bytes = encode(&report)?;
-        if bytes.len() > MAX_REPORT_BYTES {
-            return Err(exhausted("primary key inventory exceeds 32 MiB"));
-        }
-        budget
-            .charge(0, bytes.len() as u64)
-            .map_err(raw_index::budget_error)?;
-        Ok(report)
+        Ok(KeyAllocationSelection {
+            authority_id: last.authority_id,
+            revision: last.revision,
+            digest: last.revision_digest,
+            owners,
+        })
     }
 }

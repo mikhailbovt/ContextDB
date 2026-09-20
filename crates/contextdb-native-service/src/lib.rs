@@ -31,8 +31,10 @@ mod raw;
 mod raw_index;
 mod record_journal;
 pub use record_journal::NativeRecordControlPreparationReceipt;
-pub use record_journal::controls::witness::NativeRecordRemovalWitnessReceipt;
 pub use record_journal::controls::witness::pruning::NativeRecordPruningReceipt;
+pub use record_journal::controls::witness::{
+    NativeRecordBodyKind, NativeRecordKeyInventory, NativeRecordRemovalWitnessReceipt,
+};
 mod record_sources;
 pub use record_sources::{
     NativePendingRecordWrites, NativeRecordSourceProgress, NativeRecordSourceReceipt,
@@ -54,7 +56,8 @@ pub use encryption::{
 };
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{
-    CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS, NativePayloadPruningProgress,
+    CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS, NativePayloadKeyInventory,
+    NativePayloadPruningProgress,
 };
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
 pub use retention::{

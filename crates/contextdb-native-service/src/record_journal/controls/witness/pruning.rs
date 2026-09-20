@@ -296,7 +296,7 @@ pub(crate) fn mutation_identity(global: u64, key: &[u8]) -> ServiceResult<(&str,
     Ok((record, revision))
 }
 
-fn mutation_address(global: u64, record: &str, revision: u32) -> Vec<u8> {
+pub(super) fn mutation_address(global: u64, record: &str, revision: u32) -> Vec<u8> {
     format!("{}{record}/{revision:010}", mutation_prefix(global)).into_bytes()
 }
 fn pruned_key(record: &str, revision: u32) -> Vec<u8> {

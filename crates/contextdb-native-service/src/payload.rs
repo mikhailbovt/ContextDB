@@ -31,7 +31,9 @@ pub const CAPTURE_MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 pub const CAPTURE_MAX_REQUEST_PARTS: usize = 512;
 const CHUNK_BYTES: usize = 256 * 1024;
 
+mod keys;
 mod pruning;
+pub use keys::NativePayloadKeyInventory;
 pub use pruning::NativePayloadPruningProgress;
 pub(super) use pruning::{PAYLOAD_PRUNING_FEATURE, PayloadPruningPublication};
 

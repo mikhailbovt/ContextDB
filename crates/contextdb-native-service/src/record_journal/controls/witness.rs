@@ -8,6 +8,8 @@ use super::*;
 use crate::suppression::{RecordSourceControl, RemovalCheckpoint};
 
 mod graph;
+mod keys;
+pub use keys::{NativeRecordBodyKind, NativeRecordKeyInventory};
 pub(crate) mod pruning;
 #[cfg(test)]
 pub(crate) mod tests;
