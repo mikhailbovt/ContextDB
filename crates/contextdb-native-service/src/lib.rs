@@ -33,7 +33,7 @@ pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
-pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress};
+pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -101,6 +101,7 @@ fn native_capability_manifest() -> contextdb_service::CapabilityManifestV1 {
             "policy_first_candidate_recall",
             "policy_first_candidate_traversal",
             "quarantined_memory_proposals",
+            "raw_index_generation_gc",
             "restart_verification",
             "status",
             "verify",
@@ -2963,6 +2964,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != payload::MODEL_PROTOCOL_FEATURE
                 && feature != payload::REQUEST_TRANSFORM_FEATURE
                 && feature != raw_index::INDEX_FEATURE
+                && feature != raw_index::GC_FEATURE
                 && feature != assertions::STATE_FEATURE
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE

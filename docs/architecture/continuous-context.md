@@ -148,8 +148,21 @@ metadata/range traversal. Exhaustive pages freeze generation coverage and tail;
 top-k reports incomplete work separately. Shared work/byte/deadline/cancellation
 checks cover the query and projection publication lock. These finite bounds do
 not establish the million-event latency target or eliminate hardware timing
-channels. Generation reclamation, encrypted custody and physical deletion remain
-separate hardening gates.
+channels. Encryption and physical deletion remain separate hardening gates.
+
+Admin `reclaim_raw_generations(context, max_rows, budget)` removes obsolete
+generation rows in batches of at most 1,024 rows / 8 MiB. The three-generation
+limit applies to retained generations; identities continue increasing after
+reclamation. Active and current building generations are protected. A build with
+obsolete authorization or format may be abandoned, allowing a fresh rebuild
+after revocation. Empty maintenance polls do not publish journal entries.
+
+The `continuous-raw-generation-gc-v1` feature retains unfinished cleanup across
+restart and backup/restore. Verification reconstructs every usable generation;
+rows in the explicitly unreachable generation being discarded are opaque garbage
+until cleanup completes. Existing short-lived physical read views can retain
+their earlier bytes. This API reclaims logical index rows and does not certify
+physical erasure, blob deletion or backup suppression.
 
 ### Inherited disclosure restrictions
 
