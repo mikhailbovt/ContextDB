@@ -74,7 +74,7 @@ pub struct CustodyProgress {
     pub processed: u32,
     /// Current workspace revocation epoch.
     pub authorization_epoch: u64,
-    /// Disclosure can resume; a stale raw generation still needs rebuilding.
+    /// Custody is current; retention and index gates may still close disclosure.
     pub caught_up: bool,
 }
 
@@ -262,6 +262,16 @@ impl NativeService {
         workspace: &str,
     ) -> ServiceResult<()> {
         self.require_suppression_current(snapshot, workspace)?;
+        self.require_custody_rebuilt(snapshot, workspace)
+    }
+
+    // Maintenance can rebuild while retention intentionally closes disclosure.
+    pub(super) fn require_custody_rebuilt<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+    ) -> ServiceResult<()> {
+        self.require_suppression_prefix_current(snapshot, workspace)?;
         match self.custody_state(snapshot, workspace)? {
             Some(state) if !state.pending => Ok(()),
             None if self
@@ -293,16 +303,6 @@ impl NativeService {
             return Err(permission_denied());
         }
         Ok(())
-    }
-
-    pub(super) fn derived_custody_policies<S: ReadSnapshot>(
-        &self,
-        snapshot: &S,
-        id: ObservationId,
-    ) -> ServiceResult<Vec<AccessPolicy>> {
-        let record = self.custody_record(snapshot, id)?;
-        self.require_custody_ready(snapshot, &record.workspace)?;
-        Ok(record.policies)
     }
 
     // Administrative reconstruction of an archived prefix is independent of

@@ -6,6 +6,10 @@ use suppression::{RemovalCheckpoint, RemovalIntent};
 
 use super::*;
 
+mod preparation;
+pub use preparation::NativeRemovalPreparationReceipt;
+pub(super) use preparation::RemovalPreparationPublication;
+
 pub(super) const RETENTION_FEATURE: &str = "continuous-retention-authority-v1";
 
 /// Durable intent to remove originals and their dependent data.

@@ -34,8 +34,13 @@ pub(crate) struct RemovalIntent {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Operation {
-    Register { workspace: String },
-    Request { intent: RemovalIntent },
+    Register {
+        workspace: String,
+    },
+    Request {
+        intent: RemovalIntent,
+        source_pages: Vec<ContentDigest>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -208,6 +213,7 @@ impl NativeSuppressionLedger {
             &mut tx,
             Operation::Request {
                 intent: intent.clone(),
+                source_pages: inventory::source_page_digests(inventory)?,
             },
         )?;
         tx.put(
@@ -268,7 +274,7 @@ impl NativeSuppressionLedger {
         if event.checkpoint() != *checkpoint {
             return Err(invalid("removal request commitment differs"));
         }
-        let Operation::Request { intent } = event.operation else {
+        let Operation::Request { intent, .. } = event.operation else {
             return Err(invalid("retention registration is not a removal request"));
         };
         if intent.workspace != workspace {
@@ -286,6 +292,34 @@ impl NativeSuppressionLedger {
         }
         let inventory = self.read_removal_inventory(&snapshot, &intent, budget)?;
         Ok((intent, inventory))
+    }
+
+    pub(crate) fn retained_removal_intent(
+        &self,
+        workspace: &str,
+        checkpoint: &RemovalCheckpoint,
+    ) -> ServiceResult<RemovalIntent> {
+        self.require_removal_authority()?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        if checkpoint.sequence == 0
+            || checkpoint.sequence > self.removal_global_head(&snapshot)?.sequence
+        {
+            return Err(invalid("removal request is outside the retained authority"));
+        }
+        let event = self.read_removal_event(&snapshot, checkpoint.sequence)?;
+        if event.checkpoint() != *checkpoint {
+            return Err(invalid("removal request commitment differs"));
+        }
+        let Operation::Request { intent, .. } = event.operation else {
+            return Err(invalid("retention registration is not a request"));
+        };
+        if intent.workspace != workspace {
+            return Err(permission_denied());
+        }
+        Ok(intent)
     }
 
     fn append_removal_event<T: WriteTransaction>(
@@ -353,7 +387,7 @@ impl NativeSuppressionLedger {
             let event = self.read_removal_event(snapshot, head.sequence)?;
             if event.checkpoint() != head
                 || !matches!(&event.operation,
-                Operation::Request { intent } if intent.workspace == workspace)
+                Operation::Request { intent, .. } if intent.workspace == workspace)
             {
                 return Err(integrity(
                     "workspace retention head lacks its accepted request",
@@ -385,7 +419,15 @@ impl NativeSuppressionLedger {
         }
         match &event.operation {
             Operation::Register { workspace } => valid_digest(workspace)?,
-            Operation::Request { intent } => self.validate_removal_intent(intent)?,
+            Operation::Request {
+                intent,
+                source_pages,
+            } => {
+                self.validate_removal_intent(intent)?;
+                if source_pages.is_empty() || source_pages.len() > 256 {
+                    return Err(integrity("retained source page manifest is invalid"));
+                }
+            }
         }
         Ok(event)
     }
@@ -408,7 +450,7 @@ impl NativeSuppressionLedger {
         if event.checkpoint() != checkpoint {
             return Err(integrity("retention retry checkpoint differs"));
         }
-        let Operation::Request { intent } = event.operation else {
+        let Operation::Request { intent, .. } = event.operation else {
             return Err(integrity("retention retry is not a request"));
         };
         if intent.workspace != workspace || intent.retry_key != retry {
@@ -472,7 +514,10 @@ impl NativeSuppressionLedger {
                         return Err(integrity("retention workspace was registered twice"));
                     }
                 }
-                Operation::Request { intent } => {
+                Operation::Request {
+                    intent,
+                    source_pages,
+                } => {
                     if workspaces.get(&intent.workspace) != Some(&intent.previous)
                         || expected
                             .insert(
@@ -490,6 +535,11 @@ impl NativeSuppressionLedger {
                     );
                     let mut budget = inventory::verification_budget();
                     let inventory = self.read_removal_inventory(snapshot, intent, &mut budget)?;
+                    if inventory::source_page_digests(&inventory)? != *source_pages {
+                        return Err(integrity(
+                            "retained source page manifest differs from inventory",
+                        ));
+                    }
                     for (key, value) in inventory::rows(&inventory, &mut budget)? {
                         expected.insert(key, value);
                     }

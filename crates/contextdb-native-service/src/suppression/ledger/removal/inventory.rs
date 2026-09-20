@@ -5,6 +5,9 @@ use crate::NativeDeletionLineage;
 
 use super::*;
 
+mod sources;
+pub(super) use sources::source_page_digests;
+
 const CHUNK_BYTES: usize = 256 * 1024;
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 const MAX_TARGETS: usize = 65_536;
@@ -43,6 +46,7 @@ pub(super) fn rows(
     for (index, chunk) in bytes.chunks(CHUNK_BYTES).enumerate() {
         rows.insert(format!("{prefix}{index:08}").into_bytes(), chunk.to_vec());
     }
+    rows.extend(sources::source_rows(inventory, budget)?);
     Ok(rows)
 }
 

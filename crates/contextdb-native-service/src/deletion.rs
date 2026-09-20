@@ -8,7 +8,7 @@ use contextdb_service::CaptureReceipt;
 
 use super::*;
 
-const DOMAIN: &str = "contextdb/native-source-deletion-lineage/v1";
+const DOMAIN: &str = "contextdb/native-source-deletion-lineage/v2";
 const PAGE_ENTRIES: usize = 256;
 const PAGE_BYTES: usize = 1024 * 1024;
 const MAX_TARGETS: usize = 65_536;
@@ -21,6 +21,8 @@ pub struct NativeDeletionSource {
     pub receipt: CaptureReceipt,
     /// Digest of the accepted content-free recovery metadata.
     pub recovery_digest: ContentDigest,
+    /// Commitment to the complete validated immutable capture-control record.
+    pub control_digest: ContentDigest,
 }
 
 /// Exact captured descendants and shared payload owners at one workspace commit.
@@ -67,6 +69,7 @@ impl NativeDeletionLineage {
 struct SourceNode {
     receipt: CaptureReceipt,
     recovery_digest: Option<ContentDigest>,
+    control_digest: ContentDigest,
     inputs: custody::Inputs,
     owned_payload: Option<ContentBlockId>,
 }
@@ -262,6 +265,7 @@ impl NativeService {
                         _ => None,
                     };
                     graph.insert(SourceNode {
+                        control_digest: self.capture_control_digest(snapshot, &original)?,
                         receipt: original.receipt,
                         recovery_digest: work.recovery_digest,
                         inputs,
@@ -403,6 +407,7 @@ impl SourceGraph {
             sources.push(NativeDeletionSource {
                 receipt: node.receipt.clone(),
                 recovery_digest,
+                control_digest: node.control_digest,
             });
             let mut add = |child: ObservationId| -> ServiceResult<()> {
                 budget.charge(1, 32).map_err(budget_error)?;

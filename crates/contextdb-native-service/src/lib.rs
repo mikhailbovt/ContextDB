@@ -44,7 +44,7 @@ pub use encryption::{
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
-pub use retention::NativeRemovalRequestReceipt;
+pub use retention::{NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt};
 pub use suppression::{NativeSuppressionLedger, SuppressionProgress};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -315,6 +315,8 @@ struct StoredEvent {
     accepted_records: Vec<record_journal::RecordMutationRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_suppression: Option<suppression::SuppressionPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_removal_preparation: Option<retention::RemovalPreparationPublication>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -694,6 +696,11 @@ impl NativeService {
             accepted_records,
             accepted_suppression: if operation == "suppression_reconcile" {
                 Some(decode(&response_bytes, "suppression publication")?)
+            } else {
+                None
+            },
+            accepted_removal_preparation: if operation == "removal_prepare" {
+                Some(decode(&response_bytes, "removal preparation publication")?)
             } else {
                 None
             },
@@ -1164,6 +1171,7 @@ impl NativeService {
         self.verify_capture_records(snapshot)?;
         self.verify_custody_records(snapshot)?;
         self.verify_suppression_records(snapshot)?;
+        self.verify_removal_preparations(snapshot)?;
         self.verify_payload_records(snapshot)?;
         self.verify_raw_index_records(snapshot)?;
         self.verify_assertion_records(snapshot)?;
@@ -3087,6 +3095,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != payload::REQUEST_TRANSFORM_FEATURE
                 && feature != raw_index::INDEX_FEATURE
                 && feature != raw_index::GC_FEATURE
+                && feature != raw_index::REMOVAL_FEATURE
                 && feature != assertions::STATE_FEATURE
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
@@ -3099,6 +3108,8 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
         || (manifest.features.contains(retention::RETENTION_FEATURE)
             && manifest.suppression_authority.is_none())
+        || (manifest.features.contains(raw_index::REMOVAL_FEATURE)
+            && !manifest.features.contains(retention::RETENTION_FEATURE))
         || manifest.features.contains(encryption::ENCRYPTION_FEATURE)
             != manifest.custody_authority.is_some()
         || manifest.custody_authority.is_some_and(|id| id.is_nil())

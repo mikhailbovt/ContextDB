@@ -154,6 +154,110 @@ impl CaptureRecovery {
 }
 
 impl NativeService {
+    // The retained authority has already proved membership of this exact source.
+    // Only immutable control bytes are read here; this is not disclosure authority.
+    pub(in super::super) fn verify_retained_capture_control<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        source: &crate::NativeDeletionSource,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<()> {
+        let bytes = snapshot
+            .get(
+                &self.keyspaces.continuous,
+                &record_key(source.receipt.event_id),
+            )
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("retained capture control is missing"))?;
+        budget
+            .charge(1, bytes.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        let record: CaptureRecord = decode(&bytes, "retained capture control")?;
+        if record.receipt != source.receipt
+            || control_digest(&bytes) != source.control_digest
+            || record.work()?.recovery_digest != Some(source.recovery_digest)
+        {
+            return Err(integrity(
+                "capture control differs from the retained removal source",
+            ));
+        }
+        let (global, _) = self.select_snapshot(
+            snapshot,
+            &source.receipt.workspace_id.to_string(),
+            Some(source.receipt.workspace_commit),
+        )?;
+        let bytes = snapshot
+            .get(&self.keyspaces.events, &global.to_be_bytes())
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("retained capture journal is missing"))?;
+        budget
+            .charge(1, bytes.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        let journal: crate::StoredEvent = decode(&bytes, "retained capture journal")?;
+        if journal.operation != "capture"
+            || journal.accepted_original.as_ref() != Some(&record.work()?)
+            || journal.workspace_digest
+                != digest_bytes(source.receipt.workspace_id.to_string().as_bytes())
+            || journal.workspace_commit != source.receipt.workspace_commit
+            || journal.event_digest != crate::event_digest(&journal)?
+        {
+            return Err(integrity(
+                "retained control has no matching accepted capture",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn capture_control_digest<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        original: &CapturedOriginal,
+    ) -> ServiceResult<ContentDigest> {
+        let bytes = snapshot
+            .get(
+                &self.keyspaces.continuous,
+                &record_key(original.event.event_id),
+            )
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("capture control record is missing"))?;
+        let record: CaptureRecord = decode(&bytes, "capture control record")?;
+        if record.receipt != original.receipt
+            || record.producer_sequence != original.event.producer_sequence
+            || blake3::Hash::from_hex(&record.producer_key).is_err()
+            || blake3::Hash::from_hex(&record.idempotency_digest).is_err()
+            || encode(&record)? != bytes
+        {
+            return Err(integrity(
+                "capture control differs from its accepted original",
+            ));
+        }
+        let positioned: ObservationId = read_required(
+            snapshot,
+            self,
+            &position_key(&record.producer_key, record.producer_sequence),
+        )?;
+        let retry: crate::StoredIdempotency = decode(
+            &snapshot
+                .get(
+                    &self.keyspaces.idempotency,
+                    record.idempotency_digest.as_bytes(),
+                )
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("capture control retry receipt is missing"))?,
+            "capture control retry receipt",
+        )?;
+        if positioned != original.event.event_id
+            || retry.operation != "capture"
+            || retry.response_bytes != encode(&record.receipt)?
+            || retry.response_digest != digest_bytes(&retry.response_bytes)
+        {
+            return Err(integrity(
+                "capture control position or retry binding differs",
+            ));
+        }
+        Ok(control_digest(&bytes))
+    }
+
     pub(in super::super) fn capture_work_for_receipt<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -271,6 +375,13 @@ impl NativeService {
         }
         Ok(Some(first))
     }
+}
+
+pub(super) fn control_digest(bytes: &[u8]) -> ContentDigest {
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"contextdb/native-capture-control/v1\0");
+    hash.update(bytes);
+    ContentDigest::from_bytes(*hash.finalize().as_bytes())
 }
 
 fn digest(bytes: &[u8]) -> ContentDigest {

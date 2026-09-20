@@ -782,6 +782,7 @@ impl NativeService {
                     && !entry.key.starts_with(b"custody/")
                     && !entry.key.starts_with(b"suppression/")
                     && !entry.key.starts_with(b"recovery/")
+                    && !entry.key.starts_with(b"removal/")
             })
             .collect::<Vec<_>>();
         if entries.is_empty() {
@@ -1016,15 +1017,6 @@ impl NativeService {
         event_id: ObservationId,
     ) -> ServiceResult<()> {
         self.authorize_derived_custody(snapshot, context, event_id)
-    }
-
-    /// Materialized intersection of every input's disclosure restrictions.
-    pub(super) fn capture_index_policies<S: ReadSnapshot>(
-        &self,
-        snapshot: &S,
-        event_id: ObservationId,
-    ) -> ServiceResult<Vec<contextdb_service::AccessPolicy>> {
-        self.derived_custody_policies(snapshot, event_id)
     }
 
     pub(super) fn verify_capture_journal_reference<S: ReadSnapshot>(

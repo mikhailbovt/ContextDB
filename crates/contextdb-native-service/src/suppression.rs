@@ -90,12 +90,21 @@ impl NativeService {
         snapshot: &S,
         workspace: &str,
     ) -> ServiceResult<()> {
+        self.require_suppression_prefix_current(snapshot, workspace)?;
+        self.require_removal_current(snapshot, workspace)?;
+        Ok(())
+    }
+
+    pub(super) fn require_suppression_prefix_current<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+    ) -> ServiceResult<()> {
         if let Some(ledger) = &self.suppression
             && self.suppression_applied(snapshot, workspace)? != ledger.current(workspace)?
         {
             return Err(pending());
         }
-        self.require_removal_current(snapshot, workspace)?;
         Ok(())
     }
 

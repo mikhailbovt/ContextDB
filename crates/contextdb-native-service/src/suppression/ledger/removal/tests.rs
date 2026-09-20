@@ -42,7 +42,7 @@ fn retained_multi_chunk_inventory_rejects_missing_targets_and_a_rehashed_partial
     let event = ledger
         .read_removal_event(&snapshot, receipt.sequence)
         .expect("event");
-    let Operation::Request { intent } = event.operation else {
+    let Operation::Request { intent, .. } = event.operation else {
         panic!("request expected")
     };
     let retained = ledger
@@ -66,6 +66,63 @@ fn retained_multi_chunk_inventory_rejects_missing_targets_and_a_rehashed_partial
         .expect("denial");
     drop(snapshot);
     drop(native);
+    let checkpoint = RemovalCheckpoint {
+        sequence: receipt.sequence,
+        digest: receipt.digest.clone(),
+    };
+    ledger
+        .removal_source(&intent.workspace, &checkpoint, previous, &mut budget)
+        .expect("accepted last-page source");
+    let locator = format!("removal/control/{}/source/{previous}", retained.digest).into_bytes();
+    let page_key = format!("removal/control/{}/page/00000002", retained.digest).into_bytes();
+    let snapshot = ledger
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("snapshot");
+    let saved_locator = snapshot
+        .get(&ledger.rows, &locator)
+        .expect("locator")
+        .expect("present");
+    let saved_page = snapshot
+        .get(&ledger.rows, &page_key)
+        .expect("page")
+        .expect("present");
+    drop(snapshot);
+    let mut tx = ledger.engine.begin_write().expect("tx");
+    tx.put(
+        &ledger.rows,
+        locator.clone(),
+        encode(&0_usize).expect("locator"),
+    )
+    .expect("redirect locator");
+    tx.commit(Durability::Sync).expect("commit");
+    assert_eq!(
+        ledger
+            .removal_source(&intent.workspace, &checkpoint, previous, &mut budget)
+            .expect_err("point lookup cannot substitute a different accepted source")
+            .code,
+        ErrorCode::IntegrityFailure
+    );
+    let mut tx = ledger.engine.begin_write().expect("tx");
+    tx.put(&ledger.rows, locator, saved_locator)
+        .expect("repair locator");
+    let mut corrupted = saved_page.clone();
+    let last = corrupted.len() - 1;
+    corrupted[last] ^= 1;
+    tx.put(&ledger.rows, page_key.clone(), corrupted)
+        .expect("corrupt source page");
+    tx.commit(Durability::Sync).expect("commit");
+    assert_eq!(
+        ledger
+            .removal_source(&intent.workspace, &checkpoint, previous, &mut budget)
+            .expect_err("point lookup verifies the page against the immutable request")
+            .code,
+        ErrorCode::IntegrityFailure
+    );
+    let mut tx = ledger.engine.begin_write().expect("tx");
+    tx.put(&ledger.rows, page_key, saved_page)
+        .expect("repair page");
+    tx.commit(Durability::Sync).expect("repair");
     ledger.verify().expect("complete retained closure");
     let mut tx = ledger.engine.begin_write().expect("tx");
     tx.delete(&ledger.rows, last_denial.clone())

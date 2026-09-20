@@ -126,6 +126,13 @@ impl NativeService {
             let state: IndexState = decode(&entry.value, "raw index state")?;
             let workspace = std::str::from_utf8(&entry.key[b"raw/state/".len()..])
                 .map_err(|_| integrity("raw index workspace invalid"))?;
+            let world: super::super::WorkspaceState = decode(
+                &snapshot
+                    .get(&self.keyspaces.workspace, workspace.as_bytes())
+                    .map_err(storage_error)?
+                    .ok_or_else(|| integrity("raw index workspace is missing"))?,
+                "raw index workspace",
+            )?;
             let retained = retained_generations(&state)?;
             if (state.retained.is_some() || state.reclaiming.is_some())
                 && !manifest.features.contains(GC_FEATURE)
@@ -138,6 +145,10 @@ impl NativeService {
                     .raw_value(snapshot, &generation_key(workspace, number))?
                     .ok_or_else(|| integrity("retained raw generation missing"))?;
                 if generation.number != number
+                    || generation.through > world.watermarks.journal
+                    || generation
+                        .removal_through
+                        .is_some_and(|through| through > world.watermarks.journal)
                     || generation.custody_version > super::super::custody::CUSTODY_VERSION
                     || (generation.custody_version != 0
                         && !manifest
@@ -146,6 +157,8 @@ impl NativeService {
                     || generation.analyzer != RAW_ANALYZER
                     || generation.authorization_epoch
                         > self.raw_authorization_epoch(snapshot, workspace)?
+                    || (generation.removal_through.is_some()
+                        && !manifest.features.contains(REMOVAL_FEATURE))
                 {
                     return Err(integrity("raw generation binding invalid"));
                 }
@@ -183,16 +196,25 @@ impl NativeService {
                     if work.workspace_commit > generation.through {
                         break;
                     }
-                    let document: IndexedOriginal = self
-                        .raw_value(snapshot, &doc_key(workspace, number, work.event_id))?
-                        .ok_or_else(|| integrity("raw generation lost an accepted original"))?;
-                    let original = self.load_captured_original(snapshot, work.event_id)?;
                     let mut budget = QueryBudget::new(
                         u64::MAX,
                         u64::MAX,
                         Duration::from_secs(60),
                         QueryCancellation::default(),
                     );
+                    if self.source_prepared_at(
+                        snapshot,
+                        workspace,
+                        work.event_id,
+                        generation.removal_through,
+                        &mut budget,
+                    )? {
+                        continue;
+                    }
+                    let document: IndexedOriginal = self
+                        .raw_value(snapshot, &doc_key(workspace, number, work.event_id))?
+                        .ok_or_else(|| integrity("raw generation lost an accepted original"))?;
+                    let original = self.load_captured_original(snapshot, work.event_id)?;
                     let reconstructed = self.build_raw_document(
                         snapshot,
                         &original.event,

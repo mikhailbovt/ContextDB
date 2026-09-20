@@ -25,6 +25,7 @@ use super::{
 
 pub(super) const INDEX_FEATURE: &str = "continuous-raw-index-v1";
 pub(super) const GC_FEATURE: &str = "continuous-raw-generation-gc-v1";
+pub(super) const REMOVAL_FEATURE: &str = "continuous-raw-removal-v1";
 pub(super) const MAX_DOMAINS: usize = 1024;
 pub(super) const MAX_TAIL: usize = 128;
 const MAX_INDEX_TERMS: usize = 16_384;
@@ -53,6 +54,9 @@ pub(super) struct Generation {
     pub through: u64,
     pub authorization_epoch: u64,
     pub projected_sources: u64,
+    /// Prepared source removals through this native prefix are omitted entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removal_through: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -82,7 +86,7 @@ pub struct RawProjectionProgress {
     pub generation: u64,
     /// Complete capture prefix consumed by this generation.
     pub through: u64,
-    /// Originals represented, including explicit lexical omissions.
+    /// Originals represented, including lexical omissions, excluding prepared removals.
     pub projected_sources: u64,
     /// True when all outbox work visible at the build snapshot was consumed.
     pub caught_up: bool,
@@ -123,7 +127,8 @@ impl NativeService {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
-        self.require_custody_ready(&snapshot, &workspace)?;
+        self.require_custody_rebuilt(&snapshot, &workspace)?;
+        let (_, world) = self.select_snapshot(&snapshot, &context.request.workspace_id, None)?;
         let state: IndexState = self
             .raw_value(&snapshot, &state_key(&workspace))?
             .unwrap_or_default();
@@ -154,6 +159,11 @@ impl NativeService {
                 through: 0,
                 authorization_epoch: auth,
                 projected_sources: 0,
+                removal_through: self
+                    .suppression
+                    .as_ref()
+                    .filter(|ledger| ledger.supports_removal())
+                    .map(|_| world.watermarks.journal),
             }
         } else {
             let number = state
@@ -170,7 +180,6 @@ impl NativeService {
             return Err(stale_index());
         }
         let expected_generation = generation.clone();
-        let (_, world) = self.select_snapshot(&snapshot, &context.request.workspace_id, None)?;
         let prefix = format!("outbox/{workspace}/").into_bytes();
         let mut after = prefix.clone();
         after.extend_from_slice(&generation.through.to_be_bytes());
@@ -198,6 +207,25 @@ impl NativeService {
         for entry in page.entries {
             budget.charge(1, 0).map_err(budget_error)?;
             let work: super::capture::CaptureWork = decode(&entry.value, "raw projection work")?;
+            let accepted = self.captured_receipt_metadata(&snapshot, work.event_id)?;
+            if entry.key != super::capture::work_key(&workspace, work.workspace_commit)
+                || accepted.workspace_id.to_string() != context.request.workspace_id
+                || self.capture_work_for_receipt(&snapshot, &accepted)? != work
+            {
+                return Err(integrity(
+                    "raw projection work differs from accepted control",
+                ));
+            }
+            if self.source_prepared_at(
+                &snapshot,
+                &workspace,
+                work.event_id,
+                generation.removal_through,
+                budget,
+            )? {
+                generation.through = work.workspace_commit;
+                continue;
+            }
             let original = self.load_captured_original(&snapshot, work.event_id)?;
             if original.receipt.workspace_commit != work.workspace_commit
                 || original.receipt.event_digest != work.event_digest
@@ -217,7 +245,7 @@ impl NativeService {
             }
             budget.charge(0, length).map_err(budget_error)?;
             let mut policy = PolicyDomain {
-                policies: self.capture_index_policies(&snapshot, work.event_id)?,
+                policies: self.stored_custody_policies(&snapshot, work.event_id)?,
                 first_commit: work.workspace_commit,
             };
             let domain = canonical_digest(&policy.policies)?;
@@ -264,7 +292,7 @@ impl NativeService {
         }
         let _guard = self.lock_index_publication(budget)?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
-        self.require_custody_ready(&tx, &workspace)?;
+        self.require_custody_rebuilt(&tx, &workspace)?;
         let current: IndexState = self
             .raw_value(&tx, &state_key(&workspace))?
             .unwrap_or_default();
@@ -283,6 +311,9 @@ impl NativeService {
             ));
         }
         self.enable_raw_index_format(&mut tx)?;
+        if generation.removal_through.is_some() {
+            self.enable_capture_extension(&mut tx, REMOVAL_FEATURE)?;
+        }
         if next.retained.is_some() {
             self.enable_capture_extension(&mut tx, GC_FEATURE)?;
         }
