@@ -205,3 +205,12 @@ reopen/restore, shared payload inputs, legacy activation, metadata loss/tamperin
 and checkpoint owner/state corruption. Workspace Clippy and governance validation
 pass. Source removal, mixed semantic-batch pruning and deletion-aware archive
 recovery remain open; this change does not establish deletion closure.
+
+Source-deletion inspection now computes the full captured dependency graph from
+accepted journal frames, including older shared owners and independent novel
+blocks that must survive. The 115 native tests cover encrypted reopen/restore,
+model/tool/checkpoint lineage, revoked sources, legacy refusal, a 261-frame paged
+history, missing authority, altered journal acceptance, bounded cancellation and
+concurrent revision. The inspector returns no partial closure or source text.
+Workspace Clippy and governance checks pass. This is an administrative source
+inventory; the remaining copy classes and the removal executor remain open.
