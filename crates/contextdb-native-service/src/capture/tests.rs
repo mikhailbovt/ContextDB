@@ -420,9 +420,12 @@ fn concurrent_retries_publish_one_native_frame() {
 
 #[test]
 fn backup_preserves_capture_closure_and_receipts_with_rotated_host_key() {
+    let (_authority_directory, ledger) = crate::suppression::tests::authority("capture-db");
     let source = tempfile::tempdir().expect("source");
     let target = tempfile::tempdir().expect("target");
-    let service = NativeService::open(source.path(), "capture-db", [7; 32]).expect("open");
+    let service =
+        NativeService::open_with_suppression(source.path(), "capture-db", [7; 32], ledger.clone())
+            .expect("open");
     let input = request(1, "原文\nexact bytes");
     let receipt = service.append_event(input.clone()).expect("capture");
     let backup = service
@@ -431,7 +434,9 @@ fn backup_preserves_capture_closure_and_receipts_with_rotated_host_key() {
         })
         .expect("backup");
     assert_eq!(backup.format, crate::NATIVE_CONTINUOUS_BACKUP_FORMAT);
-    let restored = NativeService::open(target.path(), "capture-db", [9; 32]).expect("target");
+    let restored =
+        NativeService::open_with_suppression(target.path(), "capture-db", [9; 32], ledger.clone())
+            .expect("target");
     restored
         .restore_backup(RestoreBackupRequest {
             context: input.context.clone(),

@@ -50,6 +50,7 @@ impl NativeService {
         )?;
         let known = world.watermarks.journal;
         let workspace = workspace(&request.context);
+        self.require_suppression_current(&snapshot, &workspace)?;
         let scope_epoch = self.scope_epoch(&snapshot, &workspace, request.key.scope)?;
         let auth_epoch = self.raw_authorization_epoch(&snapshot, &workspace)?;
         let stored_authority = self
@@ -169,6 +170,7 @@ impl NativeService {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
+        self.require_suppression_current(&latest, &workspace)?;
         if self.raw_authorization_epoch(&latest, &workspace)? != auth_epoch
             || self.scope_epoch(&latest, &workspace, request.key.scope)? != scope_epoch
         {

@@ -285,8 +285,15 @@ fn forbidden_domain_insertions_and_corrupted_content_do_not_change_ranked_hits()
 
 #[test]
 fn revocation_invalidates_old_views_until_a_separate_generation_catches_up() {
+    let (_authority_directory, ledger) = crate::suppression::tests::authority("indexed-db");
     let directory = tempfile::tempdir().expect("directory");
-    let service = NativeService::open(directory.path(), "indexed-db", [7; 32]).expect("open");
+    let service = NativeService::open_with_suppression(
+        directory.path(),
+        "indexed-db",
+        [7; 32],
+        ledger.clone(),
+    )
+    .expect("open");
     let input = crate::capture::tests::request(1, "private 7319");
     service.append_event(input.clone()).expect("first");
     service
@@ -370,7 +377,8 @@ fn revocation_invalidates_old_views_until_a_separate_generation_catches_up() {
         .expect("backup");
     let target = tempfile::tempdir().expect("target");
     let restored =
-        NativeService::open(target.path(), "indexed-db", [9; 32]).expect("restored owner");
+        NativeService::open_with_suppression(target.path(), "indexed-db", [9; 32], ledger.clone())
+            .expect("restored owner");
     restored
         .restore_backup(RestoreBackupRequest {
             context: input.context.clone(),

@@ -112,8 +112,11 @@ fn repair(service: &NativeService, context: &AuthenticatedRequestContext) {
 
 #[test]
 fn model_and_tool_derivations_keep_private_input_restrictions_after_reopen_and_revocation() {
+    let (_authority_directory, ledger) = crate::suppression::tests::authority("custody");
     let directory = tempfile::tempdir().expect("directory");
-    let service = NativeService::open(directory.path(), "custody", [7; 32]).expect("open");
+    let service =
+        NativeService::open_with_suppression(directory.path(), "custody", [7; 32], ledger.clone())
+            .expect("open");
     let original = crate::capture::tests::request(1, "private secret 7319");
     service.append_event(original.clone()).expect("source");
     let scope = ScopeId::new();
@@ -199,7 +202,9 @@ fn model_and_tool_derivations_keep_private_input_restrictions_after_reopen_and_r
         .verify_native(true)
         .expect("valid unfinished propagation");
     drop(service);
-    let service = NativeService::open(directory.path(), "custody", [7; 32]).expect("reopen");
+    let service =
+        NativeService::open_with_suppression(directory.path(), "custody", [7; 32], ledger.clone())
+            .expect("reopen");
     assert!(
         read(&service, &result).is_err(),
         "restart cannot clear admission barrier"
@@ -210,8 +215,13 @@ fn model_and_tool_derivations_keep_private_input_restrictions_after_reopen_and_r
         })
         .expect("backup while propagation is incomplete");
     let restored_directory = tempfile::tempdir().expect("restore directory");
-    let restored =
-        NativeService::open(restored_directory.path(), "custody", [9; 32]).expect("restore owner");
+    let restored = NativeService::open_with_suppression(
+        restored_directory.path(),
+        "custody",
+        [9; 32],
+        ledger.clone(),
+    )
+    .expect("restore owner");
     restored
         .restore_backup(RestoreBackupRequest {
             context: output.context.clone(),

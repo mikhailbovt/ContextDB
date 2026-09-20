@@ -49,8 +49,11 @@ fn finish(service: &NativeService, context: &AuthenticatedRequestContext) -> Raw
 
 #[test]
 fn interrupted_reclamation_survives_restore_and_frees_more_than_three_lifetime_generations() {
+    let (_authority_directory, ledger) = crate::suppression::tests::authority("raw-gc");
     let directory = tempfile::tempdir().expect("directory");
-    let service = NativeService::open(directory.path(), "raw-gc", [7; 32]).expect("open");
+    let service =
+        NativeService::open_with_suppression(directory.path(), "raw-gc", [7; 32], ledger.clone())
+            .expect("open");
     let input = fixture(&service);
     assert!(
         service
@@ -104,7 +107,9 @@ fn interrupted_reclamation_survives_restore_and_frees_more_than_three_lifetime_g
             .expect("pending GC backup")
     };
     drop(service);
-    let reopened = NativeService::open(directory.path(), "raw-gc", [7; 32]).expect("reopen job");
+    let reopened =
+        NativeService::open_with_suppression(directory.path(), "raw-gc", [7; 32], ledger.clone())
+            .expect("reopen job");
     let next = reopened
         .reclaim_raw_generations(&input.context, 1, &mut budget())
         .expect("resume");
@@ -113,8 +118,13 @@ fn interrupted_reclamation_survives_restore_and_frees_more_than_three_lifetime_g
     reopened.verify_native(true).expect("resumed job");
     drop(reopened);
     let restore_directory = tempfile::tempdir().expect("restore directory");
-    let service =
-        NativeService::open(restore_directory.path(), "raw-gc", [8; 32]).expect("restore owner");
+    let service = NativeService::open_with_suppression(
+        restore_directory.path(),
+        "raw-gc",
+        [8; 32],
+        ledger.clone(),
+    )
+    .expect("restore owner");
     service
         .restore_backup(RestoreBackupRequest {
             context: input.context.clone(),

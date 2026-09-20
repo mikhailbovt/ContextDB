@@ -350,6 +350,37 @@ impl NativeService {
         if let Some(receipt) = self.replay(&tx, key.as_bytes(), "original_revocation", &digest)? {
             return Ok(receipt);
         }
+        let external = self.record_external_revocation(&tx, context, event_id, budget)?;
+        let receipt = self.revoke_original_in_transaction(
+            &mut tx,
+            context,
+            event_id,
+            key.as_bytes(),
+            &digest,
+        )?;
+        if let Some(checkpoint) = external {
+            self.publish_suppression_checkpoint(&mut tx, context, checkpoint)?;
+        }
+        budget.check().map_err(budget_error)?;
+        require_sync(
+            tx.commit(Durability::Sync)
+                .map_err(storage_error)?
+                .durability,
+        )?;
+        Ok(receipt)
+    }
+
+    pub(super) fn revoke_original_in_transaction<T: WriteTransaction>(
+        &self,
+        tx: &mut T,
+        context: &AuthenticatedRequestContext,
+        event_id: ObservationId,
+        key: &[u8],
+        digest: &str,
+    ) -> ServiceResult<OriginalRevocationReceipt> {
+        if let Some(receipt) = self.replay(tx, key, "original_revocation", digest)? {
+            return Ok(receipt);
+        }
         let observation = digest_bytes(event_id.to_string().as_bytes());
         let mut policy: super::StoredObservationPolicy = decode(
             &tx.get(&self.keyspaces.observations_policy, observation.as_bytes())
@@ -360,18 +391,18 @@ impl NativeService {
         if policy.access.workspace_id != context.request.workspace_id {
             return Err(super::permission_denied());
         }
-        let original = self.load_captured_original(&tx, event_id)?;
-        self.enable_raw_index_format(&mut tx)?;
-        let frame = self.begin_frame(&tx, &context.request.workspace_id, false)?;
+        let original = self.captured_receipt_metadata(tx, event_id)?;
+        self.enable_raw_index_format(tx)?;
+        let frame = self.begin_frame(tx, &context.request.workspace_id, false)?;
         let epoch = self
-            .raw_authorization_epoch(&tx, &frame.workspace_digest)?
+            .raw_authorization_epoch(tx, &frame.workspace_digest)?
             .checked_add(1)
             .ok_or_else(|| exhausted("authorization epoch overflow"))?;
         policy.access.retrievable = false;
         self.invalidate_custody(
-            &mut tx,
+            tx,
             &frame.workspace_digest,
-            original.receipt.workspace_commit,
+            original.workspace_commit,
             epoch,
         )?;
         tx.put(
@@ -405,20 +436,7 @@ impl NativeService {
             encode(&receipt)?,
         )
         .map_err(storage_error)?;
-        self.finish_frame(
-            &mut tx,
-            &frame,
-            "original_revocation",
-            key.as_bytes(),
-            &digest,
-            &receipt,
-        )?;
-        budget.check().map_err(budget_error)?;
-        require_sync(
-            tx.commit(Durability::Sync)
-                .map_err(storage_error)?
-                .durability,
-        )?;
+        self.finish_frame(tx, &frame, "original_revocation", key, digest, &receipt)?;
         Ok(receipt)
     }
 

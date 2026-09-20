@@ -364,6 +364,10 @@ impl NativeService {
         context: &AuthenticatedRequestContext,
         reference: &OriginalPayloadRef,
     ) -> ServiceResult<PayloadHeader> {
+        self.require_suppression_current(
+            snapshot,
+            &super::digest_bytes(context.request.workspace_id.as_bytes()),
+        )?;
         let header = self.payload_header(snapshot, reference.block_id)?;
         if !policy_allows(&context.request, &header.access) {
             return Err(permission_denied());

@@ -493,10 +493,13 @@ fn raw_context_keeps_surrounding_words_and_reports_unrendered_originals() {
 
 #[test]
 fn catalog_tracks_new_authority_slots_and_survives_rotated_restore() {
+    let (_authority_directory, ledger) = crate::suppression::tests::authority("prepare");
     use contextdb_service::{CognitiveMemoryService, CreateBackupRequest, RestoreBackupRequest};
     let directory = tempfile::tempdir().expect("fixture");
     let target = tempfile::tempdir().expect("restore fixture");
-    let service = NativeService::open(directory.path(), "prepare", [7; 32]).expect("open");
+    let service =
+        NativeService::open_with_suppression(directory.path(), "prepare", [7; 32], ledger.clone())
+            .expect("open");
     let input = setup(&service);
     service
         .initialize_state_catalog(&input.context, &mut allowance())
@@ -516,7 +519,9 @@ fn catalog_tracks_new_authority_slots_and_survives_rotated_restore() {
             context: input.context.clone(),
         })
         .expect("backup");
-    let restored = NativeService::open(target.path(), "prepare", [8; 32]).expect("fresh target");
+    let restored =
+        NativeService::open_with_suppression(target.path(), "prepare", [8; 32], ledger.clone())
+            .expect("fresh target");
     restored
         .restore_backup(RestoreBackupRequest {
             context: input.context.clone(),

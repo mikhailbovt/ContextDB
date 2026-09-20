@@ -79,6 +79,29 @@ Restore verifies original/receipt/outbox/producer/scope/stream closure before
 writing a pristine target. A restored receipt remains usable after host-key
 rotation, with fresh authorization and exact stored-receipt equality.
 
+Continuous restore requires `NativeService::open_with_suppression` and the same
+independently retained `NativeSuppressionLedger` identity. Create that authority
+in a separate directory tree, retain its ID in host recovery configuration, and
+reopen it with `NativeSuppressionLedger::open`; a missing or different authority
+fails closed. Native backups never copy or replace the external ledger. Unbound
+continuous archives remain verifiable archival data and require explicit migration
+before restore; supplying a newly created empty ledger cannot establish freshness.
+
+Original revocations synchronize the external denial before native publication.
+An epoch mismatch closes workspace disclosure across reads, indexed views,
+checkpoints and runtime fences, including after a process crash or old-backup
+restore. `maintain_suppression` imports at most 256 entries per budgeted call;
+then `maintain_custody` propagates inherited restrictions and raw indexes rebuild.
+Restore completion acknowledges archive installation; reads stay closed until
+these gates pass. New denials after restore close them again. Independent capture
+can continue, but an externally denied source ID cannot be recaptured. Competing
+native owners compare the external head under its publication owner before append.
+
+This local profile requires custody of the current external directory. It does
+not detect rollback of both independent authorities, provide a remote monotonic
+anchor, encrypt source payloads or erase uncontrolled copies. Native receipts
+and external denial entries contain source identities/digests, not source bytes.
+
 `contextdb-capture` adds host adapters for tools, complete artifact versions and
 model requests. `PayloadPort` stages up to 64 MiB in synchronized 256 KiB chunks
 before event publication. Each reference binds both the full original digest

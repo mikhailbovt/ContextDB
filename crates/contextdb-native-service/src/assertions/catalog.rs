@@ -114,6 +114,7 @@ impl NativeService {
     ) -> ServiceResult<Vec<StateKey>> {
         require_scope(context, scope, Capability::Recall)?;
         let workspace = workspace(context);
+        self.require_suppression_current(snapshot, &workspace)?;
         let manifest: super::super::Manifest = decode(
             &snapshot
                 .get(&self.keyspaces.meta, super::super::META_MANIFEST_KEY)
