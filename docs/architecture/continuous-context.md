@@ -116,6 +116,18 @@ is included. Restore checks logical closure before publishing freshly sealed val
 Wrong/missing keys and plaintext/encrypted format mismatches fail without fallback.
 Existing plaintext stores require a separate explicit migration.
 
+Version 2 key authorities also retain an authenticated issued-backup registry.
+Archive digest, logical verification digest, commit, size and predecessor are
+synchronized before encrypted backup bytes are returned. Exact retries reuse the
+registration, including after a crash before the response. `backup_registration`
+provides a point lookup; `backup_catalog_page` returns at most 256 entries and
+requires the same registry revision across pages. New key allocations alone do
+not invalidate that enumeration. Native restore never imports or rewinds the registry.
+Version 1 authorities still open existing values, but creating new backups requires
+explicit registry migration; a missing v2 registry is corruption, never an empty
+replacement. Registrations count distinct issued archives, not physical copies.
+They contain no source payload and prove neither external-copy erasure nor absence.
+
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
 profile. Record addresses, sizes, lexical hashes and archive metadata remain
 visible. Values are limited to 16 MiB before encryption; each envelope adds 64
