@@ -15,6 +15,7 @@ use uuid::Uuid;
 use super::*;
 
 mod backups;
+mod versions;
 pub use backups::{NativeBackupCatalogPage, NativeBackupRegistration};
 
 const MAX_PENDING_KEYS: usize = 16_384;
@@ -65,7 +66,8 @@ pub(super) type PendingKeys = BTreeMap<String, PendingKey>;
 
 /// Independently retained incremental custody-key inventory.
 ///
-/// Each native value address has a random data key. The inventory contains
+/// Version 3 allocates a random key per value address per native transaction.
+/// Versions 1 and 2 retain their original reusable-address keys. The inventory contains
 /// wrapped keys, never source bytes. Hosts retain its current directory,
 /// authority identity and master key outside native backup/restore.
 pub struct NativeCustodyKeys {
@@ -90,13 +92,25 @@ impl NativeCustodyKeys {
         database_id: &str,
         master: CustodyMasterKey,
     ) -> contextdb_service::ServiceResult<Arc<Self>> {
+        Self::create_version(path.as_ref(), database_id, master, 3)
+    }
+
+    pub(super) fn create_version(
+        path: &Path,
+        database_id: &str,
+        master: CustodyMasterKey,
+        version: u16,
+    ) -> contextdb_service::ServiceResult<Arc<Self>> {
+        if !matches!(version, 1..=3) {
+            return Err(crate::integrity("unsupported custody authority version"));
+        }
         crate::validate_identifier(database_id, "custody database ID")?;
-        std::fs::create_dir(path.as_ref())
+        std::fs::create_dir(path)
             .map_err(|_| crate::integrity("custody authority requires a new directory"))?;
-        let engine = FjallStorage::open(path.as_ref()).map_err(crate::storage_error)?;
+        let engine = FjallStorage::open(path).map_err(crate::storage_error)?;
         let rows = Keyspace::new(KEYSPACE).map_err(crate::storage_error)?;
         let identity = Identity {
-            version: 2,
+            version,
             authority: contextdb_core::ObservationId::new().as_uuid(),
             database: crate::digest_bytes(database_id.as_bytes()),
         };
@@ -115,18 +129,28 @@ impl NativeCustodyKeys {
         .map_err(crate::storage_error)?;
         tx.put(&rows, b"proof".to_vec(), proof)
             .map_err(crate::storage_error)?;
-        tx.put(
-            &rows,
-            backups::HEAD.to_vec(),
-            backups::genesis(&identity, &master).map_err(crate::storage_error)?,
-        )
-        .map_err(crate::storage_error)?;
+        if version >= 2 {
+            tx.put(
+                &rows,
+                backups::HEAD.to_vec(),
+                backups::genesis(&identity, &master).map_err(crate::storage_error)?,
+            )
+            .map_err(crate::storage_error)?;
+        }
+        if version == 3 {
+            tx.put(
+                &rows,
+                versions::HEAD.to_vec(),
+                versions::genesis(&identity, &master).map_err(crate::storage_error)?,
+            )
+            .map_err(crate::storage_error)?;
+        }
         crate::require_sync(
             tx.commit(Durability::Sync)
                 .map_err(crate::storage_error)?
                 .durability,
         )?;
-        Self::finish_open(engine, rows, identity, master, path.as_ref())
+        Self::finish_open(engine, rows, identity, master, path)
     }
 
     /// Open the exact retained inventory. Missing authority or wrong master key
@@ -154,7 +178,7 @@ impl NativeCustodyKeys {
                 .ok_or_else(|| crate::integrity("custody identity is missing"))?,
         )
         .map_err(crate::storage_error)?;
-        if !matches!(identity.version, 1 | 2)
+        if !matches!(identity.version, 1..=3)
             || identity.authority != authority
             || identity.database != crate::digest_bytes(database_id.as_bytes())
         {
@@ -257,7 +281,9 @@ impl NativeCustodyKeys {
         if let Some(entry) = pending.get(&address) {
             return self.value_envelope(&address, entry.record.id, &entry.bytes, plaintext);
         }
-        if let Some(record) = self.record(&address)? {
+        if self.identity.version < 3
+            && let Some(record) = self.record(&address)?
+        {
             let bytes = self.unwrap(&address, &record)?;
             return self.value_envelope(&address, record.id, &bytes, plaintext);
         }
@@ -311,9 +337,12 @@ impl NativeCustodyKeys {
             }
             open(&entry.bytes, &aad, &value[header..])?
         } else {
-            let record = self
-                .record(&address)?
-                .ok_or_else(|| failure("current custody key is unavailable"))?;
+            let record = if self.identity.version == 3 {
+                self.version_record(&address, id)?
+            } else {
+                self.record(&address)?
+            }
+            .ok_or_else(|| failure("current custody key is unavailable"))?;
             if record.id != id {
                 return Err(failure("current custody key identity differs"));
             }
@@ -324,7 +353,7 @@ impl NativeCustodyKeys {
     }
 
     // One key-store Sync per native transaction, before publishing ciphertext.
-    // Losing allocation races publish neither a mixed key batch nor native rows.
+    // Legacy address-allocation races publish neither mixed keys nor native rows.
     pub(super) fn publish(&self, pending: &PendingKeys) -> contextdb_storage::Result<()> {
         if pending.is_empty() {
             return Ok(());
@@ -334,6 +363,14 @@ impl NativeCustodyKeys {
             .enter(|| Ok(()))
             .map_err(|_| failure("custody publication admission unavailable"))?;
         let mut tx = self.engine.begin_write()?;
+        if self.identity.version == 3 {
+            self.publish_key_versions(&mut tx, pending)?;
+            let receipt = tx.commit(Durability::Sync)?;
+            if receipt.durability != Durability::Sync {
+                return Err(failure("custody key versions were not synchronized"));
+            }
+            return Ok(());
+        }
         for address in pending.keys() {
             if tx.get(&self.rows, &row_key(address))?.is_some() {
                 return Err(failure(
@@ -378,6 +415,11 @@ impl NativeCustodyKeys {
             if row.key.starts_with(b"backup/") {
                 continue; // Verified as an exact ordered registry below.
             }
+            if self.identity.version == 3
+                && (row.key.starts_with(b"key/") || row.key.starts_with(b"key-log/"))
+            {
+                continue; // The immutable allocation journal closes both families.
+            }
             let address = row
                 .key
                 .strip_prefix(b"key/")
@@ -387,6 +429,9 @@ impl NativeCustodyKeys {
                 return Err(failure("custody value address is invalid"));
             }
             self.unwrap(address, &decode(&row.value)?)?;
+        }
+        if self.identity.version == 3 {
+            self.verify_key_versions(&snapshot)?;
         }
         self.verify_backup_catalog(&snapshot)?;
         Ok(())

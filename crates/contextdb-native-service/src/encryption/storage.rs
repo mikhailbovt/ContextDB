@@ -37,6 +37,26 @@ pub(crate) struct NativeTransaction<'a> {
     pending: PendingKeys,
 }
 
+impl NativeTransaction<'_> {
+    /// Import a ciphertext row only after authenticating its exact address and
+    /// retained key. Backup restore preserves old version IDs rather than issuing
+    /// a fresh key for every row of an already verified archive.
+    pub(crate) fn put_ciphertext(
+        &mut self,
+        space: &Keyspace,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    ) -> Result<()> {
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| failure("ciphertext import requires encrypted custody"))?;
+        keys.open_value(space, &key, &value, None)?;
+        self.pending.remove(&address(space, &key));
+        self.inner.put(space, key, value)
+    }
+}
+
 impl NativeStorage {
     #[cfg(test)]
     pub(super) fn physical(&self) -> &FjallStorage {

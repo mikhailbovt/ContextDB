@@ -175,7 +175,7 @@ fn issued_registry_is_idempotent_paged_and_reopens_but_corruption_or_total_loss_
             master()
         )
         .is_err(),
-        "a version 2 authority must never replace a missing registry with an empty one"
+        "a registry-capable authority must never replace a missing registry with an empty one"
     );
 }
 
@@ -183,7 +183,8 @@ fn issued_registry_is_idempotent_paged_and_reopens_but_corruption_or_total_loss_
 fn legacy_key_authority_remains_readable_but_cannot_issue_unregistered_archives() {
     let root = tempfile::tempdir().expect("root");
     let created =
-        NativeCustodyKeys::create(root.path().join("keys"), "legacy", master()).expect("keys");
+        NativeCustodyKeys::create_version(&root.path().join("keys"), "legacy", master(), 2)
+            .expect("version 2 fixture before explicit downgrade to the version 1 wire format");
     let mut fixture = Arc::try_unwrap(created).expect("sole authority handle");
     fixture.identity.version = 1;
     let id = fixture.authority_id();

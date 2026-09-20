@@ -227,3 +227,11 @@ Non-retrievable legacy revisions can be classified and prepared administratively
 without changing their stored read policy. Encrypted archives from before
 classification/removal and after cleanup preserve independent data through
 actual reopen/restore. Hash-only migration remains open.
+
+New version 3 key authorities allocate immutable keys per changed value address
+and native transaction, with an authenticated complete allocation journal. Old
+snapshots and encrypted restore retain exact historical key IDs; an independent
+rewrite uses a new key. Tests cover actual key-authority reopen, multiple owners,
+authenticated ciphertext import and missing/replayed/changed allocation metadata.
+Version 1/2 key migration, current key disablement, complete copy dispositions and
+verified deletion completion/admission remain open.

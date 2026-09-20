@@ -307,9 +307,11 @@ fn ciphertext_relocation_and_forbidden_corruption_do_not_expose_source_bytes() {
 }
 
 #[test]
-fn concurrent_key_allocation_has_one_winner_and_the_loser_retries_before_native_publication() {
+fn legacy_key_allocation_has_one_winner_and_the_loser_retries_before_native_publication() {
     let root = tempfile::tempdir().expect("root");
-    let (_key_directory, keys) = authority("key-race");
+    let keys =
+        NativeCustodyKeys::create_version(&root.path().join("keys"), "key-race", master(), 2)
+            .expect("legacy version 2 key authority");
     let left = NativeStorage::open(&root.path().join("left"), Some(keys.clone())).expect("left");
     let right = NativeStorage::open(&root.path().join("right"), Some(keys)).expect("right");
     let space = Keyspace::new("fixture").expect("space");

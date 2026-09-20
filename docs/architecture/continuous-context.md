@@ -271,23 +271,33 @@ claim completed hard deletion or expose a model-facing deletion tool.
 `NativeService::open_with_suppression` retains plaintext native values.
 `NativeService::open_encrypted` additionally requires `NativeCustodyKeys` and seals
 every native value, including original bodies, chunks, index documents, accepted
-semantic batches and captured checkpoints. Each value address has a random data
-key; XChaCha20-Poly1305 binds ciphertext to the database, authority, keyspace,
-record address and key identity. New keys synchronize in one bounded batch before
-native publication. An interrupted publication may leave unused keys, never an
-acknowledged original without its durable key. Ordinary reads fetch one key
-descriptor; complete key-inventory verification happens when opening the authority.
+semantic batches and captured checkpoints. New version 3 key authorities allocate
+a random data key per changed value address per native transaction. Historical
+ciphertext retains its exact key identity; rewriting a mixed-content row uses a
+different key. Version 1 and 2 authorities retain their original address-key reuse
+and require explicit migration to this profile. XChaCha20-Poly1305 binds ciphertext
+to the database, authority, keyspace, record address and key identity.
+
+New keys and an authenticated allocation journal synchronize in one bounded batch
+before native publication, with at most 16,384 changed addresses. An interrupted
+publication may leave unused keys, never an acknowledged original without its
+durable key. Ordinary reads fetch one exact key descriptor. Opening the authority
+verifies the complete allocation journal and key inventory, rejecting missing,
+changed or orphaned versions. Historical keys remain available; allocation does
+not disable keys or establish deletion completion.
 
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never
 derive that master key from the rotatable token key. Encrypted backups use
 `contextdb.native-fjall.encrypted-backup.v3`, preserve ciphertext and require the
 same current key and suppression authorities. Neither authority nor the master key
-is included. Restore checks logical closure before publishing freshly sealed values.
+is included. Restore checks logical closure and authenticates each exact address
+and key before importing the original ciphertext, preserving historical key IDs
+without allocating a fresh key batch for the archive.
 Wrong/missing keys and plaintext/encrypted format mismatches fail without fallback.
 Existing plaintext stores require a separate explicit migration.
 
-Version 2 key authorities also retain an authenticated issued-backup registry.
+Version 2 and later key authorities retain an authenticated issued-backup registry.
 Archive digest, logical verification digest, commit, size and predecessor are
 synchronized before encrypted backup bytes are returned. Exact retries reuse the
 registration, including after a crash before the response. `backup_registration`
@@ -295,7 +305,7 @@ provides a point lookup; `backup_catalog_page` returns at most 256 entries and
 requires the same registry revision across pages. New key allocations alone do
 not invalidate that enumeration. Native restore never imports or rewinds the registry.
 Version 1 authorities still open existing values, but creating new backups requires
-explicit registry migration; a missing v2 registry is corruption, never an empty
+explicit registry migration; a missing required registry is corruption, never an empty
 replacement. Registrations count distinct issued archives, not physical copies.
 They contain no source payload and prove neither external-copy erasure nor absence.
 

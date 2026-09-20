@@ -220,6 +220,12 @@ impl NativeService {
                 .find(|candidate| candidate.as_str() == keyspace.name)
                 .ok_or_else(|| integrity("native backup keyspace is not admitted"))?;
             for entry in &keyspace.entries {
+                if self.engine.is_encrypted() {
+                    transaction
+                        .put_ciphertext(target, entry.key.clone(), entry.value.clone())
+                        .map_err(storage_error)?;
+                    continue;
+                }
                 let logical_value = archive_snapshot
                     .get(target, &entry.key)
                     .map_err(storage_error)?

@@ -51,7 +51,7 @@ struct Head {
 
 impl NativeCustodyKeys {
     pub(crate) fn require_backup_registry(&self) -> contextdb_service::ServiceResult<()> {
-        if self.identity.version != 2 {
+        if self.identity.version < 2 {
             return Err(contextdb_service::ServiceError::new(
                 contextdb_service::ErrorCode::FormatIncompatible,
                 "version 1 custody authority requires explicit backup-registry migration",
@@ -150,9 +150,9 @@ impl NativeCustodyKeys {
         logical_digest: &str,
         encoded_bytes: u64,
     ) -> contextdb_storage::Result<()> {
-        if self.identity.version != 2 {
+        if self.identity.version < 2 {
             return Err(failure(
-                "issued backups require a version 2 custody authority",
+                "issued backups require a version 2 or later custody authority",
             ));
         }
         valid_digest(digest)?;
