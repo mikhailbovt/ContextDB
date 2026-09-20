@@ -4,6 +4,7 @@
 #[cfg(test)]
 mod tests;
 mod verify;
+pub(crate) mod witness;
 
 use super::*;
 use crate::suppression::RemovalCheckpoint;

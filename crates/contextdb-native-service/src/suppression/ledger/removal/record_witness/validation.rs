@@ -46,7 +46,7 @@ impl RecordWriteValidation {
         Ok(())
     }
 
-    pub(super) fn key(&self) -> Vec<u8> {
+    pub(in crate::suppression::ledger::removal) fn key(&self) -> Vec<u8> {
         format!(
             "removal/record-validation/{}/{:020}/{:020}",
             self.workspace, self.request.sequence, self.global_commit
@@ -114,7 +114,7 @@ impl NativeSuppressionLedger {
                 "record write validation is unrelated to its removal witness",
             ));
         }
-        if let Some((checkpoint, operation)) = self.find_record_control(
+        if let Some((checkpoint, operation)) = self.find_retained_control(
             &tx,
             &validation.workspace,
             &validation.request,
@@ -172,7 +172,7 @@ impl NativeSuppressionLedger {
         };
         if event.checkpoint() != *checkpoint
             || !validation.matches(write)?
-            || self.find_record_control(
+            || self.find_retained_control(
                 &snapshot,
                 &validation.workspace,
                 &validation.request,

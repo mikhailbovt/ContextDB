@@ -308,6 +308,19 @@ Each complete scan admits at most 65,536 selected allocations and 32 MiB of outp
 These reports do not prove native use or physical absence, cover all copy classes,
 retire keys or reopen disclosure.
 
+`prepare_assertion_removal` verifies a mixed semantic batch and retains its source
+ownership and commitments in the version 3 removal authority, without values,
+envelopes or host policy bodies. It works before or after logical pruning; a
+workspace comparison precedes independent Sync, and exact retries preserve the
+receipt. `read_assertion_key_inventory` uses that witness after cleanup or older
+restore, including archives predating the batch. It separates shared original and
+rewritten batches from selected assertion/retraction bodies and labels. Independent
+mutation addresses are excluded. Admin, scope and stored batch policy govern both
+operations. Shared batch keys and cleaned replacement label
+keys can still be needed, so this allocation report grants no permission to disable
+them. Witnesses are limited to 5 MiB; preparation and readback use shared budgets
+and may scan accepted semantic history or the retained removal suffix.
+
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never
 derive that master key from the rotatable token key. Encrypted backups use

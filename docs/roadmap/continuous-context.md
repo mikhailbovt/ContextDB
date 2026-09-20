@@ -243,5 +243,12 @@ Record inventory identifies all historical primary, birth and closure keys from
 independent revision witnesses after pruning, reopen and encrypted restore, with
 stored access labels still enforced. Allocated keys do not prove native use or
 physical absence.
+Mixed assertion ownership is retained independently without source values or full
+envelopes. Its key inventory distinguishes shared batch versions from selected
+mutation bodies and labels through sequential cleanup, actual authority/native
+reopen and encrypted restore, including archives predating the batch. Tests cover
+independent data, retractions, policy, lost acknowledgement, publication races,
+missing witnesses and rehashed false selection. Shared and cleaned replacement
+keys remain available; this does not establish safe key retirement.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

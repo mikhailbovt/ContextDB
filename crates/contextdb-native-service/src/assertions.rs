@@ -2,7 +2,7 @@
 
 mod catalog;
 mod query;
-mod retention;
+pub(crate) mod retention;
 #[cfg(test)]
 mod tests;
 mod verify;
@@ -34,6 +34,10 @@ use super::{
 pub(super) const STATE_FEATURE: &str = "continuous-assertions-v1";
 pub(super) use catalog::CATALOG_FEATURE;
 pub use retention::NativeAssertionPruningReceipt;
+pub use retention::witness::{
+    NativeAssertionBatchKind, NativeAssertionCopyKind, NativeAssertionKeyInventory,
+    NativeAssertionRemovalWitnessReceipt,
+};
 pub(crate) use retention::{AssertionPruningPublication, PRUNING_FEATURE};
 const DOMAIN: &str = "contextdb.native-assertions/v1";
 const MAX_WINDOW: usize = 128;

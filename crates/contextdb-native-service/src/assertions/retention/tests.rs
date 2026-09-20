@@ -17,7 +17,7 @@ fn budget() -> QueryBudget {
         Default::default(),
     )
 }
-fn remove(
+pub(super) fn remove(
     native: &NativeService,
     input: &CaptureRequest,
     name: &str,
@@ -31,7 +31,7 @@ fn remove(
         )
         .expect("request removal")
 }
-fn prepare(
+pub(super) fn prepare(
     native: &NativeService,
     input: &CaptureRequest,
     removal: &crate::NativeRemovalRequestReceipt,
@@ -59,7 +59,7 @@ fn prepare(
         }
     }
 }
-fn mixed(
+pub(super) fn mixed(
     native: &NativeService,
     first: &CaptureRequest,
     second: &CaptureRequest,
@@ -98,7 +98,7 @@ fn mixed(
     );
     (request, ids.0, ids.1)
 }
-fn row(native: &NativeService, key: &[u8]) -> Option<Vec<u8>> {
+pub(super) fn row(native: &NativeService, key: &[u8]) -> Option<Vec<u8>> {
     native
         .engine
         .begin_read(SnapshotSelector::Latest)
@@ -182,6 +182,15 @@ fn mixed_assertions_prune_without_changing_independent_mutations_or_old_receipts
         })
         .expect("old archive");
     let removal = remove(&native, &first, "remove first");
+    let first_witness = native
+        .prepare_assertion_removal(
+            &first.context,
+            &removal,
+            key(&first).scope,
+            accepted.workspace_commit,
+            &mut budget(),
+        )
+        .expect("retain first mixed ownership");
     assert_eq!(
         native
             .prune_source_assertions(
@@ -287,6 +296,15 @@ fn mixed_assertions_prune_without_changing_independent_mutations_or_old_receipts
     drop(snapshot);
     let second_removal = remove(&native, &second, "remove second later");
     prepare(&native, &second, &second_removal);
+    let second_witness = native
+        .prepare_assertion_removal(
+            &second.context,
+            &second_removal,
+            key(&second).scope,
+            accepted.workspace_commit,
+            &mut budget(),
+        )
+        .expect("retain independently selected second mutation");
     let second_pruned = native
         .prune_source_assertions(
             &second.context,
@@ -296,6 +314,25 @@ fn mixed_assertions_prune_without_changing_independent_mutations_or_old_receipts
         )
         .expect("second mixed mutation");
     assert_eq!(second_pruned.mutations, BTreeSet::from([3]));
+    let first_keys = native
+        .read_assertion_key_inventory(&first.context, &first_witness, &mut budget())
+        .expect("historical first selection after another cleanup");
+    let second_keys = native
+        .read_assertion_key_inventory(&second.context, &second_witness, &mut budget())
+        .expect("historical second selection");
+    assert_eq!(first_keys.batches, second_keys.batches);
+    assert_eq!(
+        first_keys.batches[&NativeAssertionBatchKind::Retained].len(),
+        2
+    );
+    assert_eq!(
+        first_keys.mutations.keys().copied().collect::<Vec<_>>(),
+        [1]
+    );
+    assert_eq!(
+        second_keys.mutations.keys().copied().collect::<Vec<_>>(),
+        [3]
+    );
     let batch_key = retained_key(&workspace(&first.context), accepted.workspace_commit);
     let retained: RetainedAssertions =
         decode(&row(&native, &batch_key).expect("retained"), "retained").expect("decode");
@@ -312,6 +349,15 @@ fn mixed_assertions_prune_without_changing_independent_mutations_or_old_receipts
         .expect("second primary");
     let negative_removal = remove(&native, &negative, "remove negative support");
     prepare(&native, &negative, &negative_removal);
+    let negative_witness = native
+        .prepare_assertion_removal(
+            &negative.context,
+            &negative_removal,
+            key(&negative).scope,
+            negative_receipt.workspace_commit,
+            &mut budget(),
+        )
+        .expect("retain retraction ownership");
     native
         .prune_source_assertions(
             &negative.context,
@@ -320,6 +366,15 @@ fn mixed_assertions_prune_without_changing_independent_mutations_or_old_receipts
             &mut budget(),
         )
         .expect("prune retraction body");
+    let negative_keys = native
+        .read_assertion_key_inventory(&negative.context, &negative_witness, &mut budget())
+        .expect("historical retraction copies");
+    assert_eq!(negative_keys.mutations[&0].len(), 2);
+    assert!(!negative_keys.mutations[&0].contains_key(&NativeAssertionCopyKind::ClaimLabel));
+    assert_eq!(
+        negative_keys.mutations[&0][&NativeAssertionCopyKind::Body].len(),
+        1
+    );
     native
         .prune_original_sources(
             &negative.context,
@@ -356,6 +411,17 @@ fn mixed_assertions_prune_without_changing_independent_mutations_or_old_receipts
         restored
             .verify_native(true)
             .expect("restored semantic closure");
+        for (witness, expected) in [
+            (&first_witness, &first_keys),
+            (&second_witness, &second_keys),
+            (&negative_witness, &negative_keys),
+        ] {
+            let keys = restored
+                .read_assertion_key_inventory(&first.context, witness, &mut budget())
+                .expect("mixed and negative ownership after encrypted restore");
+            assert_eq!(keys.batches, expected.batches);
+            assert_eq!(keys.mutations, expected.mutations);
+        }
         assert!(row(&restored, &claim_key(successor_id)).is_some());
         assert_eq!(
             restored

@@ -14,7 +14,10 @@
 #[cfg(test)]
 mod adapter_tests;
 mod assertions;
-pub use assertions::NativeAssertionPruningReceipt;
+pub use assertions::{
+    NativeAssertionBatchKind, NativeAssertionCopyKind, NativeAssertionKeyInventory,
+    NativeAssertionPruningReceipt, NativeAssertionRemovalWitnessReceipt,
+};
 mod backup;
 mod capture;
 mod custody;
