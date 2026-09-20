@@ -237,20 +237,18 @@ impl NativeService {
                     }
                 }
                 if let Some(work) = &journal.accepted_original {
-                    let original = self.load_captured_original(snapshot, work.event_id)?;
-                    budget
-                        .charge(1, encode(&original.event)?.len() as u64)
-                        .map_err(budget_error)?;
-                    if work != &self.capture_work_for_receipt(snapshot, &original.receipt)?
-                        || original.receipt.workspace_commit != next
-                        || digest_bytes(original.receipt.workspace_id.to_string().as_bytes())
+                    let control = self.verified_capture_control(snapshot, work.event_id, budget)?;
+                    if work != &self.capture_work_for_receipt(snapshot, &control.receipt)?
+                        || control.receipt.workspace_commit != next
+                        || digest_bytes(control.receipt.workspace_id.to_string().as_bytes())
                             != world.workspace_digest
                     {
                         return Err(integrity(
                             "source deletion capture differs from accepted history",
                         ));
                     }
-                    let inputs = custody::inputs(&original.event)?;
+                    let owned_payload = control.recovery.owned_payload();
+                    let inputs = control.recovery.inputs;
                     // Account retained graph metadata as well as materialized bodies.
                     budget
                         .charge(
@@ -258,15 +256,9 @@ impl NativeService {
                             2 * encode(&inputs)?.len() as u64 + 512,
                         )
                         .map_err(budget_error)?;
-                    let owned_payload = match &original.event.payload {
-                        contextdb_core::EventPayload::Staged { reference, .. } => {
-                            Some(reference.block_id)
-                        }
-                        _ => None,
-                    };
                     graph.insert(SourceNode {
-                        control_digest: self.capture_control_digest(snapshot, &original)?,
-                        receipt: original.receipt,
+                        control_digest: control.control_digest,
+                        receipt: control.receipt,
                         recovery_digest: work.recovery_digest,
                         inputs,
                         owned_payload,

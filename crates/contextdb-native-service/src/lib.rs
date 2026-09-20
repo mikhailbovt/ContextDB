@@ -44,7 +44,9 @@ pub use encryption::{
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
-pub use retention::{NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt};
+pub use retention::{
+    NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt, NativeSourcePruningReceipt,
+};
 pub use suppression::{NativeSuppressionLedger, SuppressionProgress};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -317,6 +319,8 @@ struct StoredEvent {
     accepted_suppression: Option<suppression::SuppressionPublication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_removal_preparation: Option<retention::RemovalPreparationPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_source_pruning: Option<retention::SourcePruningPublication>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -701,6 +705,11 @@ impl NativeService {
             },
             accepted_removal_preparation: if operation == "removal_prepare" {
                 Some(decode(&response_bytes, "removal preparation publication")?)
+            } else {
+                None
+            },
+            accepted_source_pruning: if operation == "source_prune" {
+                Some(decode(&response_bytes, "source pruning publication")?)
             } else {
                 None
             },
@@ -1115,8 +1124,11 @@ impl NativeService {
                     &self.keyspaces.observations_content,
                     policy.observation_digest.as_bytes(),
                 )
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("native observation content is absent"))?;
+                .map_err(storage_error)?;
+            let Some(bytes) = bytes else {
+                self.verify_pruned_observation(snapshot, &policy)?;
+                continue;
+            };
             let content: StoredObservationContent = decode(&bytes, "native observation content")?;
             if content.metadata.get("capture_format")
                 == Some(&serde_json::json!(contextdb_service::NATIVE_CAPTURE_DOMAIN))
@@ -1172,6 +1184,7 @@ impl NativeService {
         self.verify_custody_records(snapshot)?;
         self.verify_suppression_records(snapshot)?;
         self.verify_removal_preparations(snapshot)?;
+        self.verify_source_pruning(snapshot)?;
         self.verify_payload_records(snapshot)?;
         self.verify_raw_index_records(snapshot)?;
         self.verify_assertion_records(snapshot)?;
@@ -3101,6 +3114,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != record_journal::RECORD_FEATURE
                 && feature != suppression::SUPPRESSION_FEATURE
                 && feature != retention::RETENTION_FEATURE
+                && feature != retention::PRUNING_FEATURE
                 && feature != encryption::ENCRYPTION_FEATURE
         })
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
@@ -3109,6 +3123,8 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || (manifest.features.contains(retention::RETENTION_FEATURE)
             && manifest.suppression_authority.is_none())
         || (manifest.features.contains(raw_index::REMOVAL_FEATURE)
+            && !manifest.features.contains(retention::RETENTION_FEATURE))
+        || (manifest.features.contains(retention::PRUNING_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || manifest.features.contains(encryption::ENCRYPTION_FEATURE)
             != manifest.custody_authority.is_some()

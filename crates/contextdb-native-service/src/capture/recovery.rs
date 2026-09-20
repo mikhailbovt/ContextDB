@@ -39,9 +39,9 @@ struct PayloadMetadata {
 /// adapter/source/gap strings and checkpoint content are deliberately not copied.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CaptureRecovery {
+pub(in super::super) struct CaptureRecovery {
     version: u16,
-    pub(super) scope_ids: BTreeSet<ScopeId>,
+    pub(in super::super) scope_ids: BTreeSet<ScopeId>,
     producer_id: StreamId,
     kind: EventKind,
     role: EventRole,
@@ -61,11 +61,40 @@ pub(super) struct CaptureRecovery {
     pub(super) response_stream: Option<ResponseStream>,
     provenance: Option<EventProvenance>,
     payload: PayloadMetadata,
-    inputs: crate::custody::Inputs,
+    pub(in super::super) inputs: crate::custody::Inputs,
     pub(super) checkpoint: Option<crate::owned::CheckpointControl>,
 }
 
 impl CaptureRecovery {
+    pub(super) fn verify_features(&self, manifest: &Manifest) -> ServiceResult<()> {
+        if (matches!(self.provenance, Some(EventProvenance::ModelOutput { .. }))
+            && !manifest
+                .features
+                .contains(crate::payload::MODEL_PROTOCOL_FEATURE))
+            || (self.checkpoint.is_some()
+                && !manifest.features.contains(crate::owned::OWNED_FEATURE))
+            || ((self.provenance.is_some()
+                || matches!(
+                    self.payload.shape,
+                    PayloadShape::Staged | PayloadShape::Assembly
+                ))
+                && !manifest.features.contains(crate::payload::SOURCE_FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery requires missing source format features",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn owned_payload(&self) -> Option<contextdb_core::ContentBlockId> {
+        if self.payload.shape == PayloadShape::Staged {
+            self.inputs.payloads.first().map(|value| value.block_id)
+        } else {
+            None
+        }
+    }
+
     pub(super) fn from_event(event: &EventEnvelope) -> ServiceResult<Self> {
         let (shape, bytes, media_type, renderer, model_call) = match &event.payload {
             EventPayload::InlineUtf8 { text, .. } => (
@@ -154,6 +183,43 @@ impl CaptureRecovery {
 }
 
 impl NativeService {
+    /// Administrative metadata for either a complete original or an explicitly
+    /// pruned original with independently retained control authority. Never used
+    /// to manufacture an EventEnvelope or a successful original read.
+    pub(in super::super) fn verified_capture_control<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<VerifiedCaptureControl> {
+        let record: CaptureRecord = read_required(snapshot, self, &record_key(id))?;
+        budget
+            .charge(1, encode(&record)?.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        if let Some(control_digest) = self.verify_pruned_source(snapshot, id, budget)? {
+            return Ok(VerifiedCaptureControl {
+                receipt: record.receipt,
+                recovery: record
+                    .recovery
+                    .ok_or_else(|| integrity("pruned recovery is absent"))?,
+                control_digest,
+                original: None,
+            });
+        }
+        let original = self.load_captured_original(snapshot, id)?;
+        budget
+            .charge(1, encode(&original.event)?.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        Ok(VerifiedCaptureControl {
+            control_digest: self.capture_control_digest(snapshot, &original)?,
+            recovery: record
+                .recovery
+                .unwrap_or(CaptureRecovery::from_event(&original.event)?),
+            receipt: original.receipt,
+            original: Some(original.event),
+        })
+    }
+
     // The retained authority has already proved membership of this exact source.
     // Only immutable control bytes are read here; this is not disclosure authority.
     pub(in super::super) fn verify_retained_capture_control<S: ReadSnapshot>(
@@ -375,6 +441,13 @@ impl NativeService {
         }
         Ok(Some(first))
     }
+}
+
+pub(in super::super) struct VerifiedCaptureControl {
+    pub(in super::super) receipt: CaptureReceipt,
+    pub(in super::super) recovery: CaptureRecovery,
+    pub(in super::super) control_digest: ContentDigest,
+    pub(in super::super) original: Option<EventEnvelope>,
 }
 
 pub(super) fn control_digest(bytes: &[u8]) -> ContentDigest {

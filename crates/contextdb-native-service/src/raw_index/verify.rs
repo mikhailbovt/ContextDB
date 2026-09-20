@@ -13,6 +13,7 @@ impl NativeService {
     ) -> ServiceResult<Vec<(String, OriginalRevocationReceipt)>> {
         let mut accepted = Vec::new();
         let mut epochs = BTreeMap::<String, u64>::new();
+        let mut budget = super::super::retention::audit_budget();
         for entry in snapshot
             .scan_prefix(&self.keyspaces.events, b"")
             .map_err(storage_error)?
@@ -28,8 +29,9 @@ impl NativeService {
                     {
                         return Err(integrity("accepted original revocation binding is invalid"));
                     }
-                    let original = self.load_captured_original(snapshot, receipt.event_id)?;
-                    if digest_bytes(original.event.workspace_id.to_string().as_bytes())
+                    let control =
+                        self.verified_capture_control(snapshot, receipt.event_id, &mut budget)?;
+                    if digest_bytes(control.receipt.workspace_id.to_string().as_bytes())
                         != event.workspace_digest
                     {
                         return Err(integrity("original revocation crosses workspaces"));
@@ -65,9 +67,10 @@ impl NativeService {
         snapshot: &S,
     ) -> ServiceResult<BTreeMap<Vec<u8>, u64>> {
         let mut scopes = BTreeMap::new();
+        let mut budget = super::super::retention::audit_budget();
         for (workspace, receipt) in self.accepted_raw_revocations(snapshot)? {
-            let original = self.load_captured_original(snapshot, receipt.event_id)?;
-            for scope in original.event.scope_ids {
+            let control = self.verified_capture_control(snapshot, receipt.event_id, &mut budget)?;
+            for scope in control.recovery.scope_ids {
                 let epoch = scopes
                     .entry(super::super::capture::scope_key(
                         &workspace,

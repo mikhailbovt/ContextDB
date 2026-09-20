@@ -105,6 +105,49 @@ pub struct OriginalRevocationReceipt {
 }
 
 impl NativeService {
+    pub(crate) fn require_raw_source_prunable<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+        receipt: &contextdb_service::CaptureReceipt,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        let state: IndexState = self
+            .raw_value(snapshot, &state_key(workspace))?
+            .unwrap_or_default();
+        for number in retained_generations(&state)? {
+            let generation: Generation = self
+                .raw_value(snapshot, &generation_key(workspace, number))?
+                .ok_or_else(|| integrity("pruning found a missing raw generation"))?;
+            budget
+                .charge(1, encode(&generation)?.len() as u64)
+                .map_err(budget_error)?;
+            if (generation.through >= receipt.workspace_commit
+                && !self.source_prepared_at(
+                    snapshot,
+                    workspace,
+                    receipt.event_id,
+                    generation.removal_through,
+                    budget,
+                )?)
+                || snapshot
+                    .get(
+                        &self.keyspaces.continuous,
+                        &doc_key(workspace, number, receipt.event_id),
+                    )
+                    .map_err(storage_error)?
+                    .is_some()
+            {
+                return Err(ServiceError::new(
+                    ErrorCode::IndexTooStale,
+                    "rebuild and reclaim raw generations before pruning their originals",
+                    true,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Bounded maintenance outside the interactive query. Original analysis runs
     /// outside the writer lock; publication compares generation and policy epoch.
     /// `rebuild` starts a separate generation and switches it only after catch-up.

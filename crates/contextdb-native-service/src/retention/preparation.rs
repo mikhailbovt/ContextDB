@@ -148,20 +148,31 @@ impl NativeService {
         let mut controls = BTreeMap::new();
         for id in sources {
             let retained = ledger.removal_source(&workspace, &request, *id, budget)?;
-            let original = self.load_captured_original(&snapshot, *id)?;
-            budget
-                .charge(1, encode(&original.event)?.len() as u64)
-                .map_err(raw_index::budget_error)?;
-            if original.receipt != retained.receipt
-                || self.capture_control_digest(&snapshot, &original)? != retained.control_digest
+            let control = self.verified_capture_control(&snapshot, *id, budget)?;
+            if control.receipt != retained.receipt
+                || control.control_digest != retained.control_digest
                 || self
-                    .capture_work_for_receipt(&snapshot, &original.receipt)?
+                    .capture_work_for_receipt(&snapshot, &control.receipt)?
                     .recovery_digest
                     != Some(retained.recovery_digest)
             {
                 return Err(integrity(
                     "removal preparation original differs from retained control",
                 ));
+            }
+            if !self.source_prepared_at(
+                &snapshot,
+                &workspace,
+                *id,
+                Some(world.watermarks.journal),
+                budget,
+            )? {
+                self.verify_capture_source_integrity(
+                    &snapshot,
+                    &control
+                        .original
+                        .ok_or_else(|| integrity("unprepared source has no original"))?,
+                )?;
             }
             controls.insert(*id, retained.control_digest);
         }
@@ -306,7 +317,7 @@ impl NativeService {
             }
         }
         let actual = snapshot
-            .scan_prefix(&self.keyspaces.continuous, b"removal/")
+            .scan_prefix(&self.keyspaces.continuous, b"removal/prepared/")
             .map_err(storage_error)?;
         if actual.len() != expected.len()
             || actual
@@ -323,8 +334,8 @@ impl NativeService {
                 .parse()
                 .map_err(|_| integrity("prepared source ID is invalid"))?;
             let prepared: PreparedSource = decode(&row.value, "prepared removal control")?;
-            let original = self.load_captured_original(snapshot, id)?;
-            if self.capture_control_digest(snapshot, &original)? != prepared.control_digest {
+            let control = self.verified_capture_control(snapshot, id, &mut budget)?;
+            if control.control_digest != prepared.control_digest {
                 return Err(integrity(
                     "prepared capture control changed after publication",
                 ));

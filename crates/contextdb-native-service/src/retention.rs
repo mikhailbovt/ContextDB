@@ -7,8 +7,12 @@ use suppression::{RemovalCheckpoint, RemovalIntent};
 use super::*;
 
 mod preparation;
+mod pruning;
 pub use preparation::NativeRemovalPreparationReceipt;
 pub(super) use preparation::RemovalPreparationPublication;
+pub use pruning::NativeSourcePruningReceipt;
+pub(super) use pruning::audit_budget;
+pub(super) use pruning::{PRUNING_FEATURE, SourcePruningPublication};
 
 pub(super) const RETENTION_FEATURE: &str = "continuous-retention-authority-v1";
 
