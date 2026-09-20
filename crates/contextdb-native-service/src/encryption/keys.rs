@@ -14,6 +14,9 @@ use uuid::Uuid;
 
 use super::*;
 
+mod backups;
+pub use backups::{NativeBackupCatalogPage, NativeBackupRegistration};
+
 const MAX_PENDING_KEYS: usize = 16_384;
 const KEYSPACE: &str = "contextdb_native_custody_keys";
 
@@ -93,7 +96,7 @@ impl NativeCustodyKeys {
         let engine = FjallStorage::open(path.as_ref()).map_err(crate::storage_error)?;
         let rows = Keyspace::new(KEYSPACE).map_err(crate::storage_error)?;
         let identity = Identity {
-            version: 1,
+            version: 2,
             authority: contextdb_core::ObservationId::new().as_uuid(),
             database: crate::digest_bytes(database_id.as_bytes()),
         };
@@ -112,6 +115,12 @@ impl NativeCustodyKeys {
         .map_err(crate::storage_error)?;
         tx.put(&rows, b"proof".to_vec(), proof)
             .map_err(crate::storage_error)?;
+        tx.put(
+            &rows,
+            backups::HEAD.to_vec(),
+            backups::genesis(&identity, &master).map_err(crate::storage_error)?,
+        )
+        .map_err(crate::storage_error)?;
         crate::require_sync(
             tx.commit(Durability::Sync)
                 .map_err(crate::storage_error)?
@@ -145,7 +154,7 @@ impl NativeCustodyKeys {
                 .ok_or_else(|| crate::integrity("custody identity is missing"))?,
         )
         .map_err(crate::storage_error)?;
-        if identity.version != 1
+        if !matches!(identity.version, 1 | 2)
             || identity.authority != authority
             || identity.database != crate::digest_bytes(database_id.as_bytes())
         {
@@ -366,6 +375,9 @@ impl NativeCustodyKeys {
             if row.key == b"identity" || row.key == b"proof" {
                 continue;
             }
+            if row.key.starts_with(b"backup/") {
+                continue; // Verified as an exact ordered registry below.
+            }
             let address = row
                 .key
                 .strip_prefix(b"key/")
@@ -376,6 +388,7 @@ impl NativeCustodyKeys {
             }
             self.unwrap(address, &decode(&row.value)?)?;
         }
+        self.verify_backup_catalog(&snapshot)?;
         Ok(())
     }
 }

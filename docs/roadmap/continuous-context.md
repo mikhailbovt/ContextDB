@@ -190,3 +190,10 @@ process exit between key Sync and native publication. Selected reads perform one
 key lookup at inventories of 1, 128 and 4,096 entries. This is bounded logical work,
 not a latency SLO. Host provisioning, plaintext migration, key/copy reclamation
 and full deletion closure remain separate gates.
+
+An independent issued-backup registry now synchronizes a content-free registration
+before returning encrypted archives. It survives native restore and response loss,
+rejects registry corruption/loss, and supports bounded revision-bound pages.
+Existing v1 key authorities retain read support; backup issuance requires explicit
+registry migration. Issued archives remain potential external copies until their
+disposition is independently verified; this registry is not a deletion receipt.

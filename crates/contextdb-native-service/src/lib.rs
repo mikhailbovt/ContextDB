@@ -35,7 +35,9 @@ pub use backup::{
 };
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
-pub use encryption::{CustodyMasterKey, NativeCustodyKeys};
+pub use encryption::{
+    CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
+};
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};

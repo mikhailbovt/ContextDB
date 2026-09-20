@@ -60,6 +60,9 @@ impl NativeService {
         request: CreateBackupRequest,
     ) -> ServiceResult<BackupResponse> {
         require_capability(&request.context, Capability::Admin)?;
+        if let Some(keys) = &self.engine.keys {
+            keys.require_backup_registry()?;
+        }
         let _guard = self.lock_writes()?;
         self.verify_physical_backup_layout()?;
         let backend = self
@@ -105,9 +108,25 @@ impl NativeService {
         archive.commit_seq = commit_seq;
         archive.deep_digest = deep_digest;
         let bytes = encode_backup(&archive)?;
+        let digest = digest_bytes(&bytes);
+        if let Some(keys) = &self.engine.keys {
+            keys.register_backup(
+                &digest,
+                commit_seq,
+                &archive.deep_digest,
+                bytes.len() as u64,
+            )
+            .map_err(storage_error)?;
+            #[cfg(test)]
+            AFTER_REGISTRATION.with(|hook| {
+                if let Some(hook) = hook.take() {
+                    hook();
+                }
+            });
+        }
         Ok(BackupResponse {
             format: archive.format,
-            digest: digest_bytes(&bytes),
+            digest,
             bytes,
             commit_seq,
         })
@@ -527,6 +546,11 @@ impl NativeService {
         }
         Ok(())
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static AFTER_REGISTRATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 fn non_pristine_restore() -> ServiceError {

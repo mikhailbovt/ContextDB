@@ -8,7 +8,9 @@ mod storage;
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub use keys::{CustodyMasterKey, NativeCustodyKeys};
+pub use keys::{
+    CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
+};
 pub(super) use storage::{NativeSnapshot, NativeStorage};
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
