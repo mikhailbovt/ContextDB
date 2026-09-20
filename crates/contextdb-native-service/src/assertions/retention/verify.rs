@@ -265,14 +265,4 @@ impl NativeService {
         }
         Ok((key, bytes, batch))
     }
-
-    fn raw_manifest<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<crate::Manifest> {
-        decode(
-            &snapshot
-                .get(&self.keyspaces.meta, crate::META_MANIFEST_KEY)
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("native manifest absent"))?,
-            "native manifest",
-        )
-    }
 }

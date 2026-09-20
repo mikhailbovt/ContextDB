@@ -59,6 +59,16 @@ batch. Reconstruction uses these bytes and source history. Activation is explici
 (`continuous-record-mutations-v1` / `continuous-assertions-v1`); neither retrofit
 claims to recreate an old payload that the legacy journal never retained.
 
+New record births and closures also bind a compact control in the same Sync
+(`continuous-record-controls-v1`). It retains host access policy, lifecycle and
+time, with hashes for record/link identifiers, values, text, vectors and
+attributes. Scope reconstruction can use these accepted controls. Their complete
+family and exact match to full bodies are verified across reopen and restore;
+missing controls cannot fall back to legacy behavior. Old references keep their
+encoding and receipts. Full bodies remain required until generic-record pruning
+and preparation of older mutations are implemented. Controls have a separate
+16 MiB bound per mutation group; overflow rejects the complete publication.
+
 The first native capture implementation exposes `CapturePort` and the
 `NativeConversationCapture` host adapter (`contextdb-chat/service-adapter`).
 It preserves UTF-8 or binary originals, explicit omissions, immutable edits,

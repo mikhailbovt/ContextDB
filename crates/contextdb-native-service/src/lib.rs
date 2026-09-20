@@ -1112,6 +1112,16 @@ impl NativeService {
         Ok(())
     }
 
+    fn raw_manifest<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<Manifest> {
+        decode(
+            &snapshot
+                .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("native manifest absent"))?,
+            "native manifest",
+        )
+    }
+
     fn verify_all_records<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<String> {
         for entry in snapshot
             .scan_prefix(&self.keyspaces.policy_history, b"")
@@ -3479,6 +3489,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != assertions::PRUNING_FEATURE
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
+                && feature != record_journal::CONTROL_FEATURE
                 && feature != record_sources::FEATURE
                 && feature != record_sources::writes::WRITE_FEATURE
                 && feature != record_sources::writes::GROUP_FEATURE
@@ -3492,6 +3503,8 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
             != manifest.suppression_authority.is_some()
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
+        || (manifest.features.contains(record_journal::CONTROL_FEATURE)
+            && !manifest.features.contains(record_journal::RECORD_FEATURE))
         || (manifest
             .features
             .contains(record_sources::writes::CORRECTION_FEATURE)

@@ -210,3 +210,9 @@ changing frontiers, interleaved workspaces, older encrypted restore, corrupt or
 missing controls, budget interruption, and actual runtime start/reopen/resume.
 Host classification remains trusted. Durable recovery progress, measured backlog
 limits, larger origin ancestry, generic-record pruning and migration remain open.
+
+New generic births and closures atomically bind controls without copying arbitrary
+record bodies. Tests cover correction/retraction, exact old receipts, mixed legacy
+archives and new control activation, restore, and missing/forged/orphaned metadata.
+Scope replay uses the controls; an unpruned missing body still fails verification.
+Older-mutation preparation and actual generic-copy pruning remain unfinished.

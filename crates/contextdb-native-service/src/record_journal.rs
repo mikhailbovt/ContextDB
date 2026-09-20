@@ -4,6 +4,9 @@
 
 use super::*;
 
+mod controls;
+pub(crate) use controls::CONTROL_FEATURE;
+
 pub(super) const RECORD_FEATURE: &str = "continuous-record-mutations-v1";
 const ACTIVATED: &[u8] = b"semantic/activated";
 pub(super) const MAX_WRITES: usize = 1024;
@@ -14,6 +17,8 @@ pub(super) const MAX_BYTES: usize = 16 * 1024 * 1024;
 pub(super) struct RecordMutationRef {
     pub(crate) key: Vec<u8>,
     pub(crate) digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) control_digest: Option<String>,
 }
 
 impl NativeService {
@@ -28,12 +33,7 @@ impl NativeService {
             .map_err(storage_error)?
             .is_none()
         {
-            let mut manifest: Manifest = decode(
-                &tx.get(&self.keyspaces.meta, META_MANIFEST_KEY)
-                    .map_err(storage_error)?
-                    .ok_or_else(|| integrity("native manifest absent"))?,
-                "native manifest",
-            )?;
+            let mut manifest = self.raw_manifest(tx)?;
             manifest.features.insert(RECORD_FEATURE.into());
             manifest.checksum = manifest_checksum(&manifest)?;
             tx.put(
@@ -80,6 +80,7 @@ impl NativeService {
             ));
         }
         let mut result = Vec::new();
+        let mut control_bytes = 0usize;
         for entry in page.entries {
             let record: MemoryRecord = decode(&entry.value, "accepted record mutation")?;
             if digest_bytes(record.document.access.workspace_id.as_bytes())
@@ -95,9 +96,12 @@ impl NativeService {
                 )
                 .map_err(storage_error)?;
             }
+            let control_digest =
+                self.retain_record_control(tx, frame, &record, &mut control_bytes)?;
             result.push(RecordMutationRef {
                 key: entry.key,
                 digest: digest_bytes(&entry.value),
+                control_digest: Some(control_digest),
             });
         }
         Ok(result)
@@ -110,6 +114,9 @@ impl NativeService {
         let activated: Option<u64> = self.raw_value(snapshot, ACTIVATED)?;
         let mut expected_keys = BTreeSet::new();
         let mut latest = BTreeMap::<Vec<u8>, MemoryRecord>::new();
+        let control_activation = self.record_control_activation(snapshot)?;
+        let mut expected_controls = BTreeSet::new();
+        let mut first_control = None;
         let manifest: Manifest = decode(
             &snapshot
                 .get(&self.keyspaces.meta, META_MANIFEST_KEY)
@@ -155,6 +162,15 @@ impl NativeService {
                 let record: MemoryRecord = decode(&bytes, "accepted record mutation")?;
                 let policy = policy_for(&record)?;
                 validate_stored_policy(&policy)?;
+                if let Some(control) =
+                    self.record_mutation_control(snapshot, &event, reference, control_activation)?
+                {
+                    if control != controls::RecordControl::from_record(&record)? {
+                        return Err(integrity("record control differs from accepted payload"));
+                    }
+                    expected_controls.insert(controls::control_key(&reference.key)?);
+                    first_control.get_or_insert(event.global_commit);
+                }
                 if reference.digest != digest_bytes(&bytes)
                     || mutation_key(event.global_commit, &record) != reference.key
                     || record.transaction_to.unwrap_or(record.transaction_from)
@@ -180,6 +196,12 @@ impl NativeService {
                 "orphaned or missing accepted record journal data",
             ));
         }
+        if first_control != control_activation {
+            return Err(integrity(
+                "record control activation is not its first accepted mutation",
+            ));
+        }
+        self.verify_record_control_keys(snapshot, &expected_controls, control_activation)?;
         for (key, record) in latest {
             let stored: StoredContent = decode(
                 &snapshot
@@ -220,6 +242,7 @@ impl NativeService {
         snapshot: &S,
     ) -> ServiceResult<BTreeMap<Vec<u8>, u64>> {
         let mut epochs = BTreeMap::<Vec<u8>, u64>::new();
+        let control_activation = self.record_control_activation(snapshot)?;
         for entry in snapshot
             .scan_prefix(&self.keyspaces.events, b"")
             .map_err(storage_error)?
@@ -242,6 +265,17 @@ impl NativeService {
                 }
             }
             for reference in &event.accepted_records {
+                if let Some(control) =
+                    self.record_mutation_control(snapshot, &event, reference, control_activation)?
+                {
+                    for scope in &control.policy.access.scopes {
+                        let epoch = epochs
+                            .entry(capture::scope_key(&event.workspace_digest, scope))
+                            .or_default();
+                        *epoch = (*epoch).max(event.workspace_commit);
+                    }
+                    continue;
+                }
                 let record: MemoryRecord = decode(
                     &snapshot
                         .get(&self.keyspaces.continuous, &reference.key)
