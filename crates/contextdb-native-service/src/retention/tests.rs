@@ -51,6 +51,49 @@ fn accepted_removal_closes_disclosure_across_reopen_and_old_encrypted_restore() 
             .expect("exact retry"),
         receipt
     );
+    let key_inventory = source
+        .read_original_key_inventory(&input.context, &receipt, &mut budget())
+        .expect("source keys selected through retained lineage");
+    assert_eq!(
+        key_inventory
+            .sources
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([input.event.event_id, child.event.event_id])
+    );
+    assert!(key_inventory.sources.values().all(|keys| keys.len() == 1));
+    assert!(
+        !key_inventory
+            .sources
+            .contains_key(&independent.event.event_id)
+    );
+    let before_keys = keys
+        .key_catalog_page(None, 1, &mut budget())
+        .expect("key head before inventory denials")
+        .revision;
+    let mut denied = input.context.clone();
+    denied.capability_grants.remove(&Capability::Admin);
+    assert_eq!(
+        source
+            .read_original_key_inventory(&denied, &receipt, &mut budget())
+            .expect_err("admin required")
+            .code,
+        ErrorCode::Unauthorized
+    );
+    let mut forged = receipt.clone();
+    forged.inspected_workspace_commit += 1;
+    assert!(
+        source
+            .read_original_key_inventory(&input.context, &forged, &mut budget())
+            .is_err()
+    );
+    assert_eq!(
+        keys.key_catalog_page(None, 1, &mut budget())
+            .expect("no key mutation")
+            .revision,
+        before_keys
+    );
     drop(source);
     let reopened = NativeService::open_encrypted(
         root.path().join("source"),
@@ -77,6 +120,13 @@ fn accepted_removal_closes_disclosure_across_reopen_and_old_encrypted_restore() 
         })
         .expect("install archive");
     for service in [&reopened, &restored] {
+        assert_eq!(
+            service
+                .read_original_key_inventory(&input.context, &receipt, &mut budget())
+                .expect("primary keys survive older restore, including an absent later descendant")
+                .sources,
+            key_inventory.sources
+        );
         let inventory = service
             .read_original_removal_inventory(&input.context, &receipt, &mut budget())
             .expect("full inventory survives an older native archive");

@@ -286,6 +286,23 @@ verifies the complete allocation journal and key inventory, rejecting missing,
 changed or orphaned versions. Historical keys remain available; allocation does
 not disable keys or establish deletion completion.
 
+`key_catalog_page` enumerates at most 256 accepted descriptors with a shared
+work/byte/time budget and an authenticated continuation. Pages bind the authority,
+allocation revision and exact batch chain; new allocations invalidate a pending
+enumeration, while backup registration alone does not. Continuations survive
+authority reopen. New journal records contain at most 256 descriptors, all sharing
+the transaction's key-store Sync; older larger batches remain readable and budgeted.
+Descriptors expose address/key identities and commitments,
+without wrapped or raw keys; the complete chain must reach its retained terminal.
+This is allocation evidence, including potentially unused keys after interruption.
+
+Admin `read_original_key_inventory` joins that catalog to the selected request's
+retained roots and descendants, including historical primary keys after pruning
+or old-native restore. Independent source addresses are excluded. The complete
+scan admits at most 65,536 selected allocations and 32 MiB of output. This report
+does not prove native use or physical absence, cover other copy classes, retire
+keys or reopen disclosure.
+
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never
 derive that master key from the rotatable token key. Encrypted backups use

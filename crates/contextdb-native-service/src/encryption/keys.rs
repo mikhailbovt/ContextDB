@@ -17,6 +17,7 @@ use super::*;
 mod backups;
 mod versions;
 pub use backups::{NativeBackupCatalogPage, NativeBackupRegistration};
+pub use versions::{NativeKeyAllocation, NativeKeyCatalogPage};
 
 const MAX_PENDING_KEYS: usize = 16_384;
 const KEYSPACE: &str = "contextdb_native_custody_keys";

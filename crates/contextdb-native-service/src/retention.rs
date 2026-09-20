@@ -6,8 +6,10 @@ use suppression::{RemovalCheckpoint, RemovalIntent};
 
 use super::*;
 
+mod keys;
 mod preparation;
 mod pruning;
+pub use keys::NativePrimaryKeyInventory;
 pub use preparation::NativeRemovalPreparationReceipt;
 pub(super) use preparation::RemovalPreparationPublication;
 pub use pruning::NativeSourcePruningReceipt;

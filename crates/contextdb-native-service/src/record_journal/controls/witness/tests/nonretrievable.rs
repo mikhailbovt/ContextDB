@@ -195,6 +195,12 @@ fn nonretrievable_legacy_cleanup_preserves_policy_and_encrypted_archive_recovery
     let removal = native
         .request_original_removal(&context, &targets, "remove", &mut budget())
         .expect("removal");
+    let primary_keys = native
+        .read_original_key_inventory(&context, &removal, &mut budget())
+        .expect("primary keys before cleanup")
+        .sources;
+    assert_eq!(primary_keys.len(), 1);
+    assert_eq!(primary_keys[&source].len(), 1);
     let witness = native
         .prepare_record_removal(
             &context,
@@ -241,6 +247,13 @@ fn nonretrievable_legacy_cleanup_preserves_policy_and_encrypted_archive_recovery
         .prune_original_sources(&context, &removal, &targets, &mut budget())
         .expect("primary cleanup");
     native.verify_native(true).expect("encrypted cleanup");
+    assert_eq!(
+        native
+            .read_original_key_inventory(&context, &removal, &mut budget())
+            .expect("removed primary retains all allocated key identities")
+            .sources,
+        primary_keys
+    );
     let cleaned = native
         .create_backup(CreateBackupRequest {
             context: context.clone(),

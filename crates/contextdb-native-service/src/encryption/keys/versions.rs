@@ -6,21 +6,25 @@ use std::collections::BTreeSet;
 
 use super::*;
 
+mod catalog;
+pub use catalog::{NativeKeyAllocation, NativeKeyCatalogPage};
+
 #[cfg(test)]
 mod tests;
 
 pub(super) const HEAD: &[u8] = b"key-log/head";
 const BATCHES: &[u8] = b"key-log/batch/";
 const MAX_BATCH_BYTES: usize = 8 * 1024 * 1024;
+const REFERENCES_PER_BATCH: usize = 256;
 
-#[derive(Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Head {
     sequence: u64,
     digest: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct KeyReference {
     address: String,
@@ -62,11 +66,7 @@ impl NativeCustodyKeys {
         tx: &mut T,
         pending: &PendingKeys,
     ) -> contextdb_storage::Result<()> {
-        let head = self.key_version_head(tx)?;
-        let sequence = head
-            .sequence
-            .checked_add(1)
-            .ok_or_else(|| failure("key version journal exhausted"))?;
+        let mut head = self.key_version_head(tx)?;
         if !tx
             .scan_prefix_page(
                 &self.rows,
@@ -112,25 +112,34 @@ impl NativeCustodyKeys {
             });
             tx.put(&self.rows, key, bytes)?;
         }
-        let batch = Batch {
-            sequence,
-            previous_digest: head.digest,
-            keys: references,
-        };
-        let bytes = encode(&batch)?;
-        if bytes.len() > MAX_BATCH_BYTES {
-            return Err(failure("key version journal batch exceeds its bound"));
+        // Bound new journal records so paging a large native transaction does
+        // not repeatedly decode its entire allocation set. Historical larger
+        // batches remain readable. All records and the head share one Sync.
+        for references in references.chunks(REFERENCES_PER_BATCH) {
+            let sequence = head
+                .sequence
+                .checked_add(1)
+                .ok_or_else(|| failure("key version journal exhausted"))?;
+            let batch = Batch {
+                sequence,
+                previous_digest: head.digest,
+                keys: references.to_vec(),
+            };
+            let bytes = encode(&batch)?;
+            if bytes.len() > MAX_BATCH_BYTES {
+                return Err(failure("key version journal batch exceeds its bound"));
+            }
+            head = Head {
+                sequence,
+                digest: Some(crate::digest_bytes(&bytes)),
+            };
+            let key = batch_key(sequence);
+            tx.put(&self.rows, key.clone(), self.seal_key_log(&key, &bytes)?)?;
         }
-        let next = Head {
-            sequence,
-            digest: Some(crate::digest_bytes(&bytes)),
-        };
-        let key = batch_key(sequence);
-        tx.put(&self.rows, key.clone(), self.seal_key_log(&key, &bytes)?)?;
         tx.put(
             &self.rows,
             HEAD.to_vec(),
-            self.seal_key_log(HEAD, &encode(&next)?)?,
+            self.seal_key_log(HEAD, &encode(&head)?)?,
         )?;
         Ok(())
     }

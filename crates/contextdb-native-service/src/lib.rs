@@ -50,6 +50,7 @@ pub use custody::CustodyProgress;
 pub use deletion::{NativeDeletionLineage, NativeDeletionSource};
 pub use encryption::{
     CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
+    NativeKeyAllocation, NativeKeyCatalogPage,
 };
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{
@@ -57,7 +58,8 @@ pub use payload::{
 };
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
 pub use retention::{
-    NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt, NativeSourcePruningReceipt,
+    NativePrimaryKeyInventory, NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt,
+    NativeSourcePruningReceipt,
 };
 pub use suppression::{NativeSuppressionLedger, SuppressionProgress};
 

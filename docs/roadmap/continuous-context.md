@@ -233,5 +233,9 @@ and native transaction, with an authenticated complete allocation journal. Old
 snapshots and encrypted restore retain exact historical key IDs; an independent
 rewrite uses a new key. Tests cover actual key-authority reopen, multiple owners,
 authenticated ciphertext import and missing/replayed/changed allocation metadata.
+Budgeted catalog pages bind the complete allocation chain and retain authenticated
+continuations across reopen. Administrative primary-key inventory joins retained
+source lineage to historical allocations after pruning or older restore, including
+descendants absent from that archive, and excludes independent source addresses.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

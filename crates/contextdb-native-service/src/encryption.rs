@@ -10,6 +10,7 @@ pub(crate) mod tests;
 
 pub use keys::{
     CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
+    NativeKeyAllocation, NativeKeyCatalogPage,
 };
 pub(super) use storage::{NativeSnapshot, NativeStorage};
 
@@ -71,7 +72,7 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> contextdb_storage::Re
     serde_json::from_slice(bytes).map_err(|_| failure("custody record is invalid"))
 }
 
-fn address(space: &Keyspace, key: &[u8]) -> String {
+pub(super) fn address(space: &Keyspace, key: &[u8]) -> String {
     let mut hash = blake3::Hasher::new();
     hash.update(b"contextdb/native-value-address/v1\0");
     hash.update(&(space.as_str().len() as u64).to_be_bytes());
