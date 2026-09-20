@@ -299,6 +299,17 @@ impl RecallProvider for NativeRecallProvider<'_> {
                     && request.principal.allows(&access)
                 {
                     access.validate()?;
+                    let policies = match self.service.record_source_policies(&snapshot, &policy) {
+                        Ok(policies) => policies,
+                        Err(error) if super::record_sources::source_unavailable(&error) => continue,
+                        Err(error) => return Err(provider_service(error)),
+                    };
+                    if policies
+                        .iter()
+                        .any(|policy| !request.principal.allows(&access_rule(policy)))
+                    {
+                        continue;
+                    }
                     if selected
                         .insert(policy.record_digest.clone(), (policy, access))
                         .is_some()

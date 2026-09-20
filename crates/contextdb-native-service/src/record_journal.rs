@@ -12,8 +12,8 @@ const MAX_BYTES: usize = 16 * 1024 * 1024;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RecordMutationRef {
-    key: Vec<u8>,
-    digest: String,
+    pub(crate) key: Vec<u8>,
+    pub(crate) digest: String,
 }
 
 impl NativeService {
@@ -225,6 +225,14 @@ impl NativeService {
             .map_err(storage_error)?
         {
             let event: StoredEvent = decode(&entry.value, "record scope event")?;
+            if let Some(publication) = &event.accepted_record_sources {
+                for scope in &publication.scopes {
+                    let epoch = epochs
+                        .entry(capture::scope_key(&event.workspace_digest, scope))
+                        .or_default();
+                    *epoch = (*epoch).max(event.workspace_commit);
+                }
+            }
             for reference in &event.accepted_records {
                 let record: MemoryRecord = decode(
                     &snapshot

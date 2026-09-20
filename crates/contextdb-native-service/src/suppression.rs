@@ -10,6 +10,7 @@ use contextdb_core::ObservationId;
 use contextdb_recall::QueryBudget;
 use ledger::Checkpoint;
 pub use ledger::NativeSuppressionLedger;
+pub(crate) use ledger::{RecordSourceControl, RecordSourcesCheckpoint};
 pub(crate) use ledger::{RemovalCheckpoint, RemovalIntent};
 
 pub(super) const SUPPRESSION_FEATURE: &str = "continuous-external-suppression-v1";
@@ -70,6 +71,18 @@ impl NativeService {
                 false,
             ));
         }
+        if manifest.features.contains(record_sources::FEATURE)
+            && !self
+                .suppression
+                .as_ref()
+                .is_some_and(|ledger| ledger.supports_record_sources())
+        {
+            return Err(ServiceError::new(
+                ErrorCode::FormatIncompatible,
+                "native record provenance requires its version 3 retained authority",
+                false,
+            ));
+        }
         Ok(())
     }
 
@@ -92,6 +105,7 @@ impl NativeService {
     ) -> ServiceResult<()> {
         self.require_suppression_prefix_current(snapshot, workspace)?;
         self.require_removal_current(snapshot, workspace)?;
+        self.require_record_sources_current(snapshot, workspace)?;
         Ok(())
     }
 

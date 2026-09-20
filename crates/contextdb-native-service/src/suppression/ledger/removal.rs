@@ -71,7 +71,7 @@ pub(super) fn genesis(identity: &Identity) -> ServiceResult<RemovalCheckpoint> {
 
 impl NativeSuppressionLedger {
     pub(crate) fn supports_removal(&self) -> bool {
-        self.identity.version == 2
+        self.identity.version >= 2
     }
 
     pub(super) fn removal_denies<S: ReadSnapshot>(
@@ -94,7 +94,7 @@ impl NativeSuppressionLedger {
     }
 
     pub(crate) fn require_removal_authority(&self) -> ServiceResult<()> {
-        if self.identity.version != 2 {
+        if self.identity.version < 2 {
             return Err(ServiceError::new(
                 ErrorCode::FormatIncompatible,
                 "retention removal requires explicit migration of the version 1 suppression authority",

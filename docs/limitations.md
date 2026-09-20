@@ -33,8 +33,12 @@ and release verifier—not the presence of an API name—determine completion.
   migration, key reclamation, remote authority custody and physical deletion
   remain open. Explicit source/assertion/chunk pruning supports interrupted
   cleanup and restore, retaining independent assertions and shared blocks.
-  Generic-record cleanup and a verified completion publication that reopens
-  disclosure remain unfinished. See [the native profile](architecture/continuous-context.md).
+  Version 3 authorities retain administrator-declared generic-record origins
+  across restore, enforcing current source policies before body reads. New generic
+  writes in an origin-aware workspace require unfinished source-aware writers;
+  unclassified records remain unavailable. Generic-record cleanup and a verified
+  completion publication that reopens disclosure remain unfinished.
+  See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector
   certification shape; E01/E02/E03 remain open.
 - Native Linux x86_64 and Windows x86_64 local-MCP developer previews have distinct

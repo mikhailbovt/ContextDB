@@ -179,8 +179,7 @@ negative relationships without retaining removed values or envelopes. Old full,
 partially pruned and cleaned archives verify their actual remaining logical rows
 and restore behind current suppression.
 
-The 134 native tests passed on Windows. Final projection changes also passed all
-21 assertion scenarios; workspace Clippy and governance checks passed. Fixtures
+The 140 native tests passed on Windows. Fixtures
 cover actual partial restart, overlapping removal requests, shared blocks, mixed
 semantic batches, supersession/retraction targets, original receipt retries,
 missing controls, resurrected content and concurrent publication. This is local
@@ -188,3 +187,11 @@ logical-copy cleanup, not physical or key erasure. Generic-record cleanup,
 complete copy inventory, old-replica reconciliation, verified local completion,
 key disablement and external-copy dispositions remain open. Disclosure stays
 closed after a removal request until a verified completion executor exists.
+
+Retained record origins now prevent an old native archive from losing later
+source-policy bindings. Tests include encrypted old/partial/current restore,
+records absent from an early archive, denial before decoding damaged bodies,
+independent recall, actual process exit after external Sync, interrupted catch-up,
+registry loss and genuine version 2 compatibility. Declarations require trusted
+host classification; source-aware mutation ports, generic-record pruning and
+authority migration remain unfinished.

@@ -121,10 +121,30 @@ native owners compare the external head under its publication owner before appen
 
 Explicit removal has a separate durable request. `request_original_removal`
 retains the complete inspected source inventory and every known descendant-ID
-denial in one external Sync. Version 2 suppression authorities require permanent
+denial in one external Sync. Version 2 and later authorities require permanent
 workspace registration and request history; legacy authorities require migration.
 Request-bound pages prove exact source and block membership. Shared novel blocks
 with an independent captured owner are excluded from removal targets.
+
+Version 3 authorities additionally retain immutable captured origins for ordinary
+record revisions. `bind_record_sources` accepts an authenticated administrator's
+complete declaration of 1..64 earlier captures and binds their controls to the
+original accepted record bytes. Empty evidence links or similar text never prove
+independence. The external declaration survives native restore and closes
+disclosure until `maintain_record_sources` verifies and applies its prefix. Each
+page contains at most 256 entries and 384 KiB; native application compares the
+workspace before one Sync. Applied progress is journal-bound and advances the
+declared record scopes. Whole registry loss is an error, including at reopen.
+
+Once origins are declared in a workspace, unclassified record revisions are
+unavailable. Get, timeline, candidate/ordinary recall, traversal and ContextPack
+reads apply current original and inherited custody policies before loading record
+bodies. Independent records remain available after ordinary source revocation.
+Exact accepted mutation retries remain supported; new generic writes in such a
+workspace currently require a source-aware writer that is still being implemented.
+Legacy workspaces retain their existing behavior. Version 1/2 authorities require
+explicit migration before accepting origins; this API does not perform migration
+or establish that a host's declaration is semantically complete.
 
 The current local maintenance sequence is:
 

@@ -470,9 +470,14 @@ fn legacy_authority_keeps_ordinary_data_but_native_binding_rejects_a_retention_d
         .engine
         .begin_read(SnapshotSelector::Latest)
         .expect("snapshot");
-    let rows = snapshot
+    let mut rows = snapshot
         .scan_prefix(&ledger.rows, b"removal/")
         .expect("rows");
+    rows.extend(
+        snapshot
+            .scan_prefix(&ledger.rows, b"record-sources/")
+            .expect("version 3 rows"),
+    );
     drop(snapshot);
     let mut tx = ledger.engine.begin_write().expect("tx");
     for row in rows {

@@ -30,6 +30,8 @@ mod publication;
 mod raw;
 mod raw_index;
 mod record_journal;
+mod record_sources;
+pub use record_sources::{NativeRecordSourceProgress, NativeRecordSourceReceipt};
 mod retention;
 mod suppression;
 
@@ -328,6 +330,8 @@ struct StoredEvent {
     accepted_payload_pruning: Option<payload::PayloadPruningPublication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_assertion_pruning: Option<assertions::AssertionPruningPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_sources: Option<record_sources::RecordSourcesPublication>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -730,6 +734,11 @@ impl NativeService {
             } else {
                 None
             },
+            accepted_record_sources: if operation == "record_sources_reconcile" {
+                Some(decode(&response_bytes, "record source application")?)
+            } else {
+                None
+            },
         };
         event.event_digest = event_digest(&event)?;
         let idempotency = StoredIdempotency {
@@ -914,6 +923,19 @@ impl NativeService {
                 "native authorized policy/content binding changed",
             ));
         }
+        if let Some(ledger) = &self.suppression
+            && let Some(binding) = ledger.retained_record_sources(
+                &digest_bytes(policy.access.workspace_id.as_bytes()),
+                &policy.record_digest,
+                policy.revision,
+            )?
+            && (binding.control.transaction_from != policy.transaction_from
+                || binding.control.document_digest != canonical_digest(&stored.record.document)?)
+        {
+            return Err(integrity(
+                "record body differs from retained source provenance",
+            ));
+        }
         Ok(stored.record)
     }
 
@@ -982,6 +1004,7 @@ impl NativeService {
         if !policy_allows(&request.context.request, &policy.access) {
             return Err(permission_denied());
         }
+        self.authorize_record_sources(&snapshot, &request.context.request, &policy)?;
         self.load_content(&snapshot, &policy)
     }
 
@@ -1206,6 +1229,7 @@ impl NativeService {
         self.verify_raw_index_records(snapshot)?;
         self.verify_assertion_records(snapshot)?;
         self.verify_record_mutations(snapshot)?;
+        self.verify_record_source_progress(snapshot)?;
         for entry in snapshot
             .scan_prefix(&self.keyspaces.events, b"")
             .map_err(storage_error)?
@@ -1681,6 +1705,7 @@ impl NativeService {
             replay.replayed = true;
             return Ok(replay);
         }
+        self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
         if self.load_head(&transaction, &request.memory_id)?.is_some() {
             return Err(invalid("memory ID has already been used"));
         }
@@ -1800,6 +1825,7 @@ impl NativeService {
             replay.mutation.replayed = true;
             return Ok(replay);
         }
+        self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
         if self
             .load_head(&transaction, &request.candidate_id)?
             .is_some()
@@ -2606,6 +2632,7 @@ impl NativeService {
             replay.replayed = true;
             return Ok(replay);
         }
+        self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
         let target_policy = self
             .load_head(&transaction, &request.target_id)?
             .filter(|policy| policy.transaction_to.is_none())
@@ -2747,6 +2774,7 @@ impl NativeService {
             replay.replayed = true;
             return Ok(replay);
         }
+        self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
         let target_policy = self
             .load_head(&transaction, &request.target_id)?
             .filter(|policy| policy.transaction_to.is_none())
@@ -2888,6 +2916,11 @@ impl NativeService {
                 || !policy_allows(&request.context.request, &policy.access)
             {
                 continue;
+            }
+            match self.authorize_record_sources(&snapshot, &request.context.request, &policy) {
+                Ok(()) => {}
+                Err(error) if record_sources::source_unavailable(&error) => continue,
+                Err(error) => return Err(error),
             }
             let mut record = self.load_content(&snapshot, &policy)?;
             if record.transaction_to.is_some_and(|to| to > global_commit) {
@@ -3065,6 +3098,11 @@ impl NativeService {
                     && policy_allows(principal, &policy.access)
                     && family.accepts(policy.kind)
                 {
+                    match self.authorize_record_sources(snapshot, principal, &policy) {
+                        Ok(()) => {}
+                        Err(error) if record_sources::source_unavailable(&error) => continue,
+                        Err(error) => return Err(error),
+                    }
                     selected.insert(policy.record_digest.clone(), policy);
                     if selected.len() > MAX_AUTHORIZED_CANDIDATES {
                         return Err(exhausted(
@@ -3130,6 +3168,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != assertions::PRUNING_FEATURE
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
+                && feature != record_sources::FEATURE
                 && feature != suppression::SUPPRESSION_FEATURE
                 && feature != retention::RETENTION_FEATURE
                 && feature != retention::PRUNING_FEATURE

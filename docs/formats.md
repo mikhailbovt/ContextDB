@@ -68,6 +68,12 @@ hashes; it never claims rewritten bytes have the old full-batch digest. Tombston
 and chunk progress permit only declared missing bodies. The deep digest still
 hashes every actual remaining row. A partial
 cleanup archive is not a completion receipt or evidence of physical erasure.
+The `continuous-record-sources-v1` feature binds native applied provenance to
+an independently retained version 3 suppression authority. Its global genesis,
+workspace chains and revision indexes are mandatory; record bodies and origin
+controls keep their original commitments. Native restore never replaces this
+registry. An older archive must catch up before disclosure, and unclassified
+records remain unavailable. Older authority versions require explicit migration.
 The header and record addresses are visible; the format does not claim signatures,
 physical erasure or production host key custody. See the
 [native encryption and restore contract](architecture/continuous-context.md).
