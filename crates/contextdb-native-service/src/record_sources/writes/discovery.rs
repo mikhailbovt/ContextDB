@@ -217,11 +217,7 @@ impl NativeService {
                     "record write intent has an invalid journal owner",
                 ));
             }
-            if event.operation == COMPLETE {
-                let publication = event
-                    .accepted_record_write_completion
-                    .as_ref()
-                    .ok_or_else(|| integrity("record completion declaration absent"))?;
+            if let Some(publication) = recovery::completion_declaration(&event)? {
                 let write =
                     self.recovery_global_event(&snapshot, publication.write_global_commit, budget)?;
                 if write.workspace_digest != workspace
@@ -238,8 +234,6 @@ impl NativeService {
                         "record completion journal lost its exact locator",
                     ));
                 }
-            } else if event.accepted_record_write_completion.is_some() {
-                return Err(integrity("record completion has an invalid journal owner"));
             }
             state.after = Anchor::of(&event);
         }
@@ -387,9 +381,7 @@ impl NativeService {
             if event.global_commit <= previous {
                 return Err(integrity("record completion suffix regressed"));
             }
-            if event
-                .accepted_record_write_completion
-                .as_ref()
+            if recovery::completion_declaration(&event)?
                 .is_some_and(|completion| completion.write_global_commit == write.global_commit)
             {
                 return Err(integrity("accepted record completion lost its locator"));

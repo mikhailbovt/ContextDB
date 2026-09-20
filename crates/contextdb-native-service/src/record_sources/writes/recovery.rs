@@ -1,5 +1,37 @@
 use super::*;
 
+pub(super) fn completion_declaration(
+    event: &StoredEvent,
+) -> ServiceResult<Option<&RecordWriteCompletion>> {
+    if event.operation != COMPLETE {
+        if event.accepted_record_write_completion.is_some() {
+            return Err(integrity("record completion has an invalid journal owner"));
+        }
+        return Ok(None);
+    }
+    let publication = event
+        .accepted_record_write_completion
+        .as_ref()
+        .ok_or_else(|| integrity("record completion declaration absent"))?;
+    if event.accepted_record_write.is_some()
+        || publication.write_global_commit == 0
+        || publication.write_global_commit >= event.global_commit
+        || event.response_digest != canonical_digest(publication)?
+        || event.request_digest
+            != canonical_digest(&(
+                WRITE_FEATURE,
+                COMPLETE,
+                &event.workspace_digest,
+                publication,
+            ))?
+    {
+        return Err(integrity(
+            "record completion declaration differs from acceptance",
+        ));
+    }
+    Ok(Some(publication))
+}
+
 impl NativeService {
     /// Resume an accepted source-aware mutation from its workspace-local commit.
     /// Only accepted controls are transferred; original request bodies are not
@@ -324,17 +356,9 @@ impl NativeService {
                 .as_ref()
                 .map(|reference| &reference.digest)
                 != Some(&marker.publication.intent_digest)
-            || event.accepted_record_write_completion.as_ref() != Some(&marker.publication)
+            || completion_declaration(&event)? != Some(&marker.publication)
             || marker.publication.scopes != intent.scopes()
             || event.event_digest != event_digest(&event)?
-            || event.response_digest != canonical_digest(&marker.publication)?
-            || event.request_digest
-                != canonical_digest(&(
-                    WRITE_FEATURE,
-                    COMPLETE,
-                    &event.workspace_digest,
-                    &marker.publication,
-                ))?
         {
             return Err(integrity("record write completion is not journal-bound"));
         }

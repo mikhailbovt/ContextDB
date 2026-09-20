@@ -265,55 +265,83 @@ fn absent_workspace_maps_or_receipts_never_turn_into_an_empty_recovery_page() {
 
 #[test]
 fn a_lost_completion_locator_cannot_cause_a_second_accepted_completion() {
-    let root = tempfile::tempdir().expect("root");
-    let (_authority, ledger) = suppression::tests::authority("completion-locator");
-    let service =
-        NativeService::open_with_suppression(root.path(), "completion-locator", [7; 32], ledger)
-            .expect("native");
-    let source = input(1, "source");
-    service.append_event(source.clone()).expect("capture");
-    let response = service
-        .publish_memory_from_sources(
-            publication(&source.context, "record"),
-            &BTreeSet::from([source.event.event_id]),
-            &mut budget(),
+    for missing in ["locator", "locator-and-declaration", "locator-and-binding"] {
+        let root = tempfile::tempdir().expect("root");
+        let (_authority, ledger) = suppression::tests::authority("completion-locator");
+        let service = NativeService::open_with_suppression(
+            root.path(),
+            "completion-locator",
+            [7; 32],
+            ledger,
         )
-        .expect("complete record");
-    let mut tx = service.engine.begin_write().expect("transaction");
-    let (_, event) = service
-        .recovery_event(
-            &tx,
-            &digest_bytes(source.context.request.workspace_id.as_bytes()),
-            response.commit_seq,
-            &mut budget(),
+        .expect("native");
+        let source = input(1, "source");
+        service.append_event(source.clone()).expect("capture");
+        let response = service
+            .publish_memory_from_sources(
+                publication(&source.context, "record"),
+                &BTreeSet::from([source.event.event_id]),
+                &mut budget(),
+            )
+            .expect("complete record");
+        let mut tx = service.engine.begin_write().expect("transaction");
+        let (_, event) = service
+            .recovery_event(
+                &tx,
+                &digest_bytes(source.context.request.workspace_id.as_bytes()),
+                response.commit_seq,
+                &mut budget(),
+            )
+            .expect("accepted write");
+        let before = service.global_head(&tx).expect("head");
+        if missing != "locator" {
+            let mut completion = service
+                .record_write_completion(&tx, &event)
+                .expect("completion locator")
+                .expect("completed event");
+            if missing == "locator-and-declaration" {
+                completion.accepted_record_write_completion = None;
+            } else {
+                completion
+                    .accepted_record_write_completion
+                    .as_mut()
+                    .expect("declaration")
+                    .write_global_commit = 1;
+            }
+            completion.event_digest = event_digest(&completion).expect("rehashed fixture");
+            tx.put(
+                &service.keyspaces.events,
+                completion.global_commit.to_be_bytes().to_vec(),
+                encode(&completion).expect("damaged completion"),
+            )
+            .expect("lose journal declaration");
+        }
+        tx.delete(
+            &service.keyspaces.continuous,
+            completion_key(event.global_commit),
         )
-        .expect("accepted write");
-    let before = service.global_head(&tx).expect("head");
-    tx.delete(
-        &service.keyspaces.continuous,
-        completion_key(event.global_commit),
-    )
-    .expect("lose locator only");
-    tx.commit(Durability::Sync).expect("commit");
-    assert_eq!(
-        service
-            .resume_record_source_write(&source.context, response.commit_seq, &mut budget())
-            .expect_err("later accepted completion must be found")
-            .code,
-        ErrorCode::IntegrityFailure
-    );
-    assert_eq!(
-        service
-            .repair_record_source_writes(&source.context, None, 256, &mut budget())
-            .expect_err("paged repair also refuses corrupt completion")
-            .code,
-        ErrorCode::IntegrityFailure
-    );
-    let snapshot = service
-        .engine
-        .begin_read(SnapshotSelector::Latest)
-        .expect("snapshot");
-    assert_eq!(service.global_head(&snapshot).expect("head"), before);
+        .expect("lose locator only");
+        tx.commit(Durability::Sync).expect("commit");
+        assert_eq!(
+            service
+                .resume_record_source_write(&source.context, response.commit_seq, &mut budget())
+                .expect_err("later accepted completion must be found")
+                .code,
+            ErrorCode::IntegrityFailure
+        );
+        assert_eq!(
+            service
+                .repair_record_source_writes(&source.context, None, 256, &mut budget())
+                .expect_err("paged repair also refuses corrupt completion")
+                .code,
+            ErrorCode::IntegrityFailure
+        );
+        let snapshot = service
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .expect("snapshot");
+        assert_eq!(service.global_head(&snapshot).expect("head"), before);
+    }
 }
 
 #[test]
