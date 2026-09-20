@@ -10,6 +10,7 @@ use contextdb_core::ObservationId;
 use contextdb_recall::QueryBudget;
 use ledger::Checkpoint;
 pub use ledger::NativeSuppressionLedger;
+pub(crate) use ledger::{RemovalCheckpoint, RemovalIntent};
 
 pub(super) const SUPPRESSION_FEATURE: &str = "continuous-external-suppression-v1";
 
@@ -57,6 +58,18 @@ impl NativeService {
                 "native store requires its exact current external suppression authority",
             ));
         }
+        if manifest.features.contains(retention::RETENTION_FEATURE)
+            != self
+                .suppression
+                .as_ref()
+                .is_some_and(|ledger| ledger.supports_removal())
+        {
+            return Err(ServiceError::new(
+                ErrorCode::FormatIncompatible,
+                "native retention authority format differs; explicit migration is required",
+                false,
+            ));
+        }
         Ok(())
     }
 
@@ -82,6 +95,7 @@ impl NativeService {
         {
             return Err(pending());
         }
+        self.require_removal_current(snapshot, workspace)?;
         Ok(())
     }
 

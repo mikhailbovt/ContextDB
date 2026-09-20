@@ -51,6 +51,19 @@ pub struct NativeDeletionLineage {
     pub digest: ContentDigest,
 }
 
+impl NativeDeletionLineage {
+    pub(super) fn verify_commitment(&self) -> ServiceResult<()> {
+        let mut unsigned = self.clone();
+        unsigned.digest = ContentDigest::from_bytes([0; 32]);
+        if ContentDigest::from_bytes(*blake3::hash(&encode(&(DOMAIN, unsigned))?).as_bytes())
+            != self.digest
+        {
+            return Err(integrity("source deletion inventory commitment differs"));
+        }
+        Ok(())
+    }
+}
+
 struct SourceNode {
     receipt: CaptureReceipt,
     recovery_digest: Option<ContentDigest>,

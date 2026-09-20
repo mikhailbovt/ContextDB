@@ -29,6 +29,7 @@ mod publication;
 mod raw;
 mod raw_index;
 mod record_journal;
+mod retention;
 mod suppression;
 
 pub use backup::{
@@ -43,6 +44,7 @@ pub use encryption::{
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
 pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
+pub use retention::NativeRemovalRequestReceipt;
 pub use suppression::{NativeSuppressionLedger, SuppressionProgress};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -495,6 +497,15 @@ impl NativeService {
                 .features
                 .insert(suppression::SUPPRESSION_FEATURE.into());
         }
+        if self
+            .suppression
+            .as_ref()
+            .is_some_and(|ledger| ledger.supports_removal())
+        {
+            manifest
+                .features
+                .insert(retention::RETENTION_FEATURE.into());
+        }
         if manifest.custody_authority.is_some() {
             manifest
                 .features
@@ -598,6 +609,9 @@ impl NativeService {
         workspace_id: &str,
         semantic: bool,
     ) -> ServiceResult<CommitFrame> {
+        if let Some(ledger) = &self.suppression {
+            ledger.register_removal_workspace(&digest_bytes(workspace_id.as_bytes()))?;
+        }
         let global_commit = self
             .global_head(transaction)?
             .checked_add(1)
@@ -3077,11 +3091,14 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
                 && feature != suppression::SUPPRESSION_FEATURE
+                && feature != retention::RETENTION_FEATURE
                 && feature != encryption::ENCRYPTION_FEATURE
         })
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
             != manifest.suppression_authority.is_some()
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
+        || (manifest.features.contains(retention::RETENTION_FEATURE)
+            && manifest.suppression_authority.is_none())
         || manifest.features.contains(encryption::ENCRYPTION_FEATURE)
             != manifest.custody_authority.is_some()
         || manifest.custody_authority.is_some_and(|id| id.is_nil())
