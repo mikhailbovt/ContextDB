@@ -54,11 +54,24 @@ impl NativeSuppressionLedger {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
-        let head = self.removal_global_head(&snapshot)?;
+        self.removal_source_at(&snapshot, workspace, request, id, budget)
+    }
+
+    pub(in crate::suppression::ledger) fn removal_source_at<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+        request: &RemovalCheckpoint,
+        id: ObservationId,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeDeletionSource> {
+        self.require_removal_authority()?;
+        budget.check().map_err(budget_error)?;
+        let head = self.removal_global_head(snapshot)?;
         if request.sequence == 0 || request.sequence > head.sequence {
             return Err(integrity("removal source references an unknown request"));
         }
-        let event = self.read_removal_event(&snapshot, request.sequence)?;
+        let event = self.read_removal_event(snapshot, request.sequence)?;
         budget
             .charge(1, encode(&event)?.len() as u64)
             .map_err(budget_error)?;

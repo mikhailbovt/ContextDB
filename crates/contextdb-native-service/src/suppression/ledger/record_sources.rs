@@ -224,7 +224,20 @@ impl NativeSuppressionLedger {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
-        let head = self.record_sources_head(&snapshot)?;
+        self.retained_record_sources_at(&snapshot, workspace, record, revision)
+    }
+
+    pub(in crate::suppression::ledger) fn retained_record_sources_at<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+        record: &str,
+        revision: u32,
+    ) -> ServiceResult<Option<RecordSourceEntry>> {
+        if !self.supports_record_sources() {
+            return Ok(None);
+        }
+        let head = self.record_sources_head(snapshot)?;
         let Some(bytes) = snapshot
             .get(&self.rows, &record_key(workspace, record, revision))
             .map_err(storage_error)?
@@ -232,7 +245,7 @@ impl NativeSuppressionLedger {
             return Ok(None);
         };
         let sequence: u64 = decode(&bytes, "record source locator")?;
-        let entry = self.read_record_source_entry(&snapshot, sequence)?;
+        let entry = self.read_record_source_entry(snapshot, sequence)?;
         let control = entry.record_control()?;
         if sequence > head.sequence
             || control.workspace != workspace

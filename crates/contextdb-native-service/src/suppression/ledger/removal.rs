@@ -6,6 +6,7 @@ use contextdb_service::CaptureReceipt;
 use super::*;
 
 mod inventory;
+mod record_witness;
 #[cfg(test)]
 mod tests;
 
@@ -41,6 +42,9 @@ enum Operation {
         intent: RemovalIntent,
         source_pages: Vec<ContentDigest>,
         payload_pages: Vec<ContentDigest>,
+    },
+    RecordWitness {
+        witness: record_witness::RecordWitnessDeclaration,
     },
 }
 
@@ -404,13 +408,15 @@ impl NativeSuppressionLedger {
         snapshot: &S,
         sequence: u64,
     ) -> ServiceResult<Event> {
-        let event: Event = decode(
-            &snapshot
-                .get(&self.rows, &event_key(sequence))
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("retention authority event is missing"))?,
-            "retention event",
-        )?;
+        let bytes = snapshot
+            .get(&self.rows, &event_key(sequence))
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("retention authority event is missing"))?;
+        self.decode_removal_event(&bytes, sequence)
+    }
+
+    fn decode_removal_event(&self, bytes: &[u8], sequence: u64) -> ServiceResult<Event> {
+        let event: Event = decode(bytes, "retention event")?;
         let mut unsigned = event.clone();
         unsigned.digest.clear();
         if sequence == 0
@@ -421,6 +427,7 @@ impl NativeSuppressionLedger {
         }
         match &event.operation {
             Operation::Register { workspace } => valid_digest(workspace)?,
+            Operation::RecordWitness { witness } => witness.validate(sequence)?,
             Operation::Request {
                 intent,
                 source_pages,
@@ -510,6 +517,9 @@ impl NativeSuppressionLedger {
                 return Err(integrity("retention authority chain is discontinuous"));
             }
             match &event.operation {
+                Operation::RecordWitness { witness } => {
+                    self.verify_record_witness_rows(snapshot, &event, witness, expected)?;
+                }
                 Operation::Register { workspace } => {
                     if workspaces
                         .insert(workspace.clone(), self.removal_genesis(workspace)?)

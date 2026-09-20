@@ -10,7 +10,7 @@ fn budget() -> QueryBudget {
     )
 }
 
-fn rehash<T: WriteTransaction>(service: &NativeService, tx: &mut T) {
+pub(crate) fn rehash<T: WriteTransaction>(service: &NativeService, tx: &mut T) {
     let mut previous = None;
     for row in tx
         .scan_prefix(&service.keyspaces.events, b"")
@@ -54,6 +54,11 @@ fn legacy(service: &NativeService) -> MutationResponse {
     service
         .publish_memory(independent)
         .expect("interleaved workspace");
+    strip_controls(service);
+    original
+}
+
+pub(crate) fn strip_controls(service: &NativeService) {
     let mut tx = service.engine.begin_write().expect("transaction");
     for row in tx
         .scan_prefix(&service.keyspaces.continuous, super::super::PREFIX)
@@ -89,7 +94,6 @@ fn legacy(service: &NativeService) -> MutationResponse {
     .expect("manifest");
     tx.commit(Durability::Sync).expect("legacy fixture");
     service.verify_native(true).expect("valid legacy format");
-    original
 }
 
 #[test]

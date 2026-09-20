@@ -218,5 +218,9 @@ Scope replay uses the controls; an unpruned missing body still fails verificatio
 Older full mutation groups can now retain controls through a separate accepted
 preparation, preserving their original history and receipts across restore.
 Preparation checks access, budgets and workspace CAS; missing/forged controls or
-declarations fail closed. Actual generic-copy pruning and hash-only migration
+declarations fail closed. Classified revisions can now retain complete removal
+witnesses in the independent authority, including graph roles and hashed
+provenance. Tests cover old native restore, explicit legacy preparation, lost
+acknowledgements, CAS, invalid mutation owners and changed or missing metadata.
+Native bodies remain mandatory; generic-copy pruning and hash-only migration
 remain unfinished.

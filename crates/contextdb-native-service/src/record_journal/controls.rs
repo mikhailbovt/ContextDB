@@ -6,6 +6,7 @@ use contextdb_service::{DomainTimeRange, MemoryLinks};
 use super::*;
 
 pub(crate) mod preparation;
+pub(crate) mod witness;
 
 #[cfg(test)]
 mod tests;
@@ -106,6 +107,7 @@ impl RecordControl {
         let policy = &self.policy;
         if event.event_digest != event_digest(event)?
             || event.global_commit == 0
+            || !owns_record_mutations(&event.operation)
             || policy.transaction_to.unwrap_or(policy.transaction_from) != event.global_commit
             || digest_bytes(policy.access.workspace_id.as_bytes()) != event.workspace_digest
             || policy.content_digest != reference.digest
@@ -194,6 +196,17 @@ impl NativeService {
         reference: &RecordMutationRef,
         activated: Option<u64>,
     ) -> ServiceResult<Option<RecordControl>> {
+        self.budgeted_record_mutation_control(snapshot, event, reference, activated, None)
+    }
+
+    fn budgeted_record_mutation_control<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event: &StoredEvent,
+        reference: &RecordMutationRef,
+        activated: Option<u64>,
+        budget: Option<&mut contextdb_recall::QueryBudget>,
+    ) -> ServiceResult<Option<RecordControl>> {
         if activated.is_some_and(|first| first <= event.global_commit)
             != reference.control_digest.is_some()
         {
@@ -208,6 +221,11 @@ impl NativeService {
             .get(&self.keyspaces.continuous, &control_key(&reference.key)?)
             .map_err(storage_error)?
             .ok_or_else(|| integrity("accepted record control absent"))?;
+        if let Some(budget) = budget {
+            budget
+                .charge(1, bytes.len() as u64)
+                .map_err(raw_index::budget_error)?;
+        }
         if bytes.len() > MAX_BYTES || digest_bytes(&bytes) != *digest {
             return Err(integrity(
                 "record control differs from its accepted commitment",

@@ -5,7 +5,7 @@ use contextdb_recall::QueryBudget;
 use super::*;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod verify;
 
 pub(crate) const FEATURE: &str = "continuous-record-control-preparation-v1";

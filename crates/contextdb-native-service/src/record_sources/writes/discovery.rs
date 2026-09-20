@@ -332,7 +332,7 @@ impl NativeService {
         Ok((mapping, event))
     }
 
-    fn recovery_global_event<S: ReadSnapshot>(
+    pub(crate) fn recovery_global_event<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         global: u64,

@@ -8,7 +8,7 @@ use contextdb_service::{CapturePort, CognitiveMemoryService};
 
 use super::*;
 
-pub(super) fn budget() -> QueryBudget {
+pub(crate) fn budget() -> QueryBudget {
     QueryBudget::new(
         1_000_000,
         128 * 1024 * 1024,
@@ -17,7 +17,7 @@ pub(super) fn budget() -> QueryBudget {
     )
 }
 
-pub(super) fn input(sequence: u64, text: &str) -> contextdb_service::CaptureRequest {
+pub(crate) fn input(sequence: u64, text: &str) -> contextdb_service::CaptureRequest {
     let mut input = capture::tests::request(sequence, text);
     input.context.capability_grants.extend([
         Capability::Correct,
@@ -27,7 +27,7 @@ pub(super) fn input(sequence: u64, text: &str) -> contextdb_service::CaptureRequ
     input
 }
 
-pub(super) fn publication(context: &AuthenticatedRequestContext, id: &str) -> PublishMemoryRequest {
+pub(crate) fn publication(context: &AuthenticatedRequestContext, id: &str) -> PublishMemoryRequest {
     PublishMemoryRequest {
         context: context.clone(),
         idempotency_key: format!("publish-{id}"),

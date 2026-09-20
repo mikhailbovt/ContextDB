@@ -77,6 +77,17 @@ accepted history; a missing locator cannot create another preparation. Prepared
 controls support scope reconstruction without bodies, but do not permit pruning.
 Hash-only history and unknown source provenance still require explicit migration.
 
+`prepare_record_removal` verifies one classified revision's accepted birth and
+optional closure, then retains their controls in the independent v3 removal
+journal. The witness binds an exact removal request and captured source, plus
+typed candidate roles and hashed graph/provenance facts. Record bodies, endpoint
+names and proposal actor/request strings are excluded. Old journal entries keep
+their encoding; new witnesses use a `record_witness` operation. Admin, revision
+policy, bounded analysis and a workspace CAS precede external Sync. Retries
+check accepted history even when a locator is missing. The witness survives
+native restore; it neither erases bodies nor completes removal. Older full
+mutations require explicit control preparation first.
+
 The first native capture implementation exposes `CapturePort` and the
 `NativeConversationCapture` host adapter (`contextdb-chat/service-adapter`).
 It preserves UTF-8 or binary originals, explicit omissions, immutable edits,

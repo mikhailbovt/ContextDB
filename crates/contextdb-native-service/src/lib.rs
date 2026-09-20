@@ -31,6 +31,7 @@ mod raw;
 mod raw_index;
 mod record_journal;
 pub use record_journal::NativeRecordControlPreparationReceipt;
+pub use record_journal::controls::witness::NativeRecordRemovalWitnessReceipt;
 mod record_sources;
 pub use record_sources::{
     NativePendingRecordWrites, NativeRecordSourceProgress, NativeRecordSourceReceipt,
@@ -940,7 +941,11 @@ impl NativeService {
             .get(&self.keyspaces.content_history, &key)
             .map_err(storage_error)?
             .ok_or_else(|| integrity("native authorized record content is absent"))?;
-        let stored: StoredContent = decode(&bytes, "native record content")?;
+        self.decode_content(&bytes, policy)
+    }
+
+    fn decode_content(&self, bytes: &[u8], policy: &StoredPolicy) -> ServiceResult<MemoryRecord> {
+        let stored: StoredContent = decode(bytes, "native record content")?;
         if stored.schema_version != SCHEMA_VERSION
             || stored.record_digest != policy.record_digest
             || stored.digest != policy.content_digest

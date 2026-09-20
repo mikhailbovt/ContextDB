@@ -134,10 +134,7 @@ impl NativeService {
             .map_err(storage_error)?
         {
             let event: StoredEvent = decode(&entry.value, "record mutation journal")?;
-            let writes_records = matches!(
-                event.operation.as_str(),
-                "publish_memory" | "propose_memory" | "correct" | "retract"
-            ) || record_sources::writes::is_source_write(&event.operation);
+            let writes_records = owns_record_mutations(&event.operation);
             if !event.accepted_records.is_empty()
                 && (!writes_records || activated.is_none_or(|first| first > event.global_commit))
             {
@@ -298,6 +295,13 @@ impl NativeService {
         }
         Ok(epochs)
     }
+}
+
+fn owns_record_mutations(operation: &str) -> bool {
+    matches!(
+        operation,
+        "publish_memory" | "propose_memory" | "correct" | "retract"
+    ) || record_sources::writes::is_source_write(operation)
 }
 
 fn mutation_prefix(global: u64) -> String {

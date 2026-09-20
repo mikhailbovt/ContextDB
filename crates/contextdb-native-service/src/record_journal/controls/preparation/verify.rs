@@ -1,6 +1,25 @@
 use super::*;
 
 impl NativeService {
+    pub(in crate::record_journal) fn prepared_record_controls<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        source: &StoredEvent,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<BTreeMap<Vec<u8>, RecordControl>> {
+        let global: u64 = decode(
+            &required_bytes(
+                snapshot,
+                &self.keyspaces.continuous,
+                &group_key(source.global_commit),
+                budget,
+            )?,
+            "prepared record group locator",
+        )?;
+        let event = self.recovery_global_event(snapshot, global, budget)?;
+        self.verify_prepared_group(snapshot, &event, source, budget)
+    }
+
     pub(in crate::record_journal) fn verify_record_control_preparations<S: ReadSnapshot>(
         &self,
         snapshot: &S,
