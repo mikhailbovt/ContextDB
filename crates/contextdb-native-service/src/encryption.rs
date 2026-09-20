@@ -20,6 +20,9 @@ use contextdb_storage::{Keyspace, StorageError};
 use zeroize::Zeroizing;
 
 const MAX_VALUE_BYTES: usize = 16 * 1024 * 1024;
+// A full raw lexical document has 16,384 term routes plus source/policy and
+// native commit metadata. Projection batches leave room for those control rows.
+pub(super) const MAX_PENDING_KEYS: usize = 32_768;
 const VALUE_MAGIC: &[u8] = b"CTXENC1\0";
 const NONCE_BYTES: usize = 24;
 const TAG_BYTES: usize = 16;

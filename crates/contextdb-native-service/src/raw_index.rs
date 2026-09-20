@@ -2,6 +2,8 @@
 
 pub(crate) mod copies;
 mod gc;
+#[cfg(test)]
+mod tests;
 mod verify;
 pub use copies::{
     NativeRawCopyKind, NativeRawCopyObservation, NativeRawCopyReceipt, NativeRawCopyWitness,
@@ -38,6 +40,9 @@ pub(super) const REMOVAL_FEATURE: &str = "continuous-raw-removal-v1";
 pub(super) const MAX_DOMAINS: usize = 1024;
 pub(super) const MAX_TAIL: usize = 128;
 const MAX_INDEX_TERMS: usize = 16_384;
+// Reserve keys for the native frame, format manifest, generation and index state.
+// The same bounded publication size applies to plaintext and encrypted stores.
+const MAX_PROJECTION_ROWS: usize = crate::encryption::MAX_PENDING_KEYS - 16;
 const MAX_GENERATIONS: u64 = 3;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -160,6 +165,8 @@ impl NativeService {
     /// Bounded maintenance outside the interactive query. Original analysis runs
     /// outside the writer lock; publication compares generation and policy epoch.
     /// `rebuild` starts a separate generation and switches it only after catch-up.
+    /// A batch may stop before `max_events` to fit the custody write bound. Each
+    /// original's routes stay atomic, and `through` advances only past whole inputs.
     pub fn project_originals(
         &self,
         context: &AuthenticatedRequestContext,
@@ -315,19 +322,25 @@ impl NativeService {
             } else if let Some(previous) = self.raw_value::<PolicyDomain, _>(&snapshot, &key)? {
                 policy.first_commit = previous.first_commit;
             }
-            let value = encode(&policy)?;
-            budget
-                .charge(0, (key.len() + value.len()) as u64)
-                .map_err(budget_error)?;
-            rows.insert(key, value);
+            let mut source_rows = document_rows(&workspace, generation.number, &document)?;
+            source_rows.insert(key, encode(&policy)?);
             for key in domain_eligibility_keys(&workspace, generation.number, &domain, &policy)? {
-                let value = encode(&domain)?;
-                budget
-                    .charge(0, (key.len() + value.len()) as u64)
-                    .map_err(budget_error)?;
-                rows.insert(key, value);
+                source_rows.insert(key, encode(&domain)?);
             }
-            for (key, value) in document_rows(&workspace, generation.number, &document)? {
+            let additional = source_rows
+                .keys()
+                .filter(|key| !rows.contains_key(*key))
+                .count();
+            if rows.len() + additional > MAX_PROJECTION_ROWS {
+                if rows.is_empty() {
+                    return Err(exhausted(
+                        "one original exceeds the projection row allowance",
+                    ));
+                }
+                caught_up = false;
+                break;
+            }
+            for (key, value) in source_rows {
                 budget
                     .charge(0, (key.len() + value.len()) as u64)
                     .map_err(budget_error)?;

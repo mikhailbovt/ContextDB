@@ -279,7 +279,7 @@ and require explicit migration to this profile. XChaCha20-Poly1305 binds ciphert
 to the database, authority, keyspace, record address and key identity.
 
 New keys and an authenticated allocation journal synchronize in one bounded batch
-before native publication, with at most 16,384 changed addresses. An interrupted
+before native publication, with at most 32,768 changed addresses. An interrupted
 publication may leave unused keys, never an acknowledged original without its
 durable key. Ordinary reads fetch one exact key descriptor. Opening the authority
 verifies the complete allocation journal and key inventory, rejecting missing,
@@ -441,6 +441,10 @@ The initial index profile admits 1,024 eligible domains, 128 pending raw events,
 64 concurrent read views (30-second lifetime), three retained generations and
 15-minute encrypted cursors. Source lexical projections cover up to 1 MiB and
 16,384 unique terms; larger sources remain on an explicit unindexed route.
+Projection publishes at most 32,752 index rows per transaction, reserving keys for
+commit metadata. A batch stops between whole originals when those rows would
+exceed the bound. Its receipt reports the consumed prefix and remains incomplete;
+reopening resumes the next original without truncating its terms or payload.
 Exact phrases use a safe interior-word anchor when available, otherwise bounded
 metadata/range traversal. Exhaustive pages freeze generation coverage and tail;
 top-k reports incomplete work separately. Shared work/byte/deadline/cancellation

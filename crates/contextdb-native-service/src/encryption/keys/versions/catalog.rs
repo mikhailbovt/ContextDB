@@ -128,7 +128,7 @@ impl NativeCustodyKeys {
                 }
                 if cursor.sequence == 0
                     || cursor.sequence > head.sequence
-                    || cursor.offset >= MAX_PENDING_KEYS
+                    || cursor.offset >= MAX_LEGACY_BATCH_KEYS
                     || (cursor.offset == 0) != cursor.batch_digest.is_none()
                     || (cursor.sequence == 1) != cursor.previous_digest.is_none()
                 {
@@ -158,7 +158,7 @@ impl NativeCustodyKeys {
                 .map_err(budget_error)?;
             if batch.sequence != cursor.sequence
                 || batch.previous_digest != cursor.previous_digest
-                || !(1..=MAX_PENDING_KEYS).contains(&batch.keys.len())
+                || !(1..=MAX_LEGACY_BATCH_KEYS).contains(&batch.keys.len())
                 || cursor.offset >= batch.keys.len()
                 || cursor
                     .batch_digest

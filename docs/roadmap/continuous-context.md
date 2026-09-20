@@ -264,5 +264,8 @@ observed ciphertexts and retains unresolved shared/unknown obligations. Tests
 cover descendant selection, independent originals, cursor replay and rotation,
 authority growth, pruning/restore and forged source or key claims. It covers
 observed reclamation history; current generations and older gaps remain open.
+Encrypted projection now accepts the full 16,384-term document limit and splits
+larger batches between originals, reserving capacity for native control rows.
+Coverage advances only past complete documents and resumes after restart.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

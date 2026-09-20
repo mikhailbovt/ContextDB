@@ -16,6 +16,9 @@ pub(super) const HEAD: &[u8] = b"key-log/head";
 const BATCHES: &[u8] = b"key-log/batch/";
 const MAX_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const REFERENCES_PER_BATCH: usize = 256;
+// The old writer put its entire 16,384-key transaction in one journal record.
+// New transactions may be larger, but their records stay at 256 references.
+const MAX_LEGACY_BATCH_KEYS: usize = 16_384;
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -188,7 +191,7 @@ impl NativeCustodyKeys {
             if batch.sequence != next
                 || row.key != batch_key(next)
                 || batch.previous_digest != reconstructed.digest
-                || !(1..=MAX_PENDING_KEYS).contains(&batch.keys.len())
+                || !(1..=MAX_LEGACY_BATCH_KEYS).contains(&batch.keys.len())
             {
                 return Err(failure("key version journal is discontinuous or invalid"));
             }

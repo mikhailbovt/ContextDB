@@ -19,7 +19,6 @@ mod versions;
 pub use backups::{NativeBackupCatalogPage, NativeBackupRegistration};
 pub use versions::{NativeKeyAllocation, NativeKeyCatalogPage};
 
-const MAX_PENDING_KEYS: usize = 16_384;
 const KEYSPACE: &str = "contextdb_native_custody_keys";
 
 /// Long-lived encryption key supplied by host custody, separate from token keys.
@@ -289,7 +288,7 @@ impl NativeCustodyKeys {
             return self.value_envelope(&address, record.id, &bytes, plaintext);
         }
         if pending.len() >= MAX_PENDING_KEYS {
-            return Err(failure("native custody key batch exceeds 16384 entries"));
+            return Err(failure("native custody key batch exceeds 32768 entries"));
         }
         let bytes = random_key()?;
         let id = contextdb_core::ObservationId::new().as_uuid();
