@@ -32,6 +32,11 @@ impl NativeService {
                     || intent.origins.len() != 1
                     || intent.group.is_some()))
             || (event.operation != PUBLISH && intent.group.is_none())
+            || ((event.operation == CORRECT)
+                != intent
+                    .group
+                    .as_ref()
+                    .is_some_and(|group| group.is_correction()))
             || std::str::from_utf8(&intent.idempotency_key)
                 .ok()
                 .is_none_or(|key| blake3::Hash::from_hex(key).is_err())
@@ -266,6 +271,13 @@ impl NativeService {
         if manifest.features.contains(WRITE_FEATURE) == intents.is_empty()
             || manifest.features.contains(GROUP_FEATURE)
                 != intents.values().any(|intent| intent.group.is_some())
+            || manifest.features.contains(CORRECTION_FEATURE)
+                != intents.values().any(|intent| {
+                    intent
+                        .group
+                        .as_ref()
+                        .is_some_and(|group| group.is_correction())
+                })
             || actual.len() != expected.len()
             || actual
                 .iter()

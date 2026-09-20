@@ -1,6 +1,9 @@
-//! Exact closure and per-revision origins for candidate and retraction groups.
+//! Exact closure and per-revision origins for atomic record mutation groups.
 
 use super::*;
+
+mod correction;
+use correction::Correction;
 
 #[cfg(test)]
 mod tests;
@@ -12,6 +15,38 @@ pub(super) struct RecordWriteGroup {
     inputs: BTreeMap<ObservationId, ContentDigest>,
     pub(super) previous: Vec<RecordSourceControl>,
     pub(super) scopes: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    correction: Option<Correction>,
+}
+
+pub(crate) struct GroupRequest<'a> {
+    operation: &'a str,
+    digest: &'a str,
+    idempotency_key: &'a [u8],
+    primary: &'a str,
+    correction: Option<Correction>,
+}
+
+impl<'a> GroupRequest<'a> {
+    pub(crate) fn new(
+        operation: &'a str,
+        digest: &'a str,
+        idempotency_key: &'a [u8],
+        primary: &'a str,
+    ) -> Self {
+        Self {
+            operation,
+            digest,
+            idempotency_key,
+            primary,
+            correction: None,
+        }
+    }
+
+    pub(crate) fn correcting(mut self, target: &StoredPolicy, rewires: &[HierarchyRewire]) -> Self {
+        self.correction = Some(Correction::new(target, rewires));
+        self
+    }
 }
 
 impl NativeService {
@@ -106,9 +141,8 @@ impl NativeService {
         &self,
         tx: &mut T,
         frame: &CommitFrame,
-        request: (&str, &[u8], &str),
+        request: GroupRequest<'_>,
         prepared: PreparedWrite,
-        operation: &str,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         let refs = self.accepted_record_mutations(tx, frame)?;
@@ -149,16 +183,17 @@ impl NativeService {
             }
         }
         let group = RecordWriteGroup {
-            primary: digest_bytes(request.2.as_bytes()),
+            primary: digest_bytes(request.primary.as_bytes()),
             inputs: prepared.sources,
             previous,
             scopes: records
                 .iter()
                 .flat_map(|record| record.document.access.scopes.iter().cloned())
                 .collect(),
+            correction: request.correction,
         };
         let origins = group.origins(
-            operation,
+            request.operation,
             frame.global_commit,
             &frame.workspace_digest,
             &records,
@@ -166,8 +201,8 @@ impl NativeService {
         let intent = RecordWriteIntent {
             global_commit: frame.global_commit,
             workspace: frame.workspace_digest.clone(),
-            request_digest: request.0.into(),
-            idempotency_key: request.1.into(),
+            request_digest: request.digest.into(),
+            idempotency_key: request.idempotency_key.into(),
             records: refs,
             origins,
             group: Some(group),
@@ -181,6 +216,9 @@ impl NativeService {
             .map_err(raw_index::budget_error)?;
         self.enable_capture_extension(tx, WRITE_FEATURE)?;
         self.enable_capture_extension(tx, GROUP_FEATURE)?;
+        if request.operation == CORRECT {
+            self.enable_capture_extension(tx, CORRECTION_FEATURE)?;
+        }
         tx.put(
             &self.keyspaces.continuous,
             intent_key(frame.global_commit),
@@ -322,6 +360,10 @@ impl NativeService {
 }
 
 impl RecordWriteGroup {
+    pub(super) fn is_correction(&self) -> bool {
+        self.correction.is_some()
+    }
+
     pub(super) fn validate_proposal_response(
         &self,
         response: &ProposeMemoryResponse,
@@ -358,7 +400,8 @@ impl RecordWriteGroup {
         workspace: &str,
         records: &[MemoryRecord],
     ) -> ServiceResult<Vec<RecordSourceControl>> {
-        if !matches!(operation, PROPOSE | RETRACT)
+        if !matches!(operation, PROPOSE | RETRACT | CORRECT)
+            || (operation == CORRECT) != self.is_correction()
             || !(1..=64).contains(&self.inputs.len())
             || blake3::Hash::from_hex(&self.primary).is_err()
             || self.previous.len() > record_journal::MAX_WRITES
@@ -421,6 +464,10 @@ impl RecordWriteGroup {
         let mut origins = Vec::new();
         for ((id, revision), record) in &births {
             let mut sources = self.inputs.clone();
+            let mut copied = self
+                .correction
+                .as_ref()
+                .and_then(|correction| correction.rewires.get(id));
             if *revision > 1 {
                 let key = (id.clone(), revision - 1);
                 let old = closed
@@ -438,7 +485,13 @@ impl RecordWriteGroup {
                 if expected != record.document {
                     return Err(integrity("copied revision changed its predecessor body"));
                 }
-                for (source, digest) in &prior[&key].sources {
+                copied = prior.get_key_value(&key).map(|(key, _)| key);
+            }
+            if let Some(key) = copied {
+                let previous = prior
+                    .get(key)
+                    .ok_or_else(|| integrity("copied edge has no bound predecessor"))?;
+                for (source, digest) in &previous.sources {
                     if sources
                         .insert(*source, *digest)
                         .is_some_and(|previous| previous != *digest)
@@ -470,6 +523,13 @@ impl RecordWriteGroup {
         closed: &BTreeMap<(String, u32), &MemoryRecord>,
         births: &BTreeMap<(String, u32), &MemoryRecord>,
     ) -> ServiceResult<()> {
+        if operation == CORRECT {
+            return self
+                .correction
+                .as_ref()
+                .ok_or_else(|| integrity("correction mapping absent"))?
+                .validate_shape(primary, closed, births);
+        }
         if operation == RETRACT {
             if births.len() != 1
                 || primary.revision <= 1

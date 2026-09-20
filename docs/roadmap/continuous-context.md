@@ -179,7 +179,7 @@ negative relationships without retaining removed values or envelopes. Old full,
 partially pruned and cleaned archives verify their actual remaining logical rows
 and restore behind current suppression.
 
-The 144 native tests passed on Windows. Fixtures
+Native tests pass on Windows. Fixtures
 cover actual partial restart, overlapping removal requests, shared blocks, mixed
 semantic batches, supersession/retraction targets, original receipt retries,
 missing controls, resurrected content and concurrent publication. This is local
@@ -195,10 +195,12 @@ independent recall, actual process exit after external Sync, interrupted catch-u
 registry loss and genuine version 2 compatibility. Empty record workspaces can
 activate retained origin requirements before their first record, with exact retry,
 old-archive catch-up and a publication fence against concurrent legacy writes.
-Source-aware explicit publication, quarantined proposal/supersession and retraction
-now atomically accept complete mutation groups and their origin intents. Copied
+Source-aware explicit publication, quarantined proposal/supersession, correction
+and retraction atomically accept complete mutation groups and their origin intents. Copied
 revisions retain predecessor origins; an interrupted transfer keeps the whole group
 closed. Tests cover actual process exit after partial transfer, concurrent retries,
-encrypted pending restore, hidden edges and exact copied-origin closure. Host
-classification remains trusted. Source-aware correction, automatic pending-work
-discovery, larger origin ancestry, generic-record pruning and migration remain open.
+encrypted pending restore, hidden edges and exact copied-origin closure. Correction
+retains each rewired edge's sources separately from the fully supplied successor;
+tests reject swapped copy witnesses and oversized unions without partial acceptance.
+Host classification remains trusted. Automatic pending-work discovery, larger
+origin ancestry, generic-record pruning and migration remain open.

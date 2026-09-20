@@ -21,6 +21,30 @@ impl NativeService {
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeRecordWriteReceipt> {
         require_capability(context, Capability::Admin)?;
+        // Identical callers can race while transferring/applying the same
+        // prefix. Re-read and revalidate accepted history after a CAS conflict;
+        // never retry acceptance or hide cancellation/integrity failures.
+        let mut retries = 2;
+        loop {
+            budget.charge(1, 0).map_err(raw_index::budget_error)?;
+            match self.try_complete_record_source_write(context, commit_seq, response, budget) {
+                Err(error)
+                    if retries > 0 && error.retryable && error.code == ErrorCode::IndexTooStale =>
+                {
+                    retries -= 1;
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn try_complete_record_source_write(
+        &self,
+        context: &AuthenticatedRequestContext,
+        commit_seq: u64,
+        response: Option<(&str, &str)>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeRecordWriteReceipt> {
         budget.check().map_err(raw_index::budget_error)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
         let snapshot = self

@@ -47,7 +47,7 @@ fn forget(context: &AuthenticatedRequestContext, id: &str) -> ForgetRequest {
     }
 }
 
-fn origins(
+pub(super) fn origins(
     service: &NativeService,
     context: &AuthenticatedRequestContext,
     id: &str,
@@ -72,7 +72,7 @@ fn origins(
         .collect()
 }
 
-fn accepted(service: &NativeService, operation: &str) -> Vec<StoredEvent> {
+pub(super) fn accepted(service: &NativeService, operation: &str) -> Vec<StoredEvent> {
     service
         .engine
         .begin_read(SnapshotSelector::Latest)

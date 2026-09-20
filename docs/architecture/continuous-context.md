@@ -163,8 +163,15 @@ Candidates remain quarantined. Structural writes reject an unavailable edge in
 the affected access domain instead of silently omitting it; source authorization
 precedes body decoding. Groups retain at most 1,024 mutations / 16 MiB, with 1..64
 origins per new revision; an unrepresentable union rejects the whole publication.
-Source-aware correction with copied hierarchy edges, automatic pending-work
-discovery and origin aggregation for longer revision chains remain unfinished.
+`correct_memory_from_sources` binds the exact target closure and each rewired
+hierarchy edge to its predecessor. Its fully supplied successor uses new captured
+inputs; each copied edge also retains its own predecessor's origins. Verification
+reconstructs copied metadata and rejects missing or swapped copy witnesses before
+transfer. The correction format is explicitly versioned; older groups keep their
+original encoding. Completion retries up to two snapshot conflicts within the
+shared budget, rechecking accepted history without accepting another mutation.
+Automatic pending-work discovery and origin aggregation for longer revision
+chains remain unfinished.
 Legacy workspaces retain their existing behavior. Version 1/2 authorities require
 explicit migration before accepting origins; this API does not perform migration
 or establish that a host's declaration is semantically complete.

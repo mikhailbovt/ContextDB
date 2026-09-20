@@ -10,17 +10,21 @@ mod recovery;
 mod tests;
 mod verify;
 
+pub(crate) use groups::GroupRequest;
+
 pub(crate) const WRITE_FEATURE: &str = "continuous-record-source-writes-v1";
 const COMPLETE: &str = "record_write_complete";
 const PUBLISH: &str = "publish_memory_from_sources";
 pub(crate) const PROPOSE: &str = "propose_memory_from_sources";
 pub(crate) const RETRACT: &str = "retract_from_sources";
+pub(crate) const CORRECT: &str = "correct_memory_from_sources";
 pub(crate) const GROUP_FEATURE: &str = "continuous-record-source-groups-v1";
+pub(crate) const CORRECTION_FEATURE: &str = "continuous-record-source-corrections-v1";
 const MAX_INTENT_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) type Inputs<'a> = (&'a BTreeSet<ObservationId>, &'a mut QueryBudget);
 
 pub(crate) fn is_source_write(operation: &str) -> bool {
-    matches!(operation, PUBLISH | PROPOSE | RETRACT)
+    matches!(operation, PUBLISH | PROPOSE | RETRACT | CORRECT)
 }
 
 pub(crate) trait WriteResponse: Serialize + DeserializeOwned + Clone {
@@ -159,6 +163,23 @@ impl NativeService {
         budget.check().map_err(raw_index::budget_error)?;
         let context = request.context.clone();
         let response = self.retract_memory_inner(request, Some((sources, budget)))?;
+        self.finish_source_write(&context, &response, budget)?;
+        Ok(response)
+    }
+
+    /// Correct a record from complete trusted-host inputs. Rewired hierarchy
+    /// edges also retain the origins of the metadata copied from each old edge.
+    /// All births and closures stay undisclosed until the group is complete.
+    pub fn correct_memory_from_sources(
+        &self,
+        request: CorrectRequest,
+        sources: &BTreeSet<ObservationId>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<MutationResponse> {
+        require_capability(&request.context, Capability::Admin)?;
+        budget.check().map_err(raw_index::budget_error)?;
+        let context = request.context.clone();
+        let response = self.correct_memory_inner(request, Some((sources, budget)))?;
         self.finish_source_write(&context, &response, budget)?;
         Ok(response)
     }
@@ -430,6 +451,11 @@ impl NativeService {
             || (operation == PUBLISH
                 && (intent.origins.len() != 1 || records.len() != 1 || intent.group.is_some()))
             || (operation != PUBLISH && intent.group.is_none())
+            || ((operation == CORRECT)
+                != intent
+                    .group
+                    .as_ref()
+                    .is_some_and(|group| group.is_correction()))
             || bytes.len() > MAX_INTENT_BYTES
         {
             return Err(integrity(

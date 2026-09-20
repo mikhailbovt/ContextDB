@@ -2162,9 +2162,13 @@ impl NativeService {
             self.stage_record_group(
                 &mut transaction,
                 &frame,
-                (&request_digest, &idempotency_key, &response.candidate_id),
+                record_sources::writes::GroupRequest::new(
+                    operation,
+                    &request_digest,
+                    &idempotency_key,
+                    &response.candidate_id,
+                ),
                 prepared,
-                operation,
                 inputs.as_mut().expect("prepared source group").1,
             )?;
         }
@@ -2393,6 +2397,21 @@ impl NativeService {
         frame: &CommitFrame,
         rewire: HierarchyRewire,
     ) -> ServiceResult<()> {
+        let successor = MemoryRecord {
+            document: hierarchy_rewire_document(
+                &rewire.old_record.document,
+                &rewire.new_source,
+                &rewire.new_target,
+            )?,
+            revision: 1,
+            transaction_from: frame.global_commit,
+            transaction_to: None,
+        };
+        if successor.document.id != rewire.new_edge_id {
+            return Err(integrity(
+                "hierarchy successor identity differs from its plan",
+            ));
+        }
         let mut old_record = rewire.old_record;
         old_record.transaction_to = Some(frame.global_commit);
         let closed_policy = policy_for(&old_record)?;
@@ -2403,33 +2422,6 @@ impl NativeService {
         }
         self.put_record(transaction, &closed_policy, &old_record)?;
 
-        let old_edge_id = old_record.document.id;
-        let mut links = old_record.document.links;
-        links.source = Some(rewire.new_source.clone());
-        links.target = Some(rewire.new_target.clone());
-        links.supersedes.insert(old_edge_id);
-        let successor = MemoryRecord {
-            document: MemoryDocument {
-                id: rewire.new_edge_id,
-                kind: MemoryRecordKind::Edge,
-                access: old_record.document.access,
-                valid_time: old_record.document.valid_time,
-                lifecycle: MemoryLifecycle::Active,
-                links,
-                value: serde_json::json!({
-                    "schema_version": SCHEMA_VERSION,
-                    "relation": "parent",
-                    "parent_id": rewire.new_source,
-                    "child_id": rewire.new_target,
-                }),
-                search_text: None,
-                vector: None,
-                attributes: old_record.document.attributes,
-            },
-            revision: 1,
-            transaction_from: frame.global_commit,
-            transaction_to: None,
-        };
         let successor_policy = policy_for(&successor)?;
         self.put_record(transaction, &successor_policy, &successor)
     }
@@ -2776,6 +2768,14 @@ impl NativeService {
     }
 
     fn correct_memory(&self, request: CorrectRequest) -> ServiceResult<MutationResponse> {
+        self.correct_memory_inner(request, None)
+    }
+
+    fn correct_memory_inner(
+        &self,
+        request: CorrectRequest,
+        mut inputs: Option<record_sources::writes::Inputs<'_>>,
+    ) -> ServiceResult<MutationResponse> {
         require_capability(&request.context, Capability::Correct)?;
         validate_identifier(&request.idempotency_key, "idempotency key")?;
         validate_identifier(&request.target_id, "correction target")?;
@@ -2796,26 +2796,61 @@ impl NativeService {
             ));
         }
         let authorization_digest = request.context.authorization_binding_digest()?;
-        let request_digest = canonical_digest(&(
+        let mut request_digest = canonical_digest(&(
             "correct-memory-v1",
             &authorization_digest,
             &request.target_id,
             &request.replacement,
         ))?;
+        let operation = if inputs.is_some() {
+            record_sources::writes::CORRECT
+        } else {
+            "correct"
+        };
+        if let Some((sources, _)) = &inputs {
+            request_digest = canonical_digest(&(
+                record_sources::writes::CORRECTION_FEATURE,
+                operation,
+                &request_digest,
+                sources,
+            ))?;
+        }
         let idempotency_key =
-            authenticated_idempotency_key("correct", &request.context, &request.idempotency_key)?;
-        let _guard = self.lock_writes()?;
+            authenticated_idempotency_key(operation, &request.context, &request.idempotency_key)?;
+        let (prepared, replay) = self.prepare_record_write_or_replay::<MutationResponse>(
+            &request.context,
+            operation,
+            &idempotency_key,
+            &request_digest,
+            &mut inputs,
+        )?;
+        if let Some(replay) = replay {
+            return Ok(replay);
+        }
+        #[cfg(test)]
+        if prepared.is_some() {
+            record_sources::writes::before_publication();
+        }
+        let _guard = if let Some((_, budget)) = &inputs {
+            self.lock_index_publication(budget)?
+        } else {
+            self.lock_writes()?
+        };
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(mut replay) = self.replay::<MutationResponse, _>(
             &transaction,
             &idempotency_key,
-            "correct",
+            operation,
             &request_digest,
         )? {
             replay.replayed = true;
             return Ok(replay);
         }
-        self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
+        if let Some(prepared) = &prepared {
+            self.check_record_write_preparation(&transaction, &request.context, prepared)?;
+        } else {
+            self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
+        }
         let target_policy = self
             .load_head(&transaction, &request.target_id)?
             .filter(|policy| policy.transaction_to.is_none())
@@ -2831,7 +2866,10 @@ impl NativeService {
         {
             return Err(permission_denied());
         }
-        // Content is loaded only after the target policy has authorized it.
+        self.authorize_record_sources(&transaction, &request.context.request, &target_policy)?;
+        if let Some((_, budget)) = inputs.as_mut() {
+            self.charge_source_record_body(&transaction, &target_policy, budget)?;
+        }
         let mut target = self.load_content(&transaction, &target_policy)?;
         if target.document.kind == MemoryRecordKind::Candidate {
             return Err(invalid(
@@ -2868,7 +2906,7 @@ impl NativeService {
             &request.context.request,
             global_head,
             &target.document.access,
-            None,
+            inputs.as_mut().map(|(_, budget)| &mut **budget),
         )?;
         let rewires = self.prepare_hierarchy_rewire(
             &transaction,
@@ -2876,6 +2914,14 @@ impl NativeService {
             &request.target_id,
             &request.replacement.id,
         )?;
+        let replacement_id = request.replacement.id.clone();
+        let group_request = record_sources::writes::GroupRequest::new(
+            operation,
+            &request_digest,
+            &idempotency_key,
+            &replacement_id,
+        )
+        .correcting(&target_policy, &rewires);
         if !rewires.is_empty()
             && (target.document.kind == MemoryRecordKind::Edge
                 || request.replacement.kind != target.document.kind)
@@ -2910,14 +2956,26 @@ impl NativeService {
             request_digest: request_digest.clone(),
             watermarks: frame.state.watermarks.clone(),
         };
+        if let Some(prepared) = prepared {
+            self.stage_record_group(
+                &mut transaction,
+                &frame,
+                group_request,
+                prepared,
+                inputs.as_mut().expect("prepared source group").1,
+            )?;
+        }
         self.finish_frame(
             &mut transaction,
             &frame,
-            "correct",
+            operation,
             &idempotency_key,
             &request_digest,
             &response,
         )?;
+        if let Some((_, budget)) = &inputs {
+            budget.check().map_err(raw_index::budget_error)?;
+        }
         require_sync(
             transaction
                 .commit(Durability::Sync)
@@ -3095,9 +3153,13 @@ impl NativeService {
             self.stage_record_group(
                 &mut transaction,
                 &frame,
-                (&request_digest, &idempotency_key, &request.target_id),
+                record_sources::writes::GroupRequest::new(
+                    operation,
+                    &request_digest,
+                    &idempotency_key,
+                    &request.target_id,
+                ),
                 prepared,
-                operation,
                 inputs.as_mut().expect("prepared source group").1,
             )?;
         }
@@ -3417,6 +3479,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != record_sources::FEATURE
                 && feature != record_sources::writes::WRITE_FEATURE
                 && feature != record_sources::writes::GROUP_FEATURE
+                && feature != record_sources::writes::CORRECTION_FEATURE
                 && feature != suppression::SUPPRESSION_FEATURE
                 && feature != retention::RETENTION_FEATURE
                 && feature != retention::PRUNING_FEATURE
@@ -3426,6 +3489,12 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
             != manifest.suppression_authority.is_some()
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
+        || (manifest
+            .features
+            .contains(record_sources::writes::CORRECTION_FEATURE)
+            && !manifest
+                .features
+                .contains(record_sources::writes::GROUP_FEATURE))
         || (manifest
             .features
             .contains(record_sources::writes::GROUP_FEATURE)
@@ -4033,6 +4102,34 @@ fn reject_candidate_hierarchy_cycle(
         }
     }
     Ok(())
+}
+
+fn hierarchy_rewire_document(
+    old: &MemoryDocument,
+    source: &str,
+    target: &str,
+) -> ServiceResult<MemoryDocument> {
+    let mut links = old.links.clone();
+    links.source = Some(source.into());
+    links.target = Some(target.into());
+    links.supersedes.insert(old.id.clone());
+    Ok(MemoryDocument {
+        id: hierarchy_edge_id(source, target)?,
+        kind: MemoryRecordKind::Edge,
+        access: old.access.clone(),
+        valid_time: old.valid_time,
+        lifecycle: MemoryLifecycle::Active,
+        links,
+        value: serde_json::json!({
+            "schema_version": SCHEMA_VERSION,
+            "relation": "parent",
+            "parent_id": source,
+            "child_id": target,
+        }),
+        search_text: None,
+        vector: None,
+        attributes: old.attributes.clone(),
+    })
 }
 
 fn hierarchy_edge_id(parent_id: &str, child_id: &str) -> ServiceResult<String> {

@@ -36,9 +36,10 @@ and release verifier—not the presence of an API name—determine completion.
   Version 3 authorities retain administrator-declared generic-record origins
   across restore, enforcing current source policies before body reads. Empty record
   workspaces can activate origin requirements before their first record. Explicit
-  publication, candidate supersession and retraction support atomic source-aware
-  groups and resumable origin transfer. Correction, automatic recovery discovery
-  and origin aggregation beyond the current 64-source profile remain unfinished.
+  publication, candidate supersession, correction and retraction support atomic
+  source-aware groups and resumable origin transfer. Rewired hierarchy edges
+  retain their copied sources. Automatic recovery discovery and origin aggregation
+  beyond the current 64-source profile remain unfinished.
   Unclassified records remain unavailable. Generic-record cleanup and
   verified deletion completion that reopens disclosure remain unfinished.
   See [the native profile](architecture/continuous-context.md).
