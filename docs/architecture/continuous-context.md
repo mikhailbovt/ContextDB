@@ -66,6 +66,15 @@ producer gaps and ordered response chunks. Each capture journal entry references
 its accepted original and digest; the durable outbox carries the same reference.
 Raw reads require current `ReadEvidence` and `RawEvidence` authorization.
 
+New captures also bind compact recovery metadata into both the journal and outbox
+(`continuous-capture-recovery-v1`). It retains typed identities, dependency handles,
+coverage and checkpoint control transitions, with digests for arbitrary strings
+and payloads. Verification compares it to the complete original before replaying
+producer, stream, scope and run heads. Activation preserves the legacy prefix;
+subsequent missing metadata fails verification. This prepares explicit retention
+removal without duplicating deleted text; it neither permits a missing original
+nor changes its immutable receipt or the existing logical backup digest.
+
 The initial profile uses strict pause: retain the input and retry the same key
 until a synchronized receipt arrives. It admits at most 256 KiB per inline
 payload and 128 disjoint producer gaps. Overflow is an explicit

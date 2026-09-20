@@ -191,9 +191,17 @@ key lookup at inventories of 1, 128 and 4,096 entries. This is bounded logical w
 not a latency SLO. Host provisioning, plaintext migration, key/copy reclamation
 and full deletion closure remain separate gates.
 
-An independent issued-backup registry now synchronizes a content-free registration
+An independent issued-backup registry synchronizes a content-free registration
 before returning encrypted archives. It survives native restore and response loss,
 rejects registry corruption/loss, and supports bounded revision-bound pages.
 Existing v1 key authorities retain read support; backup issuance requires explicit
 registry migration. Issued archives remain potential external copies until their
 disposition is independently verified; this registry is not a deletion receipt.
+
+Capture recovery metadata binds content-free control state and exact input handles
+to accepted journal entries. Checkpoint reconstruction uses those transitions while
+original validation remains mandatory. The 112 native tests include encrypted
+reopen/restore, shared payload inputs, legacy activation, metadata loss/tampering
+and checkpoint owner/state corruption. Workspace Clippy and governance validation
+pass. Source removal, mixed semantic-batch pruning and deletion-aware archive
+recovery remain open; this change does not establish deletion closure.

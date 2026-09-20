@@ -648,11 +648,7 @@ impl NativeService {
             accepted_original: if operation == "capture" {
                 let receipt: contextdb_service::CaptureReceipt =
                     decode(&response_bytes, "capture response")?;
-                Some(capture::CaptureWork {
-                    event_id: receipt.event_id,
-                    workspace_commit: receipt.workspace_commit,
-                    event_digest: receipt.event_digest,
-                })
+                Some(self.capture_work_for_receipt(transaction, &receipt)?)
             } else {
                 None
             },
@@ -3067,6 +3063,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.features.iter().any(|feature| {
             feature != capture::CAPTURE_FEATURE
                 && feature != capture::IMPACT_FEATURE
+                && feature != capture::RECOVERY_FEATURE
                 && feature != custody::CUSTODY_FEATURE
                 && feature != owned::OWNED_FEATURE
                 && feature != payload::SOURCE_FEATURE
