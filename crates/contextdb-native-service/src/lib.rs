@@ -67,6 +67,9 @@ pub use raw_index::{
     NativeRawSourceControl, NativeRawValueVersion, OriginalRevocationReceipt,
     RawProjectionProgress, RawReclaimProgress,
 };
+pub use raw_index::{
+    NativeRawKeyFamily, NativeRawKeyInventory, NativeRawRemovalCopy, NativeRawRemovalCopyPage,
+};
 pub use retention::{
     NativePrimaryKeyInventory, NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt,
     NativeSourcePruningReceipt,

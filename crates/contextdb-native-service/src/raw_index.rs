@@ -7,6 +7,9 @@ pub use copies::{
     NativeRawCopyKind, NativeRawCopyObservation, NativeRawCopyReceipt, NativeRawCopyWitness,
     NativeRawSourceControl, NativeRawValueVersion,
 };
+pub use copies::{
+    NativeRawKeyFamily, NativeRawKeyInventory, NativeRawRemovalCopy, NativeRawRemovalCopyPage,
+};
 pub use gc::RawReclaimProgress;
 pub(super) use gc::retained_generations;
 

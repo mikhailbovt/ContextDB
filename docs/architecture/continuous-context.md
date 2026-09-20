@@ -333,6 +333,18 @@ Cancellation after independent Sync can leave a valid observation without a
 completed GC. Untracked older prefixes and unknown rows remain unresolved;
 these witnesses neither cover all historical copies nor authorize key retirement.
 
+`read_raw_removal_copies` discovers these observations from an exact retained
+removal request, without old native receipts. Each page consumes at most 64 journal
+events and selects at most 8 MiB of witness metadata; complete request inventory
+and predecessor validation share the budget. Authenticated continuations bind
+request, caller and retained frontier, survive native restore with the same token
+key, and reject authority growth. An empty page can still have a continuation.
+`read_reclaimed_raw_key_inventory` joins selected source addresses to allocated
+keys and distinct observed ciphertexts. It keeps shared/unknown witness references
+and other custody authorities explicit. Addresses, allocations, ciphertexts and
+witness pages each have a 65,536-entry cap; output is limited to 32 MiB. Current
+generations and untracked history remain outside this observed-copy inventory.
+
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never
 derive that master key from the rotatable token key. Encrypted backups use

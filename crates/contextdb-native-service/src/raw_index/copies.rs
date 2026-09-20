@@ -4,8 +4,12 @@
 use super::*;
 use uuid::Uuid;
 
+pub(crate) mod discovery;
 mod observe;
 mod verify;
+pub use discovery::{NativeRawRemovalCopy, NativeRawRemovalCopyPage};
+mod keys;
+pub use keys::{NativeRawKeyFamily, NativeRawKeyInventory};
 
 #[cfg(test)]
 pub(crate) mod tests;

@@ -257,5 +257,12 @@ Tests cover pruning, actual authority/native reopen, empty/full/partial encrypte
 archives, lost acknowledgement, concurrent publication and damaged page chains.
 Older untracked prefixes, current-generation inventory and unobserved historical
 versions remain open; observation does not establish erasure or key retirement.
+Request-bound discovery now walks the retained observation journal with
+authenticated continuations, preserving source/control identity across older
+native restore. Historical raw-key inventory separates allocated keys from
+observed ciphertexts and retains unresolved shared/unknown obligations. Tests
+cover descendant selection, independent originals, cursor replay and rotation,
+authority growth, pruning/restore and forged source or key claims. It covers
+observed reclamation history; current generations and older gaps remain open.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

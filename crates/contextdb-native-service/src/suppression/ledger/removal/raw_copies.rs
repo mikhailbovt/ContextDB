@@ -3,6 +3,7 @@
 use super::*;
 use crate::raw_index::copies::{MAX_WITNESS_BYTES, NativeRawCopyReceipt, NativeRawCopyWitness};
 
+mod discovery;
 #[cfg(test)]
 mod tests;
 
