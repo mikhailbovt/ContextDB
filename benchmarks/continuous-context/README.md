@@ -1,5 +1,10 @@
 # Continuous context comparisons
 
+This directory currently contains development comparisons. Required final
+acceptance is tracked as [phase 17](../../docs/benchmarks/continuous-context-final.md),
+including paired runs of the same model without and with ContextDB. The local
+reader replay below does not constitute completion of those external benchmarks.
+
 The shared generator lives in `contextdb-bench`; conformance imports the same
 history. Emit a reproducible corpus with:
 

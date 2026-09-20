@@ -1,7 +1,8 @@
 # Continuous context delivery
 
 Implementation of the [accepted design](../architecture/continuous-context.md).
-Numbers retain the supplied v3 backlog. A phase is complete only when its
+Phases 00–16 retain the supplied v3 backlog; phase 17 is the user-requested
+final benchmark stage. A phase is complete only when its
 executable path and stated evidence exist; contract fixtures alone are not
 native or model acceptance.
 
@@ -24,6 +25,14 @@ native or model acceptance.
 | 14 | Downstream utility training and held-out evaluation | Planned |
 | 15 | Disabled-by-default learning, shadow/canary and rollback | Planned |
 | 16 | Open-reader differentiable gates | Optional research; not a product gate |
+| 17 | Final paired model benchmarks: MemGym/MemoryGym, LongMemEval and LoCoMo | Planned; required final acceptance; no final benchmark runs yet |
+
+Phase 17 evaluates the integrated result of phases 00–15; optional phase 16 does
+not block it. Its primary comparison uses the same model and agent without and
+with ContextDB, alongside summary and raw-hybrid baselines. The
+[final benchmark protocol](../benchmarks/continuous-context-final.md) defines the
+required suites, held-out evaluation, complete cost accounting and acceptance
+artifacts. Phase 09 development results do not satisfy this final gate.
 
 The first connected proof is capture → raw retrieval → current state → bounded
 R0 assembly → lease admission → owned conversation resume. Tools and learned
