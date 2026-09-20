@@ -249,7 +249,7 @@ impl NativeService {
         Ok(result)
     }
 
-    fn recovery_workspace<S: ReadSnapshot>(
+    pub(crate) fn recovery_workspace<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -300,7 +300,7 @@ impl NativeService {
         Ok(state)
     }
 
-    pub(super) fn recovery_event<S: ReadSnapshot>(
+    pub(crate) fn recovery_event<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,

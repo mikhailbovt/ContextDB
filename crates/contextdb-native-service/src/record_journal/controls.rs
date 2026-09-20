@@ -5,6 +5,8 @@ use contextdb_service::{DomainTimeRange, MemoryLinks};
 
 use super::*;
 
+pub(crate) mod preparation;
+
 #[cfg(test)]
 mod tests;
 
@@ -91,6 +93,34 @@ impl RecordControl {
             || digests.any(|digest| blake3::Hash::from_hex(digest).is_err())
         {
             return Err(integrity("record control metadata is invalid"));
+        }
+        Ok(())
+    }
+
+    fn validate_binding(
+        &self,
+        event: &StoredEvent,
+        reference: &RecordMutationRef,
+    ) -> ServiceResult<()> {
+        self.validate()?;
+        let policy = &self.policy;
+        if event.event_digest != event_digest(event)?
+            || event.global_commit == 0
+            || policy.transaction_to.unwrap_or(policy.transaction_from) != event.global_commit
+            || digest_bytes(policy.access.workspace_id.as_bytes()) != event.workspace_digest
+            || policy.content_digest != reference.digest
+            || reference.key
+                != format!(
+                    "{}{}/{:010}",
+                    mutation_prefix(event.global_commit),
+                    policy.record_digest,
+                    policy.revision
+                )
+                .as_bytes()
+        {
+            return Err(integrity(
+                "record control is not bound to this accepted mutation",
+            ));
         }
         Ok(())
     }
@@ -184,26 +214,7 @@ impl NativeService {
             ));
         }
         let control: RecordControl = decode(&bytes, "record mutation control")?;
-        control.validate()?;
-        let policy = &control.policy;
-        if event.event_digest != event_digest(event)?
-            || event.global_commit == 0
-            || policy.transaction_to.unwrap_or(policy.transaction_from) != event.global_commit
-            || digest_bytes(policy.access.workspace_id.as_bytes()) != event.workspace_digest
-            || policy.content_digest != reference.digest
-            || reference.key
-                != format!(
-                    "{}{}/{:010}",
-                    mutation_prefix(event.global_commit),
-                    policy.record_digest,
-                    policy.revision
-                )
-                .as_bytes()
-        {
-            return Err(integrity(
-                "record control is not bound to this accepted mutation",
-            ));
-        }
+        control.validate_binding(event, reference)?;
         Ok(Some(control))
     }
 

@@ -30,6 +30,7 @@ mod publication;
 mod raw;
 mod raw_index;
 mod record_journal;
+pub use record_journal::NativeRecordControlPreparationReceipt;
 mod record_sources;
 pub use record_sources::{
     NativePendingRecordWrites, NativeRecordSourceProgress, NativeRecordSourceReceipt,
@@ -340,6 +341,9 @@ struct StoredEvent {
     accepted_record_write: Option<record_sources::writes::RecordWriteRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_record_write_completion: Option<record_sources::writes::RecordWriteCompletion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_control_preparation:
+        Option<record_journal::controls::preparation::ControlPreparation>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -730,6 +734,11 @@ impl NativeService {
             accepted_record_write,
             accepted_record_write_completion: if operation == "record_write_complete" {
                 Some(decode(&response_bytes, "record write completion")?)
+            } else {
+                None
+            },
+            accepted_record_control_preparation: if operation == "record_controls_prepare" {
+                Some(decode(&response_bytes, "record control preparation")?)
             } else {
                 None
             },
@@ -3490,6 +3499,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
                 && feature != record_journal::CONTROL_FEATURE
+                && feature != record_journal::controls::preparation::FEATURE
                 && feature != record_sources::FEATURE
                 && feature != record_sources::writes::WRITE_FEATURE
                 && feature != record_sources::writes::GROUP_FEATURE
@@ -3503,7 +3513,10 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
             != manifest.suppression_authority.is_some()
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
-        || (manifest.features.contains(record_journal::CONTROL_FEATURE)
+        || ((manifest.features.contains(record_journal::CONTROL_FEATURE)
+            || manifest
+                .features
+                .contains(record_journal::controls::preparation::FEATURE))
             && !manifest.features.contains(record_journal::RECORD_FEATURE))
         || (manifest
             .features

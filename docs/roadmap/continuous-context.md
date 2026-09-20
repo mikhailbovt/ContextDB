@@ -215,4 +215,8 @@ New generic births and closures atomically bind controls without copying arbitra
 record bodies. Tests cover correction/retraction, exact old receipts, mixed legacy
 archives and new control activation, restore, and missing/forged/orphaned metadata.
 Scope replay uses the controls; an unpruned missing body still fails verification.
-Older-mutation preparation and actual generic-copy pruning remain unfinished.
+Older full mutation groups can now retain controls through a separate accepted
+preparation, preserving their original history and receipts across restore.
+Preparation checks access, budgets and workspace CAS; missing/forged controls or
+declarations fail closed. Actual generic-copy pruning and hash-only migration
+remain unfinished.

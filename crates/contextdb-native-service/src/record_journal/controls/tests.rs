@@ -1,6 +1,6 @@
 use super::*;
 
-fn context() -> AuthenticatedRequestContext {
+pub(super) fn context() -> AuthenticatedRequestContext {
     crate::tests::authenticated(
         "record-control-test",
         "control-workspace",
@@ -15,7 +15,7 @@ fn context() -> AuthenticatedRequestContext {
     )
 }
 
-fn request() -> PublishMemoryRequest {
+pub(super) fn request() -> PublishMemoryRequest {
     PublishMemoryRequest {
         context: context(),
         idempotency_key: "original-publication".into(),
@@ -35,7 +35,11 @@ fn get(service: &NativeService, id: &str) -> MemoryRecord {
         .expect("record")
 }
 
-fn event<S: ReadSnapshot>(service: &NativeService, snapshot: &S, global: u64) -> StoredEvent {
+pub(super) fn event<S: ReadSnapshot>(
+    service: &NativeService,
+    snapshot: &S,
+    global: u64,
+) -> StoredEvent {
     decode(
         &snapshot
             .get(&service.keyspaces.events, &global.to_be_bytes())

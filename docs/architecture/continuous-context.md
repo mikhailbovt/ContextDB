@@ -66,8 +66,16 @@ attributes. Scope reconstruction can use these accepted controls. Their complete
 family and exact match to full bodies are verified across reopen and restore;
 missing controls cannot fall back to legacy behavior. Old references keep their
 encoding and receipts. Full bodies remain required until generic-record pruning
-and preparation of older mutations are implemented. Controls have a separate
+is implemented. Controls have a separate
 16 MiB bound per mutation group; overflow rejects the complete publication.
+
+`prepare_record_controls` adds verified controls for one older full mutation group
+through a separate accepted publication (`continuous-record-control-preparation-v1`).
+It requires Admin and each revision's access policy, uses bounded analysis and a
+workspace CAS, and preserves original events and receipts. Retries validate the
+accepted history; a missing locator cannot create another preparation. Prepared
+controls support scope reconstruction without bodies, but do not permit pruning.
+Hash-only history and unknown source provenance still require explicit migration.
 
 The first native capture implementation exposes `CapturePort` and the
 `NativeConversationCapture` host adapter (`contextdb-chat/service-adapter`).

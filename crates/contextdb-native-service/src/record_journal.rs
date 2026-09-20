@@ -4,8 +4,9 @@
 
 use super::*;
 
-mod controls;
+pub(crate) mod controls;
 pub(crate) use controls::CONTROL_FEATURE;
+pub use controls::preparation::NativeRecordControlPreparationReceipt;
 
 pub(super) const RECORD_FEATURE: &str = "continuous-record-mutations-v1";
 const ACTIVATED: &[u8] = b"semantic/activated";
@@ -117,6 +118,7 @@ impl NativeService {
         let control_activation = self.record_control_activation(snapshot)?;
         let mut expected_controls = BTreeSet::new();
         let mut first_control = None;
+        let prepared = self.verify_record_control_preparations(snapshot)?;
         let manifest: Manifest = decode(
             &snapshot
                 .get(&self.keyspaces.meta, META_MANIFEST_KEY)
@@ -162,14 +164,16 @@ impl NativeService {
                 let record: MemoryRecord = decode(&bytes, "accepted record mutation")?;
                 let policy = policy_for(&record)?;
                 validate_stored_policy(&policy)?;
-                if let Some(control) =
-                    self.record_mutation_control(snapshot, &event, reference, control_activation)?
-                {
-                    if control != controls::RecordControl::from_record(&record)? {
-                        return Err(integrity("record control differs from accepted payload"));
-                    }
+                let control =
+                    self.record_mutation_control(snapshot, &event, reference, control_activation)?;
+                if control.is_some() {
                     expected_controls.insert(controls::control_key(&reference.key)?);
                     first_control.get_or_insert(event.global_commit);
+                }
+                if let Some(control) = control.as_ref().or_else(|| prepared.get(&reference.key))
+                    && *control != controls::RecordControl::from_record(&record)?
+                {
+                    return Err(integrity("record control differs from accepted payload"));
                 }
                 if reference.digest != digest_bytes(&bytes)
                     || mutation_key(event.global_commit, &record) != reference.key
@@ -243,6 +247,7 @@ impl NativeService {
     ) -> ServiceResult<BTreeMap<Vec<u8>, u64>> {
         let mut epochs = BTreeMap::<Vec<u8>, u64>::new();
         let control_activation = self.record_control_activation(snapshot)?;
+        let prepared = self.verify_record_control_preparations(snapshot)?;
         for entry in snapshot
             .scan_prefix(&self.keyspaces.events, b"")
             .map_err(storage_error)?
@@ -265,9 +270,9 @@ impl NativeService {
                 }
             }
             for reference in &event.accepted_records {
-                if let Some(control) =
-                    self.record_mutation_control(snapshot, &event, reference, control_activation)?
-                {
+                let control =
+                    self.record_mutation_control(snapshot, &event, reference, control_activation)?;
+                if let Some(control) = control.as_ref().or_else(|| prepared.get(&reference.key)) {
                     for scope in &control.policy.access.scopes {
                         let epoch = epochs
                             .entry(capture::scope_key(&event.workspace_digest, scope))

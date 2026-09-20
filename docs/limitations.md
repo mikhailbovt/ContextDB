@@ -44,7 +44,8 @@ and release verifier—not the presence of an API name—determine completion.
   Durable progress, measured backlog limits and origin aggregation beyond the
   current 64-source profile remain unfinished.
   Unclassified records remain unavailable. New mutations bind compact body-free
-  controls; older-mutation preparation, generic-record cleanup and
+  controls; older full mutation groups support explicit verified preparation.
+  Hash-only migration, generic-record cleanup and
   verified deletion completion that reopens disclosure remain unfinished.
   See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector
