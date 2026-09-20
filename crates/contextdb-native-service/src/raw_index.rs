@@ -38,6 +38,8 @@ pub(super) struct IndexState {
 #[serde(deny_unknown_fields)]
 pub(super) struct Generation {
     pub number: u64,
+    #[serde(default, skip_serializing_if = "legacy_custody")]
+    pub custody_version: u16,
     pub analyzer: String,
     pub through: u64,
     pub authorization_epoch: u64,
@@ -112,6 +114,7 @@ impl NativeService {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
+        self.require_custody_ready(&snapshot, &workspace)?;
         let state: IndexState = self
             .raw_value(&snapshot, &state_key(&workspace))?
             .unwrap_or_default();
@@ -131,6 +134,7 @@ impl NativeService {
             next.building = Some(next.next);
             Generation {
                 number: next.next,
+                custody_version: super::custody::CUSTODY_VERSION,
                 analyzer: RAW_ANALYZER.into(),
                 through: 0,
                 authorization_epoch: auth,
@@ -144,7 +148,10 @@ impl NativeService {
             self.raw_value(&snapshot, &generation_key(&workspace, number))?
                 .ok_or_else(|| integrity("raw generation manifest is absent"))?
         };
-        if generation.authorization_epoch != auth || generation.analyzer != RAW_ANALYZER {
+        if generation.authorization_epoch != auth
+            || generation.analyzer != RAW_ANALYZER
+            || generation.custody_version != super::custody::CUSTODY_VERSION
+        {
             return Err(stale_index());
         }
         let expected_generation = generation.clone();
@@ -242,6 +249,7 @@ impl NativeService {
         }
         let _guard = self.lock_index_publication(budget)?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
+        self.require_custody_ready(&tx, &workspace)?;
         let current: IndexState = self
             .raw_value(&tx, &state_key(&workspace))?
             .unwrap_or_default();
@@ -334,7 +342,7 @@ impl NativeService {
         if policy.access.workspace_id != context.request.workspace_id {
             return Err(super::permission_denied());
         }
-        self.load_captured_original(&tx, event_id)?;
+        let original = self.load_captured_original(&tx, event_id)?;
         self.enable_raw_index_format(&mut tx)?;
         let frame = self.begin_frame(&tx, &context.request.workspace_id, false)?;
         let epoch = self
@@ -342,6 +350,12 @@ impl NativeService {
             .checked_add(1)
             .ok_or_else(|| exhausted("authorization epoch overflow"))?;
         policy.access.retrievable = false;
+        self.invalidate_custody(
+            &mut tx,
+            &frame.workspace_digest,
+            original.receipt.workspace_commit,
+            epoch,
+        )?;
         tx.put(
             &self.keyspaces.observations_policy,
             observation.into_bytes(),
@@ -464,17 +478,8 @@ impl NativeService {
     pub(super) fn lock_index_publication(
         &self,
         budget: &QueryBudget,
-    ) -> ServiceResult<std::sync::MutexGuard<'_, ()>> {
-        loop {
-            budget.check().map_err(budget_error)?;
-            match self.writes.try_lock() {
-                Ok(guard) => return Ok(guard),
-                Err(std::sync::TryLockError::Poisoned(_)) => {
-                    return Err(integrity("native publication lock poisoned"));
-                }
-                Err(std::sync::TryLockError::WouldBlock) => std::thread::yield_now(),
-            }
-        }
+    ) -> ServiceResult<super::publication::PublicationGuard<'_>> {
+        self.writes.enter(|| budget.check().map_err(budget_error))
     }
 
     fn enable_raw_index_format<T: WriteTransaction>(&self, tx: &mut T) -> ServiceResult<()> {
@@ -496,6 +501,10 @@ impl NativeService {
         }
         Ok(())
     }
+}
+
+fn legacy_custody(version: &u16) -> bool {
+    *version == 0
 }
 
 pub(super) fn state_key(workspace: &str) -> Vec<u8> {

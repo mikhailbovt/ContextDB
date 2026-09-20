@@ -328,23 +328,27 @@ fn request_source_permission_is_checked_before_request_body_materialization() {
         },
     };
     service.append_event(occurrence.clone()).expect("request");
+    let mut budget = contextdb_recall::QueryBudget::new(
+        1000,
+        1024 * 1024,
+        std::time::Duration::from_secs(5),
+        Default::default(),
+    );
+    service
+        .revoke_original(
+            &original.context,
+            original.event.event_id,
+            "revoke",
+            &mut budget,
+        )
+        .expect("revocation publication");
+    assert!(
+        service
+            .maintain_custody(&original.context, 64, &mut budget)
+            .expect("propagate restrictions before corrupt-body injection")
+            .caught_up
+    );
     let mut tx = service.engine.begin_write().expect("tx");
-    let source_key =
-        crate::digest_bytes(original.event.event_id.to_string().as_bytes()).into_bytes();
-    let mut policy: crate::StoredObservationPolicy = decode(
-        &tx.get(&service.keyspaces.observations_policy, &source_key)
-            .expect("read")
-            .expect("policy"),
-        "source policy",
-    )
-    .expect("decode");
-    policy.access.retrievable = false;
-    tx.put(
-        &service.keyspaces.observations_policy,
-        source_key,
-        encode(&policy).expect("encode"),
-    )
-    .expect("revoke fixture");
     tx.put(
         &service.keyspaces.observations_content,
         crate::digest_bytes(occurrence.event.event_id.to_string().as_bytes()).into_bytes(),

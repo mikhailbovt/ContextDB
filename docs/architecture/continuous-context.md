@@ -148,7 +148,43 @@ metadata/range traversal. Exhaustive pages freeze generation coverage and tail;
 top-k reports incomplete work separately. Shared work/byte/deadline/cancellation
 checks cover the query and projection publication lock. These finite bounds do
 not establish the million-event latency target or eliminate hardware timing
-channels. Generation reclamation and broader custody controls follow in hardening.
+channels. Generation reclamation, encrypted custody and physical deletion remain
+separate hardening gates.
+
+### Inherited disclosure restrictions
+
+`continuous-derived-custody-v1` materializes the intersection of input policies
+at capture. Model outputs inherit their exact request; tool results inherit their
+intent and the intent's captured proposal. Checkpoints inherit hot/required
+sources, pending attempts/proposals and their last model output. Declared revisions
+inherit their predecessor; full replacement bytes alone cannot declassify them.
+Ordinary causal links between independent observations do not declare derivation.
+Repeated policies are deduplicated; read-time authorization does not traverse the
+conversation. The initial profile allows 128 distinct policies and 1 MiB of custody
+metadata per capture, with explicit backpressure at either limit.
+
+`revoke_original` atomically closes workspace disclosure and advances its policy
+epoch. Admin `maintain_custody(context, max_events, budget)` propagates restrictions
+in capture order, at most 256 records per call. Query admission remains closed
+until `caught_up`; derived captures wait, while independent originals can still
+be saved. Analysis runs outside publication authority, with deadline/work/byte
+checks. Publication compares the analyzed state and epoch and checks newly arrived
+captures before reopening the gate. Restart and logical backup/restore preserve
+unfinished work. Historical reads and checkpoint recovery use these current
+restrictions, including restrictions inherited through model/tool responses.
+
+Legacy continuous stores require the same explicit bounded custody migration
+before disclosure. Afterwards, rebuild any existing raw generation with
+`project_originals(..., true, ...)`, then continue with `rebuild=false` until
+`caught_up`. Legacy index labels cannot become trusted merely because migration
+finished. Deep verification reconstructs the checked prefix from immutable
+originals; pending rows remain inaccessible until rebuilt. These Rust admin APIs
+do not imply automatic background maintenance or an exposed MCP/SDK endpoint.
+
+Capture and maintenance share a FIFO publication queue with 64 slots including
+the active writer. Full admission returns retryable backpressure before opening
+a transaction. Waits honor the caller's budget and have a 30-second ceiling;
+cancelled waiters release their slot without overtaking other publishers.
 
 Reconcile an index generation with a bounded revision overlay that includes
 updates, retractions, supersession, deletion and permission changes. Mask old

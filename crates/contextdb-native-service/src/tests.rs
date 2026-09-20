@@ -1687,7 +1687,10 @@ fn admin_backup_restores_all_native_keyspaces_into_a_pristine_target_and_reopens
         Some(contextdb_service::CapabilityState::Unsupported)
     );
     for capability in [
+        "bounded_publication_admission",
         "candidate_hierarchy_dag",
+        "capture_custody_migration",
+        "capture_custody_propagation",
         "policy_first_candidate_recall",
         "policy_first_candidate_traversal",
         "quarantined_memory_proposals",
@@ -1701,9 +1704,14 @@ fn admin_backup_restores_all_native_keyspaces_into_a_pristine_target_and_reopens
     for capability in [
         "background_semantic_adjudication",
         "consolidate",
+        "encrypted_custody_domains",
+        "hard_delete",
         "native_graph_store",
         "observation_semantic_extraction",
+        "physical_deletion_closure",
+        "raw_index_generation_gc",
         "reflect",
+        "restore_current_suppression_ledger",
     ] {
         assert_eq!(
             status.capability_manifest.capability(capability),

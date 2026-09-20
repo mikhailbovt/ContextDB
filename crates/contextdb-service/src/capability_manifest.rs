@@ -11,7 +11,7 @@ pub use contextdb_core::{
 /// The vocabulary deliberately includes important unavailable production
 /// executors. Omitting those gaps would turn a machine-readable profile into a
 /// marketing string with extra steps.
-pub const SERVICE_CAPABILITY_IDS_V1: [&str; 49] = [
+pub const SERVICE_CAPABILITY_IDS_V1: [&str; 56] = [
     "admin_native_logical_backup",
     "admin_native_pristine_restore",
     "ann_hnsw_runtime",
@@ -21,7 +21,10 @@ pub const SERVICE_CAPABILITY_IDS_V1: [&str; 49] = [
     "async_maintenance",
     "background_semantic_adjudication",
     "bootstrap",
+    "bounded_publication_admission",
     "candidate_hierarchy_dag",
+    "capture_custody_migration",
+    "capture_custody_propagation",
     "canonical_context_pack_protobuf_bytes",
     "checkpoint",
     "compact",
@@ -33,6 +36,7 @@ pub const SERVICE_CAPABILITY_IDS_V1: [&str; 49] = [
     "durable_fjall_storage",
     "durable_postflight_receipt",
     "embedded_builder",
+    "encrypted_custody_domains",
     "grpc_transport",
     "handoff",
     "hard_delete",
@@ -47,12 +51,15 @@ pub const SERVICE_CAPABILITY_IDS_V1: [&str; 49] = [
     "ordered_journal_recovery",
     "persistent_ann_recall_projection",
     "persistent_lexical_recall_projection",
+    "physical_deletion_closure",
     "pin",
     "policy_first_candidate_recall",
     "policy_first_candidate_traversal",
     "quarantined_memory_proposals",
+    "raw_index_generation_gc",
     "reflect",
     "restart_verification",
+    "restore_current_suppression_ledger",
     "resume",
     "retention_revision",
     "runtime_model_migration",

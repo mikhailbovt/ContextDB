@@ -22,6 +22,11 @@ and release verifier—not the presence of an API name—determine completion.
 - The standalone production host does not claim hard deletion until physical
   content erasure and closure receipts are wired through the selected backend.
 - Logical export is not automatically an encrypted, signed physical backup.
+- Native continuous capture enforces inherited source restrictions through bounded
+  custody propagation. Legacy continuous stores require explicit custody migration
+  and index rebuild; interrupted revocation keeps disclosure closed. This does not
+  yet apply a newer external suppression ledger to an older backup, erase retained
+  payloads or supply encrypted custody domains.
 - M17's 10M run measured storage records, not the RFC semantic graph/vector
   certification shape; E01/E02/E03 remain open.
 - Native Linux x86_64 and Windows x86_64 local-MCP developer previews have distinct

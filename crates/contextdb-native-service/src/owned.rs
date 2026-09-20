@@ -145,6 +145,7 @@ impl OwnedRunPort for NativeService {
         let head: RunHead = decode(&bytes, "run head")?;
         check_identity(context, &head.identity)?;
         self.authorized_capture_policy(&snapshot, context, head.receipt.event_id)?;
+        self.authorize_capture_dependencies(&snapshot, context, head.receipt.event_id)?;
         let original = self.load_captured_original(&snapshot, head.receipt.event_id)?;
         let checkpoint = decode_checkpoint(&original.event)?;
         budget
@@ -184,6 +185,7 @@ impl OwnedRunPort for NativeService {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         self.authorized_capture_policy(&snapshot, context, checkpoint.event_id)?;
+        self.authorize_capture_dependencies(&snapshot, context, checkpoint.event_id)?;
         let original = self.load_captured_original(&snapshot, checkpoint.event_id)?;
         if original.receipt != *checkpoint {
             return Err(invalid("checkpoint receipt differs"));
@@ -269,6 +271,7 @@ impl NativeService {
         receipt: &CaptureReceipt,
     ) -> ServiceResult<OwnedRunCheckpoint> {
         self.authorized_capture_policy(snapshot, context, receipt.event_id)?;
+        self.authorize_capture_dependencies(snapshot, context, receipt.event_id)?;
         let original = self.load_captured_original(snapshot, receipt.event_id)?;
         let checkpoint = decode_checkpoint(&original.event)?;
         check_identity(context, &checkpoint.identity)?;
@@ -345,6 +348,7 @@ impl NativeService {
         self.validate_pending_model(snapshot, &request.context, &request.checkpoint)?;
         if let Some(id) = request.checkpoint.last_model_output {
             self.authorized_capture_policy(snapshot, &request.context, id)?;
+            self.authorize_capture_dependencies(snapshot, &request.context, id)?;
             let original = self.load_captured_original(snapshot, id)?;
             if original.event.kind != EventKind::ModelResponseCompleted
                 || original.event.run_id != Some(request.checkpoint.identity.run_id)
@@ -549,7 +553,7 @@ fn check_identity(
     }
     Ok(())
 }
-fn decode_checkpoint(event: &EventEnvelope) -> ServiceResult<OwnedRunCheckpoint> {
+pub(super) fn decode_checkpoint(event: &EventEnvelope) -> ServiceResult<OwnedRunCheckpoint> {
     let bytes = event
         .payload
         .original_bytes()

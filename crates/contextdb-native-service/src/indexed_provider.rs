@@ -212,6 +212,7 @@ impl IndexedRecallProvider for NativeIndexedRecallProvider<'_> {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         let workspace = digest_bytes(self.context.request.workspace_id.as_bytes());
+        self.service.require_custody_ready(&snapshot, &workspace)?;
         let (global, state) = self.service.select_snapshot(
             &snapshot,
             &self.context.request.workspace_id,
@@ -231,13 +232,17 @@ impl IndexedRecallProvider for NativeIndexedRecallProvider<'_> {
         } else {
             Generation {
                 number: 0,
+                custody_version: super::custody::CUSTODY_VERSION,
                 analyzer: RAW_ANALYZER.into(),
                 through: 0,
                 authorization_epoch: auth,
                 projected_sources: 0,
             }
         };
-        if generation.authorization_epoch != auth || generation.analyzer != RAW_ANALYZER {
+        if generation.authorization_epoch != auth
+            || generation.analyzer != RAW_ANALYZER
+            || generation.custody_version != super::custody::CUSTODY_VERSION
+        {
             return Err(stale_index());
         }
         let mut eligible = BTreeSet::new();
@@ -572,6 +577,8 @@ impl NativeIndexedRecallProvider<'_> {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
+        self.service
+            .require_custody_ready(&current, &view.workspace)?;
         if self
             .service
             .raw_authorization_epoch(&current, &view.workspace)?
