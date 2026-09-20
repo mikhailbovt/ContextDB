@@ -61,6 +61,8 @@ impl NativeService {
     /// by the shared budget and 1024 mutations/16 MiB each of bodies and controls.
     /// Publication uses a workspace CAS and one Sync. Exact retries follow the
     /// accepted journal even if the idempotency cache is unavailable.
+    /// Non-retrievable revisions can be prepared for cleanup without changing
+    /// their stored labels; all other access restrictions remain enforced.
     /// Hash-only history needs explicit migration; no body is erased here.
     pub fn prepare_record_controls(
         &self,
@@ -314,7 +316,11 @@ impl NativeService {
             {
                 return Err(integrity("record preparation policy address differs"));
             }
-            if !policy_allows(&context.request, &policy.access) {
+            // Administrative preparation enables cleanup of denied revisions;
+            // it never changes the stored labels or grants ordinary disclosure.
+            let mut access = policy.access.clone();
+            access.retrievable = true;
+            if !policy_allows(&context.request, &access) {
                 return Err(ServiceError::new(
                     ErrorCode::PermissionDenied,
                     "record preparation policy denies access",

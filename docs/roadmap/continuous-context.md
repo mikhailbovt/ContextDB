@@ -18,7 +18,7 @@ native or model acceptance.
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Merged in #9; all eight CI jobs passed; reader/cache acceptance remains open |
 | 08 | Atomic lease admission, invalidation and action fences | Merged in #10; all eight CI jobs passed; strict transport handoff remains open |
 | 09 | Cache/cost controller and paired runtime evaluation | Merged in #11; all eight CI jobs passed; R0 quality and total monetary benefit remain open |
-| 10 | Restore/revocation, retention, custody and bounded publication | Custody, suppression, encrypted backups and lineage implemented; local source/assertion/chunk cleanup verified on Windows; generic-record/key/external closure and completion admission remain open |
+| 10 | Restore/revocation, retention, custody and bounded publication | Custody, suppression, encrypted backups and lineage implemented; local source/assertion/generic/chunk cleanup verified on Windows; complete copy/key/external closure and completion admission remain open |
 | 11 | Migration, integrations, demo and release evidence | Planned |
 | 12 | Router replay corpus, contracts and training lineage | Planned |
 | 13 | Measured R1 scorer and optional bounded R2 cascade | Planned |
@@ -223,5 +223,7 @@ every affected generic revision to be pruned and rejects unknown origins.
 Tests cover copied correction edges, candidate graphs, historical revisions,
 full/partial/cleaned archives, actual reopen, lost acknowledgement, CAS and
 missing, forged or resurrected data. Unpruned bodies remain mandatory.
-Hash-only migration and administrative preparation of non-retrievable legacy
-records remain open.
+Non-retrievable legacy revisions can be classified and prepared administratively
+without changing their stored read policy. Encrypted archives from before
+classification/removal and after cleanup preserve independent data through
+actual reopen/restore. Hash-only migration remains open.

@@ -76,6 +76,9 @@ accepted history; a missing locator cannot create another preparation. Prepared
 controls support scope reconstruction; deletion also requires an independent
 removal witness and an accepted pruning publication.
 Hash-only history and unknown source provenance still require explicit migration.
+Origin classification and control preparation can inspect non-retrievable legacy
+revisions for cleanup; scope, audience, purpose, consent and clearance still apply.
+Neither operation changes the stored disclosure policy.
 
 `prepare_record_removal` verifies one classified revision's accepted birth and
 optional closure, then retains their controls in the independent v3 removal

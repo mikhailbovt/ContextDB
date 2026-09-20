@@ -66,6 +66,8 @@ impl NativeService {
     /// similar text. Each origin must precede the accepted record. The external
     /// Sync closes native disclosure until `maintain_record_sources` catches up.
     /// Later unclassified revisions remain unavailable in this workspace.
+    /// Admin may classify a non-retrievable revision for cleanup; its other
+    /// access labels still apply and its stored disclosure policy is unchanged.
     pub fn bind_record_sources(
         &self,
         context: &AuthenticatedRequestContext,
@@ -110,7 +112,9 @@ impl NativeService {
             "record origin policy",
         )?;
         validate_stored_policy(&policy)?;
-        if !policy_allows(&context.request, &policy.access)
+        let mut access = policy.access.clone();
+        access.retrievable = true;
+        if !policy_allows(&context.request, &access)
             || policy.record_digest != record_digest
             || policy.revision != revision
         {

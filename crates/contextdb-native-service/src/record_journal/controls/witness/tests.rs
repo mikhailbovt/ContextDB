@@ -6,6 +6,7 @@ use super::*;
 use crate::record_sources::tests::{budget, input, publication};
 
 mod legacy;
+mod nonretrievable;
 
 pub(crate) struct Fixture {
     pub(crate) root: tempfile::TempDir,
