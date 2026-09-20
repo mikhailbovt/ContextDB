@@ -128,7 +128,11 @@ impl NativeService {
             if !event.accepted_records.is_empty()
                 || matches!(
                     event.operation.as_str(),
-                    "publish_memory" | "propose_memory" | "correct" | "retract"
+                    "publish_memory"
+                        | "propose_memory"
+                        | "correct"
+                        | "retract"
+                        | "publish_memory_from_sources"
                 )
             {
                 return Err(unsupported(

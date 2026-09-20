@@ -127,7 +127,11 @@ impl NativeService {
             let event: StoredEvent = decode(&entry.value, "record mutation journal")?;
             let writes_records = matches!(
                 event.operation.as_str(),
-                "publish_memory" | "propose_memory" | "correct" | "retract"
+                "publish_memory"
+                    | "propose_memory"
+                    | "correct"
+                    | "retract"
+                    | "publish_memory_from_sources"
             );
             if !event.accepted_records.is_empty()
                 && (!writes_records || activated.is_none_or(|first| first > event.global_commit))
@@ -226,6 +230,14 @@ impl NativeService {
         {
             let event: StoredEvent = decode(&entry.value, "record scope event")?;
             if let Some(publication) = &event.accepted_record_sources {
+                for scope in &publication.scopes {
+                    let epoch = epochs
+                        .entry(capture::scope_key(&event.workspace_digest, scope))
+                        .or_default();
+                    *epoch = (*epoch).max(event.workspace_commit);
+                }
+            }
+            if let Some(publication) = &event.accepted_record_write_completion {
                 for scope in &publication.scopes {
                     let epoch = epochs
                         .entry(capture::scope_key(&event.workspace_digest, scope))

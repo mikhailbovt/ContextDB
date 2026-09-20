@@ -10,6 +10,8 @@ pub(crate) const FEATURE: &str = "continuous-record-sources-v1";
 
 mod registration;
 pub use registration::NativeRecordSourceWorkspaceReceipt;
+pub(crate) mod writes;
+pub use writes::NativeRecordWriteReceipt;
 
 /// Durable host declaration of one record revision's captured origins.
 /// This is an authority receipt, not a native commit or deletion receipt.
@@ -155,6 +157,7 @@ impl NativeService {
             scopes: policy.access.scopes.clone(),
             sources: controls,
         };
+        self.check_record_write_origin(&snapshot, &control)?;
         #[cfg(test)]
         BEFORE_PUBLICATION.with(|hook| {
             if let Some(hook) = hook.take() {
@@ -218,12 +221,25 @@ impl NativeService {
                 },
             });
         }
-        // Exact accepted history prevents a missing local record from being
-        // misreported as a legitimate post-backup absence.
-        self.verify_record_mutations(&snapshot)?;
+        // Existing revisions carry exact accepted-birth proofs. Only a missing
+        // revision needs reverse history closure to prove post-backup absence;
+        // normal publication must not rescan every earlier record body.
+        let mut verified_absence = false;
         let mut scopes = BTreeSet::new();
         for entry in &entries {
             if let Some(control) = entry.control.record() {
+                if !verified_absence
+                    && snapshot
+                        .get(
+                            &self.keyspaces.policy_history,
+                            &history_key(&control.record_digest, control.revision),
+                        )
+                        .map_err(storage_error)?
+                        .is_none()
+                {
+                    self.verify_record_mutations(&snapshot)?;
+                    verified_absence = true;
+                }
                 self.verify_local_record_origin(&snapshot, control, budget)?;
                 scopes.extend(control.scopes.iter().cloned());
             }
@@ -371,6 +387,7 @@ impl NativeService {
         if ledger.current_record_sources(&workspace)?.is_none() {
             return Ok(Vec::new());
         }
+        self.require_record_write_complete(snapshot, policy)?;
         let binding = ledger
             .retained_record_sources(&workspace, &policy.record_digest, policy.revision)?
             .ok_or_else(|| {

@@ -146,8 +146,16 @@ Once a workspace is activated, unclassified record revisions are
 unavailable. Get, timeline, candidate/ordinary recall, traversal and ContextPack
 reads apply current original and inherited custody policies before loading record
 bodies. Independent records remain available after ordinary source revocation.
-Exact accepted mutation retries remain supported; new generic writes in such a
-workspace currently require a source-aware writer that is still being implemented.
+`publish_memory_from_sources` accepts explicit memory and complete captured-input
+controls in one native Sync, then transfers its actual birth commitments to the
+retained authority. Reads wait for a separate journal-bound completion, including
+after manual provenance catch-up or an older restore. An interrupted response
+includes the accepted workspace commit; exact retry or `resume_record_source_write`
+finishes that same operation without its original request body. Current source
+revocation still denies disclosure. Restored archives cannot reuse retained record
+identities, and administrative repair cannot replace accepted input declarations.
+Candidate, correction and retraction writers with complete copied-record origins
+and automatic pending-work discovery remain unfinished.
 Legacy workspaces retain their existing behavior. Version 1/2 authorities require
 explicit migration before accepting origins; this API does not perform migration
 or establish that a host's declaration is semantically complete.

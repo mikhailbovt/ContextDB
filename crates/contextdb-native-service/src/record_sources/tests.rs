@@ -8,7 +8,7 @@ use contextdb_service::{CapturePort, CognitiveMemoryService};
 
 use super::*;
 
-fn budget() -> QueryBudget {
+pub(super) fn budget() -> QueryBudget {
     QueryBudget::new(
         1_000_000,
         128 * 1024 * 1024,
@@ -17,7 +17,7 @@ fn budget() -> QueryBudget {
     )
 }
 
-fn input(sequence: u64, text: &str) -> contextdb_service::CaptureRequest {
+pub(super) fn input(sequence: u64, text: &str) -> contextdb_service::CaptureRequest {
     let mut input = capture::tests::request(sequence, text);
     input.context.capability_grants.extend([
         Capability::Correct,
@@ -27,7 +27,7 @@ fn input(sequence: u64, text: &str) -> contextdb_service::CaptureRequest {
     input
 }
 
-fn publication(context: &AuthenticatedRequestContext, id: &str) -> PublishMemoryRequest {
+pub(super) fn publication(context: &AuthenticatedRequestContext, id: &str) -> PublishMemoryRequest {
     PublishMemoryRequest {
         context: context.clone(),
         idempotency_key: format!("publish-{id}"),
@@ -37,7 +37,7 @@ fn publication(context: &AuthenticatedRequestContext, id: &str) -> PublishMemory
     }
 }
 
-fn get(
+pub(super) fn get(
     service: &NativeService,
     context: &AuthenticatedRequestContext,
     id: &str,
@@ -49,7 +49,7 @@ fn get(
     })
 }
 
-fn catch_up(service: &NativeService, context: &AuthenticatedRequestContext) {
+pub(super) fn catch_up(service: &NativeService, context: &AuthenticatedRequestContext) {
     while !service
         .maintain_suppression(context, 2, &mut budget())
         .expect("current suppression")

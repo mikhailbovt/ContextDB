@@ -195,5 +195,9 @@ independent recall, actual process exit after external Sync, interrupted catch-u
 registry loss and genuine version 2 compatibility. Empty record workspaces can
 activate retained origin requirements before their first record, with exact retry,
 old-archive catch-up and a publication fence against concurrent legacy writes.
-Declarations require trusted host classification; source-aware mutation ports,
-generic-record pruning and authority migration remain unfinished.
+Explicit source-aware publication now atomically accepts its record and origin
+intent, then completes a recoverable transfer to retained authority. Tests cover
+actual process exit, concurrent capture/retry, encrypted pending restore, revoked
+inputs and retained identity reservations. Declarations still require trusted host
+classification. Candidate/correction/retraction ports, automatic pending-work
+discovery, generic-record pruning and authority migration remain unfinished.

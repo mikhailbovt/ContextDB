@@ -33,6 +33,7 @@ mod record_journal;
 mod record_sources;
 pub use record_sources::{
     NativeRecordSourceProgress, NativeRecordSourceReceipt, NativeRecordSourceWorkspaceReceipt,
+    NativeRecordWriteReceipt,
 };
 mod retention;
 mod suppression;
@@ -334,6 +335,10 @@ struct StoredEvent {
     accepted_assertion_pruning: Option<assertions::AssertionPruningPublication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_record_sources: Option<record_sources::RecordSourcesPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_write: Option<record_sources::writes::RecordWriteRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_write_completion: Option<record_sources::writes::RecordWriteCompletion>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -672,6 +677,14 @@ impl NativeService {
         let response_bytes = encode(response)?;
         let response_digest = digest_bytes(&response_bytes);
         let accepted_records = self.accepted_record_mutations(transaction, frame)?;
+        let accepted_record_write = self.accepted_record_write(
+            transaction,
+            frame,
+            operation,
+            request_digest,
+            idempotency_key,
+            &accepted_records,
+        )?;
         let mut event = StoredEvent {
             schema_version: SCHEMA_VERSION,
             global_commit: frame.global_commit,
@@ -711,6 +724,12 @@ impl NativeService {
                 None
             },
             accepted_records,
+            accepted_record_write,
+            accepted_record_write_completion: if operation == "record_write_complete" {
+                Some(decode(&response_bytes, "record write completion")?)
+            } else {
+                None
+            },
             accepted_suppression: if operation == "suppression_reconcile" {
                 Some(decode(&response_bytes, "suppression publication")?)
             } else {
@@ -1233,6 +1252,7 @@ impl NativeService {
         self.verify_assertion_records(snapshot)?;
         self.verify_record_mutations(snapshot)?;
         self.verify_record_source_progress(snapshot)?;
+        self.verify_record_writes(snapshot)?;
         for entry in snapshot
             .scan_prefix(&self.keyspaces.events, b"")
             .map_err(storage_error)?
@@ -1675,6 +1695,17 @@ impl NativeService {
         &self,
         request: PublishMemoryRequest,
     ) -> ServiceResult<MutationResponse> {
+        self.publish_explicit_memory_inner(request, None)
+    }
+
+    fn publish_explicit_memory_inner(
+        &self,
+        request: PublishMemoryRequest,
+        mut inputs: Option<(
+            &BTreeSet<contextdb_core::ObservationId>,
+            &mut contextdb_recall::QueryBudget,
+        )>,
+    ) -> ServiceResult<MutationResponse> {
         require_capability(&request.context, Capability::Correct)?;
         require_capability(&request.context, Capability::Observe)?;
         validate_identifier(&request.idempotency_key, "idempotency key")?;
@@ -1685,30 +1716,70 @@ impl NativeService {
             return Err(permission_denied());
         }
         let authorization_digest = request.context.authorization_binding_digest()?;
-        let request_digest = canonical_digest(&(
+        let mut request_digest = canonical_digest(&(
             "publish-memory-v1",
             &authorization_digest,
             &request.memory_id,
             &request.value,
             &request.search_text,
         ))?;
-        let idempotency_key = authenticated_idempotency_key(
-            "publish_memory",
-            &request.context,
-            &request.idempotency_key,
-        )?;
-        let _guard = self.lock_writes()?;
+        let operation = if let Some((sources, _)) = &inputs {
+            request_digest = canonical_digest(&(
+                record_sources::writes::WRITE_FEATURE,
+                "publish_memory_from_sources",
+                &request_digest,
+                sources,
+            ))?;
+            "publish_memory_from_sources"
+        } else {
+            "publish_memory"
+        };
+        let idempotency_key =
+            authenticated_idempotency_key(operation, &request.context, &request.idempotency_key)?;
+        // Accepted retries repair the original handoff even if its source has
+        // since been revoked. They never re-evaluate it as a new publication.
+        let prepared = if let Some((sources, budget)) = inputs.as_mut() {
+            let snapshot = self
+                .engine
+                .begin_read(SnapshotSelector::Latest)
+                .map_err(storage_error)?;
+            if let Some(mut replay) = self.replay::<MutationResponse, _>(
+                &snapshot,
+                &idempotency_key,
+                operation,
+                &request_digest,
+            )? {
+                replay.replayed = true;
+                return Ok(replay);
+            }
+            Some(self.prepare_record_write(&request.context, sources, budget)?)
+        } else {
+            None
+        };
+        #[cfg(test)]
+        if prepared.is_some() {
+            record_sources::writes::before_publication();
+        }
+        let _guard = if let Some((_, budget)) = &inputs {
+            self.lock_index_publication(budget)?
+        } else {
+            self.lock_writes()?
+        };
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(mut replay) = self.replay::<MutationResponse, _>(
             &transaction,
             &idempotency_key,
-            "publish_memory",
+            operation,
             &request_digest,
         )? {
             replay.replayed = true;
             return Ok(replay);
         }
-        self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
+        if let Some(prepared) = &prepared {
+            self.check_record_write_preparation(&transaction, &request.context, prepared)?;
+        } else {
+            self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
+        }
         if self.load_head(&transaction, &request.memory_id)?.is_some() {
             return Err(invalid("memory ID has already been used"));
         }
@@ -1743,14 +1814,27 @@ impl NativeService {
             request_digest: request_digest.clone(),
             watermarks: frame.state.watermarks.clone(),
         };
+        if let Some(prepared) = prepared {
+            self.stage_record_write(
+                &mut transaction,
+                &frame,
+                (&request_digest, &idempotency_key),
+                prepared,
+                &record,
+                inputs.as_mut().expect("prepared source write").1,
+            )?;
+        }
         self.finish_frame(
             &mut transaction,
             &frame,
-            "publish_memory",
+            operation,
             &idempotency_key,
             &request_digest,
             &response,
         )?;
+        if let Some((_, budget)) = &inputs {
+            budget.check().map_err(raw_index::budget_error)?;
+        }
         require_sync(
             transaction
                 .commit(Durability::Sync)
@@ -3172,6 +3256,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
                 && feature != record_sources::FEATURE
+                && feature != record_sources::writes::WRITE_FEATURE
                 && feature != suppression::SUPPRESSION_FEATURE
                 && feature != retention::RETENTION_FEATURE
                 && feature != retention::PRUNING_FEATURE
@@ -3181,6 +3266,12 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
             != manifest.suppression_authority.is_some()
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
+        || (manifest
+            .features
+            .contains(record_sources::writes::WRITE_FEATURE)
+            && (!manifest.features.contains(record_sources::FEATURE)
+                || !manifest.features.contains(record_journal::RECORD_FEATURE)
+                || manifest.suppression_authority.is_none()))
         || (manifest.features.contains(retention::RETENTION_FEATURE)
             && manifest.suppression_authority.is_none())
         || (manifest.features.contains(raw_index::REMOVAL_FEATURE)

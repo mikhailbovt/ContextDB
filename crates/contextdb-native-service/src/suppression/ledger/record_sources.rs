@@ -28,6 +28,12 @@ pub(crate) struct RecordSourceControl {
     pub sources: BTreeMap<ObservationId, ContentDigest>,
 }
 
+impl RecordSourceControl {
+    pub(crate) fn validate(&self) -> ServiceResult<()> {
+        validate_control(self)
+    }
+}
+
 // The untagged record variant preserves the exact existing v3 binding bytes.
 // Registration is a distinct control, never a fictitious record with no origins.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -242,6 +248,45 @@ impl NativeSuppressionLedger {
             ));
         }
         Ok(Some(entry))
+    }
+
+    pub(crate) fn record_identity_retained(
+        &self,
+        workspace: &str,
+        record: &str,
+    ) -> ServiceResult<bool> {
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        self.record_sources_head(&snapshot)?;
+        let prefix = format!("record-sources/record/{workspace}/{record}/");
+        let page = snapshot
+            .scan_prefix_page(
+                &self.rows,
+                ScanPageRequest {
+                    prefix: prefix.as_bytes(),
+                    start_after: None,
+                    max_entries: 1,
+                    max_bytes: 1024,
+                },
+            )
+            .map_err(storage_error)?;
+        let Some(row) = page.entries.first() else {
+            return Ok(false);
+        };
+        let sequence: u64 = decode(&row.value, "retained record identity locator")?;
+        let entry = self.read_record_source_entry(&snapshot, sequence)?;
+        let control = entry.record_control()?;
+        if row.key != record_key(workspace, record, control.revision)
+            || self
+                .retained_record_sources(workspace, record, control.revision)?
+                .as_ref()
+                != Some(&entry)
+        {
+            return Err(integrity("retained record identity locator differs"));
+        }
+        Ok(true)
     }
 
     pub(crate) fn bind_record_origin(
