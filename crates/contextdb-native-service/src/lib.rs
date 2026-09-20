@@ -1848,6 +1848,14 @@ impl NativeService {
         &self,
         request: ProposeMemoryRequest,
     ) -> ServiceResult<ProposeMemoryResponse> {
+        self.propose_memory_atomic_inner(request, None)
+    }
+
+    fn propose_memory_atomic_inner(
+        &self,
+        request: ProposeMemoryRequest,
+        mut inputs: Option<record_sources::writes::Inputs<'_>>,
+    ) -> ServiceResult<ProposeMemoryResponse> {
         require_capability(&request.context, Capability::Observe)?;
         validate_identifier(&request.idempotency_key, "idempotency key")?;
         validate_identifier(&request.candidate_id, "candidate ID")?;
@@ -1894,25 +1902,57 @@ impl NativeService {
             &request.parent_candidate_ids,
             &request.supersedes_candidate_ids,
         ))?;
-        let request_digest =
+        let mut request_digest =
             canonical_digest(&("propose-memory-v1", &authorization_digest, &input_digest))?;
-        let idempotency_key = authenticated_idempotency_key(
-            "propose_memory",
+        let operation = if inputs.is_some() {
+            record_sources::writes::PROPOSE
+        } else {
+            "propose_memory"
+        };
+        if let Some((sources, _)) = &inputs {
+            request_digest = canonical_digest(&(
+                record_sources::writes::GROUP_FEATURE,
+                operation,
+                &request_digest,
+                sources,
+            ))?;
+        }
+        let idempotency_key =
+            authenticated_idempotency_key(operation, &request.context, &request.idempotency_key)?;
+        let (prepared, replay) = self.prepare_record_write_or_replay::<ProposeMemoryResponse>(
             &request.context,
-            &request.idempotency_key,
+            operation,
+            &idempotency_key,
+            &request_digest,
+            &mut inputs,
         )?;
-        let _guard = self.lock_writes()?;
+        if let Some(replay) = replay {
+            return Ok(replay);
+        }
+        #[cfg(test)]
+        if prepared.is_some() {
+            record_sources::writes::before_publication();
+        }
+        let _guard = if let Some((_, budget)) = &inputs {
+            self.lock_index_publication(budget)?
+        } else {
+            self.lock_writes()?
+        };
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(mut replay) = self.replay::<ProposeMemoryResponse, _>(
             &transaction,
             &idempotency_key,
-            "propose_memory",
+            operation,
             &request_digest,
         )? {
             replay.mutation.replayed = true;
             return Ok(replay);
         }
-        self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
+        if let Some(prepared) = &prepared {
+            self.check_record_write_preparation(&transaction, &request.context, prepared)?;
+        } else {
+            self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
+        }
         if self
             .load_head(&transaction, &request.candidate_id)?
             .is_some()
@@ -1937,6 +1977,10 @@ impl NativeService {
             {
                 return Err(permission_denied());
             }
+            self.authorize_record_sources(&transaction, &request.context.request, &parent_policy)?;
+            if let Some((_, budget)) = inputs.as_mut() {
+                self.charge_source_record_body(&transaction, &parent_policy, budget)?;
+            }
             let parent = self.load_content(&transaction, &parent_policy)?;
             if parent.document.lifecycle != MemoryLifecycle::Active
                 || candidate_role(&parent.document) != Some(CANDIDATE_MEMORY_ROLE)
@@ -1958,6 +2002,14 @@ impl NativeService {
                 || predecessor_policy.access != candidate_access
             {
                 return Err(permission_denied());
+            }
+            self.authorize_record_sources(
+                &transaction,
+                &request.context.request,
+                &predecessor_policy,
+            )?;
+            if let Some((_, budget)) = inputs.as_mut() {
+                self.charge_source_record_body(&transaction, &predecessor_policy, budget)?;
             }
             let predecessor = self.load_content(&transaction, &predecessor_policy)?;
             if candidate_role(&predecessor.document) != Some(CANDIDATE_MEMORY_ROLE) {
@@ -1984,6 +2036,7 @@ impl NativeService {
             &request.context.request,
             global_head,
             &candidate_access,
+            inputs.as_mut().map(|(_, budget)| &mut **budget),
         )?;
         reject_candidate_hierarchy_cycle(
             &active_edges,
@@ -2105,14 +2158,27 @@ impl NativeService {
             proposal_state: contextdb_service::CandidateProposalState::Quarantined,
             canonical: false,
         };
+        if let Some(prepared) = prepared {
+            self.stage_record_group(
+                &mut transaction,
+                &frame,
+                (&request_digest, &idempotency_key, &response.candidate_id),
+                prepared,
+                operation,
+                inputs.as_mut().expect("prepared source group").1,
+            )?;
+        }
         self.finish_frame(
             &mut transaction,
             &frame,
-            "propose_memory",
+            operation,
             &idempotency_key,
             &request_digest,
             &response,
         )?;
+        if let Some((_, budget)) = &inputs {
+            budget.check().map_err(raw_index::budget_error)?;
+        }
         require_sync(
             transaction
                 .commit(Durability::Sync)
@@ -2128,18 +2194,33 @@ impl NativeService {
         principal: &RequestContext,
         global_commit: u64,
         exact_access: &AccessPolicy,
+        mut budget: Option<&mut contextdb_recall::QueryBudget>,
     ) -> ServiceResult<Vec<(StoredPolicy, MemoryRecord)>> {
-        let policies = self.authorized_policies(
-            snapshot,
-            principal,
-            global_commit,
-            MemoryLifecycle::Active,
-            AuthorizedPolicyFamily::Candidate,
-        )?;
+        let policies = if let Some(budget) = budget.as_deref_mut() {
+            self.source_graph_policies(
+                snapshot,
+                principal,
+                global_commit,
+                exact_access,
+                AuthorizedPolicyFamily::Candidate,
+                budget,
+            )?
+        } else {
+            self.authorized_policies(
+                snapshot,
+                principal,
+                global_commit,
+                MemoryLifecycle::Active,
+                AuthorizedPolicyFamily::Candidate,
+            )?
+        };
         let mut edges = Vec::new();
         for policy in policies.into_values() {
             if policy.kind != MemoryRecordKind::Candidate || policy.access != *exact_access {
                 continue;
+            }
+            if let Some(budget) = budget.as_deref_mut() {
+                self.charge_source_record_body(snapshot, &policy, budget)?;
             }
             let record = self.load_content(snapshot, &policy)?;
             if candidate_role(&record.document) == Some(CANDIDATE_EDGE_ROLE) {
@@ -2200,18 +2281,33 @@ impl NativeService {
         principal: &RequestContext,
         global_commit: u64,
         exact_access: &AccessPolicy,
+        mut budget: Option<&mut contextdb_recall::QueryBudget>,
     ) -> ServiceResult<Vec<(StoredPolicy, MemoryRecord)>> {
-        let policies = self.authorized_policies(
-            snapshot,
-            principal,
-            global_commit,
-            MemoryLifecycle::Active,
-            AuthorizedPolicyFamily::Canonical,
-        )?;
+        let policies = if let Some(budget) = budget.as_deref_mut() {
+            self.source_graph_policies(
+                snapshot,
+                principal,
+                global_commit,
+                exact_access,
+                AuthorizedPolicyFamily::Canonical,
+                budget,
+            )?
+        } else {
+            self.authorized_policies(
+                snapshot,
+                principal,
+                global_commit,
+                MemoryLifecycle::Active,
+                AuthorizedPolicyFamily::Canonical,
+            )?
+        };
         let mut edges = Vec::new();
         for policy in policies.into_values() {
             if policy.kind != MemoryRecordKind::Edge || policy.access != *exact_access {
                 continue;
+            }
+            if let Some(budget) = budget.as_deref_mut() {
+                self.charge_source_record_body(snapshot, &policy, budget)?;
             }
             let record = self.load_content(snapshot, &policy)?;
             if record.document.links.predicate.as_deref() == Some(HIERARCHY_PARENT_PREDICATE) {
@@ -2772,6 +2868,7 @@ impl NativeService {
             &request.context.request,
             global_head,
             &target.document.access,
+            None,
         )?;
         let rewires = self.prepare_hierarchy_rewire(
             &transaction,
@@ -2831,6 +2928,14 @@ impl NativeService {
     }
 
     fn retract_memory(&self, request: ForgetRequest) -> ServiceResult<MutationResponse> {
+        self.retract_memory_inner(request, None)
+    }
+
+    fn retract_memory_inner(
+        &self,
+        request: ForgetRequest,
+        mut inputs: Option<record_sources::writes::Inputs<'_>>,
+    ) -> ServiceResult<MutationResponse> {
         require_capability(&request.context, Capability::Forget)?;
         if request.mode == ForgetMode::HardDelete {
             require_capability(&request.context, Capability::HardDelete)?;
@@ -2841,27 +2946,62 @@ impl NativeService {
         validate_identifier(&request.idempotency_key, "idempotency key")?;
         validate_identifier(&request.target_id, "retraction target")?;
         let authorization_digest = request.context.authorization_binding_digest()?;
-        let request_digest = canonical_digest(&(
+        let mut request_digest = canonical_digest(&(
             "retract-memory-v1",
             &authorization_digest,
             &request.target_id,
             request.mode,
             &request.reason,
         ))?;
+        let operation = if inputs.is_some() {
+            record_sources::writes::RETRACT
+        } else {
+            "retract"
+        };
+        if let Some((sources, _)) = &inputs {
+            request_digest = canonical_digest(&(
+                record_sources::writes::GROUP_FEATURE,
+                operation,
+                &request_digest,
+                sources,
+            ))?;
+        }
         let idempotency_key =
-            authenticated_idempotency_key("retract", &request.context, &request.idempotency_key)?;
-        let _guard = self.lock_writes()?;
+            authenticated_idempotency_key(operation, &request.context, &request.idempotency_key)?;
+        let (prepared, replay) = self.prepare_record_write_or_replay::<MutationResponse>(
+            &request.context,
+            operation,
+            &idempotency_key,
+            &request_digest,
+            &mut inputs,
+        )?;
+        if let Some(replay) = replay {
+            return Ok(replay);
+        }
+        #[cfg(test)]
+        if prepared.is_some() {
+            record_sources::writes::before_publication();
+        }
+        let _guard = if let Some((_, budget)) = &inputs {
+            self.lock_index_publication(budget)?
+        } else {
+            self.lock_writes()?
+        };
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(mut replay) = self.replay::<MutationResponse, _>(
             &transaction,
             &idempotency_key,
-            "retract",
+            operation,
             &request_digest,
         )? {
             replay.replayed = true;
             return Ok(replay);
         }
-        self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
+        if let Some(prepared) = &prepared {
+            self.check_record_write_preparation(&transaction, &request.context, prepared)?;
+        } else {
+            self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
+        }
         let target_policy = self
             .load_head(&transaction, &request.target_id)?
             .filter(|policy| policy.transaction_to.is_none())
@@ -2874,6 +3014,10 @@ impl NativeService {
         {
             return Err(permission_denied());
         }
+        self.authorize_record_sources(&transaction, &request.context.request, &target_policy)?;
+        if let Some((_, budget)) = inputs.as_mut() {
+            self.charge_source_record_body(&transaction, &target_policy, budget)?;
+        }
         let mut target = self.load_content(&transaction, &target_policy)?;
         if target.document.lifecycle != MemoryLifecycle::Active {
             return Err(invalid("retraction target is not active"));
@@ -2884,6 +3028,7 @@ impl NativeService {
             &request.context.request,
             global_head,
             &target.document.access,
+            inputs.as_mut().map(|(_, budget)| &mut **budget),
         )?;
         let has_incident_hierarchy_edges = hierarchy_edges.iter().any(|(_, record)| {
             record.document.links.source.as_deref() == Some(&request.target_id)
@@ -2897,6 +3042,7 @@ impl NativeService {
                 &request.context.request,
                 global_head,
                 &target.document.access,
+                inputs.as_mut().map(|(_, budget)| &mut **budget),
             )?
         } else {
             Vec::new()
@@ -2945,14 +3091,27 @@ impl NativeService {
             request_digest: request_digest.clone(),
             watermarks: frame.state.watermarks.clone(),
         };
+        if let Some(prepared) = prepared {
+            self.stage_record_group(
+                &mut transaction,
+                &frame,
+                (&request_digest, &idempotency_key, &request.target_id),
+                prepared,
+                operation,
+                inputs.as_mut().expect("prepared source group").1,
+            )?;
+        }
         self.finish_frame(
             &mut transaction,
             &frame,
-            "retract",
+            operation,
             &idempotency_key,
             &request_digest,
             &response,
         )?;
+        if let Some((_, budget)) = &inputs {
+            budget.check().map_err(raw_index::budget_error)?;
+        }
         require_sync(
             transaction
                 .commit(Durability::Sync)
@@ -3257,6 +3416,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != record_journal::RECORD_FEATURE
                 && feature != record_sources::FEATURE
                 && feature != record_sources::writes::WRITE_FEATURE
+                && feature != record_sources::writes::GROUP_FEATURE
                 && feature != suppression::SUPPRESSION_FEATURE
                 && feature != retention::RETENTION_FEATURE
                 && feature != retention::PRUNING_FEATURE
@@ -3266,6 +3426,12 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
             != manifest.suppression_authority.is_some()
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
+        || (manifest
+            .features
+            .contains(record_sources::writes::GROUP_FEATURE)
+            && !manifest
+                .features
+                .contains(record_sources::writes::WRITE_FEATURE))
         || (manifest
             .features
             .contains(record_sources::writes::WRITE_FEATURE)

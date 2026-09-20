@@ -15,7 +15,7 @@ impl NativeService {
             .map_err(storage_error)?
             .ok_or_else(|| integrity("accepted source intent bytes absent"))?;
         let intent: RecordWriteIntent = decode(&bytes, "accepted source intent")?;
-        if event.operation != PUBLISH
+        if !is_source_write(&event.operation)
             || event.event_digest != event_digest(event)?
             || reference.digest != digest_bytes(&bytes)
             || bytes.len() > MAX_INTENT_BYTES
@@ -23,8 +23,15 @@ impl NativeService {
             || intent.workspace != event.workspace_digest
             || intent.request_digest != event.request_digest
             || intent.records != event.accepted_records
-            || intent.records.len() != 1
-            || intent.origins.len() != 1
+            || intent.records.is_empty()
+            || intent.records.len() > record_journal::MAX_WRITES
+            || intent.origins.is_empty()
+            || intent.origins.len() > intent.records.len()
+            || (event.operation == PUBLISH
+                && (intent.records.len() != 1
+                    || intent.origins.len() != 1
+                    || intent.group.is_some()))
+            || (event.operation != PUBLISH && intent.group.is_none())
             || std::str::from_utf8(&intent.idempotency_key)
                 .ok()
                 .is_none_or(|key| blake3::Hash::from_hex(key).is_err())
@@ -43,8 +50,18 @@ impl NativeService {
                 .ok_or_else(|| integrity("source-aware write retry receipt absent"))?,
             "source-aware write retry receipt",
         )?;
-        let response: MutationResponse =
-            decode(&receipt.response_bytes, "source-aware write response")?;
+        let response: MutationResponse = if event.operation == PROPOSE {
+            let proposal: ProposeMemoryResponse =
+                decode(&receipt.response_bytes, "source-aware proposal response")?;
+            intent
+                .group
+                .as_ref()
+                .ok_or_else(|| integrity("proposal group absent"))?
+                .validate_proposal_response(&proposal, &intent)?;
+            proposal.mutation
+        } else {
+            decode(&receipt.response_bytes, "source-aware write response")?
+        };
         if receipt.schema_version != SCHEMA_VERSION
             || receipt.operation != event.operation
             || receipt.request_digest != event.request_digest
@@ -72,6 +89,10 @@ impl NativeService {
         budget
             .charge(1, encode(&intent)?.len() as u64)
             .map_err(raw_index::budget_error)?;
+        if intent.group.is_some() {
+            self.verified_record_group(snapshot, event, &intent, budget)?;
+            return Ok(intent);
+        }
         let control = &intent.origins[0];
         let reference = &intent.records[0];
         let bytes = snapshot
@@ -160,7 +181,7 @@ impl NativeService {
                 .ok_or_else(|| integrity("record birth event absent"))?,
             "record birth event",
         )?;
-        if event.operation == PUBLISH
+        if is_source_write(&event.operation)
             && !self
                 .record_write_intent(snapshot, &event)?
                 .origins
@@ -186,7 +207,7 @@ impl NativeService {
             if let Some(applied) = &event.accepted_record_sources {
                 prefixes.insert(event.workspace_digest.clone(), applied.through.clone());
             }
-            if event.operation == PUBLISH {
+            if is_source_write(&event.operation) {
                 let intent = self.verified_record_write_intent(snapshot, &event, &mut budget)?;
                 expected.insert(intent_key(event.global_commit), encode(&intent)?);
                 intents.insert(event.global_commit, intent);
@@ -209,11 +230,7 @@ impl NativeService {
             let intent = intents
                 .get(&publication.write_global_commit)
                 .ok_or_else(|| integrity("record completion precedes its accepted intent"))?;
-            let scopes: BTreeSet<String> = intent
-                .origins
-                .iter()
-                .flat_map(|control| control.scopes.iter().cloned())
-                .collect();
+            let scopes = intent.scopes();
             if self.record_write_completion(snapshot, &write)?.as_ref() != Some(&event)
                 || prefixes.get(&event.workspace_digest) != Some(&publication.through)
                 || publication.scopes != scopes
@@ -247,6 +264,8 @@ impl NativeService {
             .scan_prefix(&self.keyspaces.continuous, b"record-write/")
             .map_err(storage_error)?;
         if manifest.features.contains(WRITE_FEATURE) == intents.is_empty()
+            || manifest.features.contains(GROUP_FEATURE)
+                != intents.values().any(|intent| intent.group.is_some())
             || actual.len() != expected.len()
             || actual
                 .iter()
@@ -268,7 +287,7 @@ impl NativeService {
             .map_err(storage_error)?
         {
             let receipt: StoredIdempotency = decode(&row.value, "record write retry closure")?;
-            if receipt.operation == PUBLISH && !receipt_keys.contains(&row.key) {
+            if is_source_write(&receipt.operation) && !receipt_keys.contains(&row.key) {
                 return Err(integrity("orphaned source-aware write retry receipt"));
             }
         }

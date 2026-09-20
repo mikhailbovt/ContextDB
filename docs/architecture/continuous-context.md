@@ -154,8 +154,17 @@ includes the accepted workspace commit; exact retry or `resume_record_source_wri
 finishes that same operation without its original request body. Current source
 revocation still denies disclosure. Restored archives cannot reuse retained record
 identities, and administrative repair cannot replace accepted input declarations.
-Candidate, correction and retraction writers with complete copied-record origins
-and automatic pending-work discovery remain unfinished.
+`propose_memory_from_sources` and `retract_from_sources` extend this handoff to
+complete candidate/link and retraction groups. Copied revisions retain predecessor
+origins plus new captured inputs; independent new candidates retain their own
+inputs. Closed revisions keep their original birth bindings. New and historical
+reads wait for the entire group to complete, even if some origins have transferred.
+Candidates remain quarantined. Structural writes reject an unavailable edge in
+the affected access domain instead of silently omitting it; source authorization
+precedes body decoding. Groups retain at most 1,024 mutations / 16 MiB, with 1..64
+origins per new revision; an unrepresentable union rejects the whole publication.
+Source-aware correction with copied hierarchy edges, automatic pending-work
+discovery and origin aggregation for longer revision chains remain unfinished.
 Legacy workspaces retain their existing behavior. Version 1/2 authorities require
 explicit migration before accepting origins; this API does not perform migration
 or establish that a host's declaration is semantically complete.

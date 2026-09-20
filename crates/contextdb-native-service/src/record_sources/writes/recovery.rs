@@ -17,7 +17,7 @@ impl NativeService {
         &self,
         context: &AuthenticatedRequestContext,
         commit_seq: u64,
-        response: Option<&MutationResponse>,
+        response: Option<(&str, &str)>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeRecordWriteReceipt> {
         require_capability(context, Capability::Admin)?;
@@ -48,16 +48,12 @@ impl NativeService {
         {
             return Err(integrity("record write commit mapping differs"));
         }
-        if let Some(response) = response {
-            let mut original = response.clone();
-            original.replayed = false;
-            if event.request_digest != original.request_digest
-                || event.response_digest != canonical_digest(&original)?
-            {
-                return Err(integrity(
-                    "record write retry receipt differs from its accepted event",
-                ));
-            }
+        if let Some((request_digest, response_digest)) = response
+            && (event.request_digest != request_digest || event.response_digest != response_digest)
+        {
+            return Err(integrity(
+                "record write retry receipt differs from its accepted event",
+            ));
         }
         let intent = self.verified_record_write_intent(&snapshot, &event, budget)?;
         let accepted_world = self.workspace_state(&snapshot, &context.request.workspace_id)?;
@@ -116,11 +112,7 @@ impl NativeService {
                 .digest
                 .clone(),
             through: through.clone(),
-            scopes: intent
-                .origins
-                .iter()
-                .flat_map(|control| control.scopes.iter().cloned())
-                .collect(),
+            scopes: intent.scopes(),
         };
         #[cfg(test)]
         BEFORE_COMPLETION.with(|hook| {
@@ -198,7 +190,7 @@ impl NativeService {
         )?;
         if event.schema_version != SCHEMA_VERSION
             || event.global_commit != global
-            || event.operation != PUBLISH
+            || !is_source_write(&event.operation)
             || event.event_digest != event_digest(&event)?
             || event.accepted_record_write.is_none()
         {
@@ -217,7 +209,11 @@ impl NativeService {
             .suppression
             .as_ref()
             .ok_or_else(|| integrity("record source authority absent"))?;
-        for control in &intent.origins {
+        for control in intent
+            .origins
+            .iter()
+            .chain(intent.group.iter().flat_map(|group| group.previous.iter()))
+        {
             budget
                 .charge(1, encode(control)?.len() as u64)
                 .map_err(raw_index::budget_error)?;
@@ -277,12 +273,7 @@ impl NativeService {
                 .map(|reference| &reference.digest)
                 != Some(&marker.publication.intent_digest)
             || event.accepted_record_write_completion.as_ref() != Some(&marker.publication)
-            || marker.publication.scopes
-                != intent
-                    .origins
-                    .iter()
-                    .flat_map(|control| control.scopes.iter().cloned())
-                    .collect()
+            || marker.publication.scopes != intent.scopes()
             || event.event_digest != event_digest(&event)?
             || event.response_digest != canonical_digest(&marker.publication)?
             || event.request_digest
@@ -324,7 +315,7 @@ impl NativeService {
                     .ok_or_else(|| integrity("record acceptance event absent"))?,
                 "record acceptance event",
             )?;
-            if event.operation == PUBLISH {
+            if is_source_write(&event.operation) {
                 let write = self.record_write_event(snapshot, global)?;
                 if self.record_write_completion(snapshot, &write)?.is_none() {
                     return Err(pending("accepted record source handoff is incomplete"));

@@ -4,6 +4,7 @@
 use super::*;
 use contextdb_core::ContentDigest;
 
+mod groups;
 mod recovery;
 #[cfg(test)]
 mod tests;
@@ -12,7 +13,38 @@ mod verify;
 pub(crate) const WRITE_FEATURE: &str = "continuous-record-source-writes-v1";
 const COMPLETE: &str = "record_write_complete";
 const PUBLISH: &str = "publish_memory_from_sources";
+pub(crate) const PROPOSE: &str = "propose_memory_from_sources";
+pub(crate) const RETRACT: &str = "retract_from_sources";
+pub(crate) const GROUP_FEATURE: &str = "continuous-record-source-groups-v1";
 const MAX_INTENT_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) type Inputs<'a> = (&'a BTreeSet<ObservationId>, &'a mut QueryBudget);
+
+pub(crate) fn is_source_write(operation: &str) -> bool {
+    matches!(operation, PUBLISH | PROPOSE | RETRACT)
+}
+
+pub(crate) trait WriteResponse: Serialize + DeserializeOwned + Clone {
+    fn mutation(&self) -> &MutationResponse;
+    fn mutation_mut(&mut self) -> &mut MutationResponse;
+}
+
+impl WriteResponse for MutationResponse {
+    fn mutation(&self) -> &MutationResponse {
+        self
+    }
+    fn mutation_mut(&mut self) -> &mut MutationResponse {
+        self
+    }
+}
+
+impl WriteResponse for ProposeMemoryResponse {
+    fn mutation(&self) -> &MutationResponse {
+        &self.mutation
+    }
+    fn mutation_mut(&mut self) -> &mut MutationResponse {
+        &mut self.mutation
+    }
+}
 
 /// A completed handoff of one accepted mutation group to retained provenance.
 /// This does not override current source permissions or certify deletion.
@@ -40,6 +72,22 @@ struct RecordWriteIntent {
     idempotency_key: Vec<u8>,
     records: Vec<record_journal::RecordMutationRef>,
     origins: Vec<RecordSourceControl>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    group: Option<groups::RecordWriteGroup>,
+}
+
+impl RecordWriteIntent {
+    fn scopes(&self) -> BTreeSet<String> {
+        self.group.as_ref().map_or_else(
+            || {
+                self.origins
+                    .iter()
+                    .flat_map(|control| control.scopes.iter().cloned())
+                    .collect()
+            },
+            |group| group.scopes.clone(),
+        )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -79,25 +127,98 @@ impl NativeService {
         budget.check().map_err(raw_index::budget_error)?;
         let context = request.context.clone();
         let response = self.publish_explicit_memory_inner(request, Some((sources, budget)))?;
+        self.finish_source_write(&context, &response, budget)?;
+        Ok(response)
+    }
+
+    /// Atomically propose quarantined candidates and links, retaining the input
+    /// origins of copied superseded revisions. Requires trusted host Admin.
+    pub fn propose_memory_from_sources(
+        &self,
+        request: ProposeMemoryRequest,
+        sources: &BTreeSet<ObservationId>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<ProposeMemoryResponse> {
+        require_capability(&request.context, Capability::Admin)?;
+        budget.check().map_err(raw_index::budget_error)?;
+        let context = request.context.clone();
+        let response = self.propose_memory_atomic_inner(request, Some((sources, budget)))?;
+        self.finish_source_write(&context, &response, budget)?;
+        Ok(response)
+    }
+
+    /// Retract a record and its incident links as one source-aware group. The
+    /// new revision retains its old body origins; hard deletion is separate.
+    pub fn retract_from_sources(
+        &self,
+        request: ForgetRequest,
+        sources: &BTreeSet<ObservationId>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<MutationResponse> {
+        require_capability(&request.context, Capability::Admin)?;
+        budget.check().map_err(raw_index::budget_error)?;
+        let context = request.context.clone();
+        let response = self.retract_memory_inner(request, Some((sources, budget)))?;
+        self.finish_source_write(&context, &response, budget)?;
+        Ok(response)
+    }
+
+    fn finish_source_write<R: WriteResponse>(
+        &self,
+        context: &AuthenticatedRequestContext,
+        response: &R,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
         #[cfg(test)]
         after_native_sync();
+        let mut original = response.clone();
+        original.mutation_mut().replayed = false;
+        let digest = canonical_digest(&original)?;
+        let mutation = response.mutation();
         if let Err(mut error) = self.complete_record_source_write(
-            &context,
-            response.commit_seq,
-            Some(&response),
+            context,
+            mutation.commit_seq,
+            Some((&mutation.request_digest, &digest)),
             budget,
         ) {
             error.partial_result_refs = vec![format!(
                 "record-write:{}:{}",
                 digest_bytes(context.request.workspace_id.as_bytes()),
-                response.commit_seq
+                mutation.commit_seq
             )]
             .into_boxed_slice();
             error.safe_next_action =
                 Some("Retry the identical request or resume the accepted workspace commit.".into());
             return Err(error);
         }
-        Ok(response)
+        Ok(())
+    }
+
+    pub(crate) fn prepare_record_write_or_replay<R: WriteResponse>(
+        &self,
+        context: &AuthenticatedRequestContext,
+        operation: &'static str,
+        idempotency_key: &[u8],
+        request_digest: &str,
+        inputs: &mut Option<Inputs<'_>>,
+    ) -> ServiceResult<(Option<PreparedWrite>, Option<R>)> {
+        let Some((sources, budget)) = inputs.as_mut() else {
+            return Ok((None, None));
+        };
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        if let Some(mut replay) =
+            self.replay::<R, _>(&snapshot, idempotency_key, operation, request_digest)?
+        {
+            replay.mutation_mut().replayed = true;
+            return Ok((None, Some(replay)));
+        }
+        Ok((
+            Some(self.prepare_record_write(context, sources, budget)?),
+            None,
+        ))
     }
 
     pub(crate) fn prepare_record_write(
@@ -250,6 +371,7 @@ impl NativeService {
             request_digest: request.0.into(),
             idempotency_key: request.1.into(),
             records: self.accepted_record_mutations(tx, frame)?,
+            group: None,
             origins: vec![RecordSourceControl {
                 workspace: frame.workspace_digest.clone(),
                 record_digest: digest_bytes(record.document.id.as_bytes()),
@@ -292,7 +414,7 @@ impl NativeService {
         let bytes = snapshot
             .get(&self.keyspaces.continuous, &intent_key(frame.global_commit))
             .map_err(storage_error)?;
-        if operation != PUBLISH {
+        if !is_source_write(operation) {
             if bytes.is_some() {
                 return Err(integrity("unexpected record source intent"));
             }
@@ -305,8 +427,9 @@ impl NativeService {
             || intent.request_digest != request_digest
             || intent.idempotency_key != idempotency_key
             || intent.records != records
-            || intent.origins.len() != 1
-            || records.len() != 1
+            || (operation == PUBLISH
+                && (intent.origins.len() != 1 || records.len() != 1 || intent.group.is_some()))
+            || (operation != PUBLISH && intent.group.is_none())
             || bytes.len() > MAX_INTENT_BYTES
         {
             return Err(integrity(

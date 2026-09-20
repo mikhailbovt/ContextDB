@@ -126,13 +126,10 @@ impl NativeService {
                 return Err(integrity("record initialization accepted history differs"));
             }
             if !event.accepted_records.is_empty()
+                || writes::is_source_write(&event.operation)
                 || matches!(
                     event.operation.as_str(),
-                    "publish_memory"
-                        | "propose_memory"
-                        | "correct"
-                        | "retract"
-                        | "publish_memory_from_sources"
+                    "publish_memory" | "propose_memory" | "correct" | "retract"
                 )
             {
                 return Err(unsupported(

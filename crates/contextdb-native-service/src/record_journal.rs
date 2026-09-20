@@ -6,8 +6,8 @@ use super::*;
 
 pub(super) const RECORD_FEATURE: &str = "continuous-record-mutations-v1";
 const ACTIVATED: &[u8] = b"semantic/activated";
-const MAX_WRITES: usize = 1024;
-const MAX_BYTES: usize = 16 * 1024 * 1024;
+pub(super) const MAX_WRITES: usize = 1024;
+pub(super) const MAX_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -127,12 +127,8 @@ impl NativeService {
             let event: StoredEvent = decode(&entry.value, "record mutation journal")?;
             let writes_records = matches!(
                 event.operation.as_str(),
-                "publish_memory"
-                    | "propose_memory"
-                    | "correct"
-                    | "retract"
-                    | "publish_memory_from_sources"
-            );
+                "publish_memory" | "propose_memory" | "correct" | "retract"
+            ) || record_sources::writes::is_source_write(&event.operation);
             if !event.accepted_records.is_empty()
                 && (!writes_records || activated.is_none_or(|first| first > event.global_commit))
             {
