@@ -127,6 +127,16 @@ pub(super) struct RetirementState {
     uncertain: bool,
 }
 
+impl RetirementState {
+    pub(super) fn frontier(&self) -> Option<NativeKeyRetirementReceipt> {
+        self.frontier.clone()
+    }
+
+    pub(super) fn contains(&self, id: Uuid) -> bool {
+        self.keys.contains_key(&id)
+    }
+}
+
 impl NativeCustodyKeys {
     /// Read an immutable current-refusal acceptance from retained host custody.
     /// The full retirement journal remains verified; no key material is returned.
@@ -301,6 +311,12 @@ impl NativeCustodyKeys {
     pub(in crate::encryption) fn retirement_frontier(
         &self,
     ) -> contextdb_storage::Result<Option<NativeKeyRetirementReceipt>> {
+        Ok(self.current_retirements()?.frontier())
+    }
+
+    pub(super) fn current_retirements(
+        &self,
+    ) -> contextdb_storage::Result<RwLockReadGuard<'_, RetirementState>> {
         let state = self
             .retirement
             .read()
@@ -310,7 +326,7 @@ impl NativeCustodyKeys {
                 "key retirement outcome is uncertain; reopen custody",
             ));
         }
-        Ok(state.frontier.clone())
+        Ok(state)
     }
 
     pub(in crate::encryption) fn require_retirement_frontier(
@@ -331,16 +347,8 @@ impl NativeCustodyKeys {
         &self,
         id: Uuid,
     ) -> contextdb_storage::Result<RwLockReadGuard<'_, RetirementState>> {
-        let state = self
-            .retirement
-            .read()
-            .map_err(|_| failure("key retirement state is poisoned"))?;
-        if state.uncertain {
-            return Err(failure(
-                "key retirement outcome is uncertain; reopen custody",
-            ));
-        }
-        if state.keys.contains_key(&id) {
+        let state = self.current_retirements()?;
+        if state.contains(id) {
             return Err(failure("ciphertext key is retired"));
         }
         Ok(state)
@@ -449,6 +457,14 @@ impl NativeCustodyKeys {
     ) -> ServiceResult<()> {
         let value = &event.value;
         value.receipt.validate(self).map_err(storage_error)?;
+        if let Some(retired) = &value.evidence.backups.retirements {
+            retired.validate(self).map_err(storage_error)?;
+            if event.previous.as_ref() != Some(retired) {
+                return Err(integrity(
+                    "key retirement evidence has a different predecessor",
+                ));
+            }
+        }
         for digest in [
             &value.workspace_digest,
             &value.request.digest,

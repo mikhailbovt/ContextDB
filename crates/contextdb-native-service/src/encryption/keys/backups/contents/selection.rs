@@ -7,8 +7,9 @@ use super::*;
 #[cfg(test)]
 mod tests;
 
-/// Archive histories at one custody snapshot. Backfill and replacement acceptance
-/// change this frontier even when no new archive is issued.
+/// Archive histories and current refusal at one custody inspection. Backfill,
+/// replacement acceptance and key retirement change this frontier even when no
+/// new archive is issued.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeBackupFrontier {
@@ -26,6 +27,9 @@ pub struct NativeBackupFrontier {
     /// Latest retained archive-byte progress, including incomplete artifacts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<NativeBackupArtifactReceipt>,
+    /// Current key refusal at this inspection, independent of archive issuance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retirements: Option<NativeKeyRetirementReceipt>,
 }
 
 /// One issued archive's relation to the selected key allocations. An empty copy
@@ -44,6 +48,11 @@ pub struct NativeBackupKeyArchive {
     /// Actual independently retained archive bytes; absence is not availability.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact: Option<NativeBackupArtifactProgress>,
+    /// Every key in complete membership is currently usable, including unselected
+    /// data. False for unknown membership or any retired key. This is bound to the
+    /// enclosing refusal frontier, not a guarantee about physical archive copies.
+    #[serde(default)]
+    pub keys_available: bool,
 }
 
 /// Complete issued-archive coverage at one immutable frontier. No archive bytes,
@@ -58,7 +67,11 @@ pub struct NativeBackupKeyInventory {
 }
 
 impl Head {
-    fn frontier(&self, authority_id: Uuid) -> NativeBackupFrontier {
+    fn frontier(
+        &self,
+        authority_id: Uuid,
+        retirements: Option<NativeKeyRetirementReceipt>,
+    ) -> NativeBackupFrontier {
         NativeBackupFrontier {
             authority_id,
             issued_sequence: self.sequence,
@@ -66,6 +79,7 @@ impl Head {
             contents: self.contents.clone(),
             replacements: self.replacements.clone(),
             artifacts: self.artifacts.clone(),
+            retirements,
         }
     }
 }
@@ -150,6 +164,9 @@ impl NativeCustodyKeys {
         request: Option<(&str, &crate::NativeRemovalRequestReceipt)>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<(NativeBackupKeyInventory, Vec<NativeBackupReplacement>)> {
+        // Keep the classification coherent while walking all memberships. The
+        // caller rechecks this frontier under custody publication before use.
+        let retired = self.current_retirements().map_err(storage_error)?;
         let head = self.backup_head(snapshot).map_err(storage_error)?;
         budget
             .charge(1, encode(&head).map_err(storage_error)?.len() as u64)
@@ -168,6 +185,7 @@ impl NativeCustodyKeys {
                     contents: None,
                     copies: Vec::new(),
                     artifact: None,
+                    keys_available: false,
                 },
             );
             Ok(())
@@ -182,6 +200,7 @@ impl NativeCustodyKeys {
             let inventory = event.inventory();
             reserve(&mut report_bytes, &inventory, budget)?;
             archive.contents = Some(inventory);
+            archive.keys_available = true;
             expected.insert(event_key(event.sequence));
             expected.insert(index_key(&event.registration.archive_digest));
             let mut previous = contents_genesis(&event.registration).map_err(storage_error)?;
@@ -195,6 +214,7 @@ impl NativeCustodyKeys {
                     if !addresses.insert(copy.address_digest.clone()) {
                         return Err(integrity("archive key inventory repeats an address"));
                     }
+                    archive.keys_available &= !retired.contains(copy.version.key_id);
                     if let Some(address) = selected.get(&copy.version.key_id) {
                         if address != &copy.address_digest {
                             return Err(integrity(
@@ -267,7 +287,7 @@ impl NativeCustodyKeys {
             ));
         }
         let report = NativeBackupKeyInventory {
-            frontier: head.frontier(self.authority_id()),
+            frontier: head.frontier(self.authority_id(), retired.frontier()),
             archives: archives.into_values().collect(),
         };
         crate::retention::keys::charge_report(&report, budget)?;
@@ -275,7 +295,7 @@ impl NativeCustodyKeys {
     }
 
     // Caller holds the same custody publication guard as native and archive
-    // writers. Rechecking only issuance would miss concurrent legacy backfill.
+    // writers. Issuance alone misses backfill, byte retention and key retirement.
     pub(crate) fn require_backup_frontier(
         &self,
         expected: &NativeBackupFrontier,
@@ -290,7 +310,8 @@ impl NativeCustodyKeys {
         budget
             .charge(1, encode(&head).map_err(storage_error)?.len() as u64)
             .map_err(budget_error)?;
-        if head.frontier(self.authority_id()) != *expected {
+        let retired = self.retirement_frontier().map_err(storage_error)?;
+        if head.frontier(self.authority_id(), retired) != *expected {
             return Err(ServiceError::new(
                 ErrorCode::IndexTooStale,
                 "archive custody frontier changed; restart inventory",

@@ -320,6 +320,9 @@ limited to their selected family and current frontiers; they grant no key retire
 or deletion-completion authority.
 Successive requests can share a path only after each exact request is independently
 verified within the same workspace and removal authority.
+Routing now skips complete targets with retired keys and can follow later readable
+replacements. Reports bind the current refusal frontier, so retirement alone also
+invalidates an in-flight archive inventory.
 Request-bound replacements now preserve the original journal prefix, receipts,
 payload manifests and independent bodies under full native replay. Actual target
 bytes, membership and independent provenance are issued with one custody Sync.

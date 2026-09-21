@@ -44,7 +44,8 @@ pub enum NativeBackupPreservation {
         /// Exact clean target and its preservation provenance.
         path: NativeBackupPreservationPath,
     },
-    /// A proven clean target has independently retained, fully verified bytes.
+    /// A proven clean target has independently retained, fully verified bytes and
+    /// currently usable keys at the enclosing archive/refusal frontier.
     Preserved {
         /// Exact clean target and its preservation provenance.
         path: NativeBackupPreservationPath,
@@ -138,7 +139,7 @@ pub(crate) fn inventory(
         budget.charge(1, 0).map_err(budget_error)?;
         let sequence = archive.registration.sequence;
         let mut route = Routes::default();
-        if statuses[&sequence] == NativeBackupPreservation::NotRequired {
+        if statuses[&sequence] == NativeBackupPreservation::NotRequired && archive.keys_available {
             route.clean = Some(Route {
                 target: sequence,
                 next: None,

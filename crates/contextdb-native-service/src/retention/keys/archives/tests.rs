@@ -2,6 +2,73 @@ use super::*;
 use crate::retention::keys::witness::tests::{budget, fixture};
 
 #[test]
+fn removal_archive_inventory_retries_when_only_current_key_refusal_changes() {
+    let f = fixture();
+    let selection = NativeRemovalKeySelection::Originals;
+    f.native
+        .prepare_original_removal_sources(
+            &f.input.context,
+            &f.removal,
+            &f.removal.roots,
+            &mut budget(),
+        )
+        .expect("prepare");
+    f.native
+        .maintain_custody(&f.input.context, 256, &mut budget())
+        .expect("custody");
+    f.native
+        .prune_original_sources(
+            &f.input.context,
+            &f.removal,
+            &f.removal.roots,
+            &mut budget(),
+        )
+        .expect("prune");
+    let before = f
+        .native
+        .read_removal_backup_inventory(&f.input.context, &f.removal, &selection, &mut budget())
+        .expect("before retirement");
+    let ids = before
+        .dispositions
+        .values()
+        .flatten()
+        .map(|key| key.allocation.key_id)
+        .collect();
+    let native = f.native.clone();
+    let context = f.input.context.clone();
+    let removal = f.removal.clone();
+    BEFORE_ARCHIVE_FENCE.with(|hook| {
+        hook.replace(Some(Box::new(move || {
+            native
+                .retire_removal_keys(
+                    &context,
+                    &removal,
+                    &NativeRemovalKeySelection::Originals,
+                    &ids,
+                    &mut budget(),
+                )
+                .expect("concurrent retirement without allocation, native-use or archive changes");
+        })))
+    });
+    assert_eq!(
+        f.native
+            .read_removal_backup_inventory(&f.input.context, &f.removal, &selection, &mut budget())
+            .expect_err("refusal changed during report construction")
+            .code,
+        ErrorCode::IndexTooStale
+    );
+    let current = f
+        .native
+        .read_removal_backup_inventory(&f.input.context, &f.removal, &selection, &mut budget())
+        .expect("retry");
+    assert_eq!(current.key_inventory, before.key_inventory);
+    assert!(current.backups.frontier.retirements.is_some());
+    let mut archive_only = current.backups;
+    archive_only.frontier.retirements = None;
+    assert_eq!(archive_only, before.backups);
+}
+
+#[test]
 fn removal_archive_join_preserves_old_copies_after_prune_restore_and_authority_reopen() {
     let f = fixture();
     let selection = NativeRemovalKeySelection::Originals;

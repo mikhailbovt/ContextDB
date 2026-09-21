@@ -51,7 +51,8 @@ and release verifier—not the presence of an API name—determine completion.
   digest. A bounded coordinator cleans exact archives in separate restored owners;
   inventories expose unknown membership, mixed-value composition and missing
   preservation paths or artifacts for each selected family. Each path verifies
-  every exact removal request and ends at completely retained clean bytes.
+  every exact removal request and ends at completely retained clean bytes with
+  currently usable keys. These reports require retry after concurrent key retirement.
   Owned-key retirement rejects unresolved native/archive obligations and denies
   decryption through old snapshots or restored archives. Its independent journal
   survives native restore; uncertain Sync closes key use until authority recovery.

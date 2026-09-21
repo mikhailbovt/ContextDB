@@ -515,11 +515,16 @@ under the same archive checks. It classifies exact archived versions using retai
 value commitments, including versions without native-use observations. Independent
 mutations, replay controls, selected data and unknown compositions remain distinct.
 The final custody fence also checks the independent classification journal.
+Both archive inventories bind the current key-refusal frontier. Complete membership
+reports whether every key remains usable, including keys outside the selected
+removal family. Unknown membership never establishes key availability.
 
 Both reports include preservation for every issued archive. A path follows verified
 replacement proofs within this workspace and removal authority. Each edge's exact
 request is independently verified, allowing successive authorized removals to share
-a path. The target must be free of selected removal values. `Preserved` requires
+a path. The target must be free of selected removal values and have usable keys.
+Routing follows later authorized replacements when an earlier target has a retired
+key, even if its bytes remain completely retained. `Preserved` also requires
 complete, verified artifact bytes. Unknown membership or composition, absent paths
 and incomplete artifacts remain separate obligations. Native ancestry determines
 path order; issuance order and a newer clean archive alone prove no preservation.

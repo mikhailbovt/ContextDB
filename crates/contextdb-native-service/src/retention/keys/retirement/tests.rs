@@ -456,6 +456,57 @@ fn sequential_retirements_preserve_archives_through_separately_authorized_remova
         )
         .expect("second refusal without decrypting the first source");
     assert_eq!(accepted.receipt.sequence, first.receipt.sequence + 1);
+    let earlier = f
+        .native
+        .read_removal_backup_inventory(
+            &f.input.context,
+            &f.removal,
+            &NativeRemovalKeySelection::Originals,
+            &mut budget(),
+        )
+        .expect("reassess the earlier source after a different key retirement");
+    let middle_archive = &earlier.backups.archives[1];
+    assert!(
+        middle_archive
+            .artifact
+            .as_ref()
+            .expect("complete bytes remain")
+            .complete
+    );
+    assert!(
+        !middle_archive.keys_available,
+        "unselected second source key is now retired"
+    );
+    assert!(earlier.backups.archives[2].keys_available);
+    assert_eq!(
+        earlier.backups.frontier.retirements,
+        Some(accepted.receipt.clone())
+    );
+    let NativeBackupPreservation::Preserved { path, artifact } = &earlier.preservation[&1] else {
+        panic!("earlier source must retain a readable route");
+    };
+    assert_eq!(
+        path.target_sequence,
+        clean.replacement.target.registration.sequence
+    );
+    assert_eq!(
+        path.replacements,
+        [
+            middle.replacement.receipt.clone(),
+            clean.replacement.receipt.clone()
+        ]
+    );
+    let available = f
+        .native
+        .read_retained_removal_backup(
+            &f.input.context,
+            &second,
+            &clean.replacement.receipt,
+            artifact,
+            &mut budget(),
+        )
+        .expect("route ends at actual readable archive bytes");
+    assert_eq!(available, clean.backup);
     let view = f
         .native
         .engine
