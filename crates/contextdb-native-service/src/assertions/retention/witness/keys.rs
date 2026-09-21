@@ -43,6 +43,10 @@ pub struct NativeAssertionKeyInventory {
     pub allocation_revision: u64,
     /// Commitment at that revision.
     pub allocation_digest: Option<String>,
+    /// Tracked history for these selected addresses. None supplies no use evidence
+    /// (legacy profile or older serialized report). This does not retire keys.
+    #[serde(default)]
+    pub native_use: Option<crate::NativeKeyUseInventory>,
     /// All allocated keys of original and rewritten shared batch addresses.
     pub batches: BTreeMap<NativeAssertionBatchKind, Vec<NativeKeyAllocation>>,
     /// Selected source mutation ordinals, their body/label families and all keys.
@@ -149,6 +153,7 @@ impl NativeService {
             custody_authority_id: allocations.authority_id,
             allocation_revision: allocations.revision,
             allocation_digest: allocations.digest,
+            native_use: allocations.native_use,
             batches,
             mutations,
         };

@@ -21,6 +21,10 @@ pub struct NativeRawIndexKeyInventory {
     pub allocation_revision: u64,
     /// Commitment at that allocation frontier.
     pub allocation_digest: Option<String>,
+    /// Tracked history for these selected addresses. None supplies no use evidence
+    /// (legacy profile or older serialized report). This does not retire keys.
+    #[serde(default)]
+    pub native_use: Option<crate::NativeKeyUseInventory>,
     /// The observed snapshot; it need not match the currently restored native store.
     pub snapshot: NativeRawIndexSnapshot,
     /// Terminal receipt anchoring every inspected page, including shared/unknown rows.
@@ -83,6 +87,7 @@ impl NativeService {
             custody_authority_id: selected.authority_id,
             allocation_revision: selected.revision,
             allocation_digest: selected.digest,
+            native_use: selected.native_use,
             snapshot,
             inventory: inventory.clone(),
             inspected_pages,

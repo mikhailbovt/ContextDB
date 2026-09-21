@@ -63,6 +63,21 @@ fn accepted_removal_closes_disclosure_across_reopen_and_old_encrypted_restore() 
         BTreeSet::from([input.event.event_id, child.event.event_id])
     );
     assert!(key_inventory.sources.values().all(|keys| keys.len() == 1));
+    let usage = key_inventory.native_use.as_ref().expect("v4 source use");
+    assert_eq!(usage.addresses.len(), 2);
+    for key in key_inventory.sources.values().flatten() {
+        let history = &usage.addresses[&key.address_digest];
+        assert_eq!(history.transitions.len(), 1);
+        assert_eq!(
+            history.transitions[0]
+                .after
+                .as_ref()
+                .expect("accepted original")
+                .key_id,
+            key.key_id
+        );
+        assert_eq!(history.acknowledged.len(), 1);
+    }
     assert!(
         !key_inventory
             .sources
@@ -120,12 +135,25 @@ fn accepted_removal_closes_disclosure_across_reopen_and_old_encrypted_restore() 
         })
         .expect("install archive");
     for service in [&reopened, &restored] {
+        let current = service
+            .read_original_key_inventory(&input.context, &receipt, &mut budget())
+            .expect("primary keys survive older restore, including an absent later descendant");
+        assert_eq!(current.sources, key_inventory.sources);
+        let usage = current
+            .native_use
+            .as_ref()
+            .expect("retained tracked copies");
+        let original_address = &current.sources[&input.event.event_id][0].address_digest;
+        let child_address = &current.sources[&child.event.event_id][0].address_digest;
         assert_eq!(
-            service
-                .read_original_key_inventory(&input.context, &receipt, &mut budget())
-                .expect("primary keys survive older restore, including an absent later descendant")
-                .sources,
-            key_inventory.sources
+            usage.addresses[original_address].acknowledged.len(),
+            2,
+            "original was also imported into the older replica"
+        );
+        assert_eq!(
+            usage.addresses[child_address].acknowledged.len(),
+            1,
+            "later descendant remains only in the newer instance"
         );
         let inventory = service
             .read_original_removal_inventory(&input.context, &receipt, &mut budget())

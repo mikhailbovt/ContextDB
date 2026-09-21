@@ -10,8 +10,9 @@ pub(crate) mod tests;
 
 pub use keys::{
     CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
-    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyUseCatalogPage, NativeKeyUseChange,
-    NativeKeyUseChangesPage, NativeKeyUseOutcome, NativeKeyUseReceipt, NativeKeyUseTransaction,
+    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyUseAddressInventory,
+    NativeKeyUseCatalogPage, NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory,
+    NativeKeyUseOutcome, NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition,
     NativeKeyUseVersion,
 };
 pub(super) use storage::{NativeSnapshot, NativeStorage};

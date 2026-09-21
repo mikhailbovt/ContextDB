@@ -314,8 +314,20 @@ native-use growth invalidates the cursor, while allocation-only changes do not.
 and distinguishes its pending, committed or aborted outcome. These reads check
 their own pages and bindings; full authority-open verification also replays each
 instance's before/after history and closes its state and outcome indexes. This
-history identifies native use; it does not assign source ownership, cover legacy
-unobserved copies, count external copies or authorize key disablement.
+history alone does not assign source ownership, cover legacy unobserved copies,
+count external copies or authorize key disablement.
+
+Primary, payload, record, assertion and raw key inventories now attach native-use
+history to the addresses selected by their retained request or ownership witness.
+The join runs the complete history/index verifier under the caller's shared budget
+and returns at most 65,536 transitions and 32 MiB. Both allocation and use frontiers
+must remain unchanged. Each address retains exact before/after versions, outcomes
+and the last acknowledged value per registered instance. Pending and aborted
+attempts remain distinct; a missing tracked use does not prove external absence.
+Raw observations also match the committed ciphertext and decoded-value digest.
+Version 3 reports return `native_use: null`; older serialized reports also lack
+this evidence. Shared batches can still contain
+independently needed versions; a source-bound report is not a retirement witness.
 
 `key_catalog_page` enumerates at most 256 accepted descriptors with a shared
 work/byte/time budget and an authenticated continuation. Pages bind the authority,
@@ -336,8 +348,9 @@ excluded. `read_record_key_inventory` uses an independent revision witness to
 identify its historical primary, accepted birth and optional closure keys; Admin
 and all other stored access labels remain required for non-retrievable revisions.
 Each complete scan admits at most 65,536 selected allocations and 32 MiB of output.
-These reports do not prove native use or physical absence, cover all copy classes,
-retire keys or reopen disclosure.
+Their native-use attachment covers tracked versions at selected addresses; these
+reports do not establish physical absence, cover all copy classes, retire keys or
+reopen disclosure.
 
 `prepare_assertion_removal` verifies a mixed semantic batch and retains its source
 ownership and commitments in the version 3 removal authority, without values,
@@ -395,8 +408,9 @@ pages and unallocated current-authority keys reject the whole report. Selected
 addresses, allocations, ciphertexts and pages each have a 65,536-entry cap; output
 is limited to 32 MiB. Its receipt preserves shared/unknown rows and reclaimed
 prefixes in the inspected chain. Completion means that this retained snapshot was
-scanned; it does not establish expected projection coverage, complete native-use
-history, absence of unobserved copies, key disablement or erasure.
+scanned; the separate native-use attachment verifies tracked versions at its
+selected addresses. Neither establishes expected projection coverage, absence of
+unobserved copies, key disablement or erasure.
 
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never

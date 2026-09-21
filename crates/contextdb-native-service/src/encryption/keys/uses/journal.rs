@@ -1,5 +1,10 @@
 use super::*;
 
+pub(super) enum UseVisit<'a> {
+    Change(&'a PendingUse, &'a NativeKeyUseChange),
+    Outcome(&'a PendingUse, bool, &'a UseCheckpoint),
+}
+
 impl NativeCustodyKeys {
     pub(super) fn use_head<S: ReadSnapshot>(
         &self,
@@ -313,6 +318,14 @@ impl NativeCustodyKeys {
         &self,
         snapshot: &S,
     ) -> contextdb_storage::Result<()> {
+        self.visit_native_use(snapshot, |_| Ok(()))
+    }
+
+    pub(super) fn visit_native_use<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        mut visit: impl FnMut(UseVisit<'_>) -> contextdb_storage::Result<()>,
+    ) -> contextdb_storage::Result<()> {
         let head = self.use_head(snapshot)?;
         let mut previous = UseCheckpoint::default();
         let mut states: BTreeMap<Uuid, InstanceState> = BTreeMap::new();
@@ -389,13 +402,16 @@ impl NativeCustodyKeys {
                         checkpoint: event.checkpoint.clone(),
                     };
                     self.visit_use_changes(snapshot, &pending, |change| {
-                        if copies.get(&(instance, change.address_digest)).cloned() != change.before
+                        if copies
+                            .get(&(instance, change.address_digest.clone()))
+                            .cloned()
+                            != change.before
                         {
                             return Err(failure(
                                 "native key-use preimage differs from accepted instance history",
                             ));
                         }
-                        Ok(())
+                        visit(UseVisit::Change(&pending, &change))
                     })?;
                     state.pending = Some(pending);
                     advance_state(state, &event.checkpoint)?;
@@ -441,6 +457,7 @@ impl NativeCustodyKeys {
                         })?;
                         state.marker = pending.expected()?;
                     }
+                    visit(UseVisit::Outcome(&pending, committed, &event.checkpoint))?;
                     advance_state(state, &event.checkpoint)?;
                     references.insert(
                         instance_key(instance, state.revision),

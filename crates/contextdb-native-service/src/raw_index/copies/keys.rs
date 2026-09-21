@@ -33,6 +33,10 @@ pub struct NativeRawKeyInventory {
     pub allocation_revision: u64,
     /// Allocation journal commitment at that revision.
     pub allocation_digest: Option<String>,
+    /// Tracked history for these selected addresses. None supplies no use evidence
+    /// (legacy profile or older serialized report). This does not retire keys.
+    #[serde(default)]
+    pub native_use: Option<crate::NativeKeyUseInventory>,
     /// Complete retained observation journal frontier examined.
     pub observation_sequence: u64,
     /// Commitment to that retained frontier.
@@ -94,6 +98,7 @@ impl NativeService {
             custody_authority_id: selected.authority_id,
             allocation_revision: selected.revision,
             allocation_digest: selected.digest,
+            native_use: selected.native_use,
             observation_sequence: frontier.sequence,
             observation_digest: frontier.digest.clone(),
             sources: selected.sources,
@@ -107,7 +112,7 @@ impl NativeService {
 
 // Shared source/address/version selection for reclamation and live observations.
 type RawKeyOwner = (ObservationId, String);
-type ObservedVersions = BTreeMap<(Uuid, Uuid, String), NativeRawValueVersion>;
+type ObservedVersions = BTreeMap<(Uuid, Uuid, String), (NativeRawValueVersion, String)>;
 
 pub(in crate::raw_index) struct RawKeyFamilies {
     addresses: BTreeMap<String, RawKeyOwner>,
@@ -117,6 +122,7 @@ pub(in crate::raw_index) struct RawKeyFamilies {
 }
 
 pub(in crate::raw_index) struct RawFamilySelection {
+    pub native_use: Option<crate::NativeKeyUseInventory>,
     pub authority_id: Uuid,
     pub revision: u64,
     pub digest: Option<String>,
@@ -158,20 +164,23 @@ impl RawKeyFamilies {
             return Err(exhausted("raw key inventory exceeds 65536 addresses"));
         }
         if let Some(version) = row.version {
-            if self
-                .observed
-                .entry(owner)
-                .or_default()
-                .insert(
-                    (
-                        version.authority_id,
-                        version.key_id,
-                        version.ciphertext_digest.clone(),
-                    ),
-                    version,
-                )
-                .is_none()
+            let previous = self.observed.entry(owner).or_default().insert(
+                (
+                    version.authority_id,
+                    version.key_id,
+                    version.ciphertext_digest.clone(),
+                ),
+                (version, row.value_digest.clone()),
+            );
+            if previous
+                .as_ref()
+                .is_some_and(|(_, digest)| *digest != row.value_digest)
             {
+                return Err(integrity(
+                    "repeated raw ciphertext observations disagree on their value",
+                ));
+            }
+            if previous.is_none() {
                 self.observed_count += 1;
             }
             if self.observed_count > 65_536 {
@@ -192,11 +201,44 @@ impl RawKeyFamilies {
         let mut observed = self.observed;
         let mut sources = self.sources;
         for ((source, address), allocations) in selected.owners {
-            let observed_versions: Vec<NativeRawValueVersion> = observed
+            let versions = observed
                 .remove(&(source, address.clone()))
-                .unwrap_or_default()
-                .into_values()
-                .collect();
+                .unwrap_or_default();
+            if let Some(usage) = &selected.native_use {
+                let history = usage
+                    .addresses
+                    .get(&address)
+                    .ok_or_else(|| integrity("observed raw address lost its native-use history"))?;
+                let mut committed = BTreeSet::new();
+                for change in &history.transitions {
+                    budget.charge(1, 0).map_err(budget_error)?;
+                    if change.transaction.outcome == crate::NativeKeyUseOutcome::Committed
+                        && let Some(after) = &change.after
+                    {
+                        committed.insert((
+                            after.key_id,
+                            after.ciphertext_digest.as_str(),
+                            after.value_digest.as_str(),
+                        ));
+                    }
+                }
+                for (version, value_digest) in versions.values() {
+                    budget.charge(1, 0).map_err(budget_error)?;
+                    if version.authority_id == selected.authority_id
+                        && !committed.contains(&(
+                            version.key_id,
+                            version.ciphertext_digest.as_str(),
+                            value_digest.as_str(),
+                        ))
+                    {
+                        return Err(integrity(
+                            "observed raw ciphertext differs from committed native use",
+                        ));
+                    }
+                }
+            }
+            let observed_versions: Vec<NativeRawValueVersion> =
+                versions.into_values().map(|(version, _)| version).collect();
             let allocated: BTreeSet<_> = allocations.iter().map(|key| key.key_id).collect();
             budget
                 .charge(observed_versions.len() as u64, 0)
@@ -226,10 +268,70 @@ impl RawKeyFamilies {
             ));
         }
         Ok(RawFamilySelection {
+            native_use: selected.native_use,
             authority_id: selected.authority_id,
             revision: selected.revision,
             digest: selected.digest,
             sources,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::raw_index::copies::tests::{budget, fixture, reclaim};
+
+    #[test]
+    fn raw_key_join_checks_ciphertext_and_value_against_committed_use() {
+        let f = fixture();
+        let receipt = reclaim(&f, 64).copies.expect("copy receipt");
+        let witness = f
+            .native
+            .read_raw_copy_witness(&f.first.context, &receipt, &mut budget())
+            .expect("retained observation");
+        let original = witness
+            .rows
+            .into_iter()
+            .find(|row| row.source == Some(f.first.event.event_id))
+            .expect("selected row");
+        for damage in ["none", "cipher", "value", "foreign"] {
+            let mut row = original.clone();
+            match damage {
+                "cipher" => {
+                    row.version.as_mut().expect("encrypted").ciphertext_digest = "0".repeat(64)
+                }
+                "value" => row.value_digest = "0".repeat(64),
+                "foreign" => {
+                    row.version.as_mut().expect("encrypted").authority_id = Uuid::from_u128(99)
+                }
+                _ => {}
+            }
+            let mut families = RawKeyFamilies::new(std::iter::once(f.first.event.event_id));
+            families.observe(row).expect("observation input");
+            let result = families.select(&f.native, &mut budget());
+            if matches!(damage, "cipher" | "value") {
+                assert!(
+                    result.is_err(),
+                    "allocated UUID alone must not validate {damage}"
+                );
+            } else {
+                let report = result.expect("exact use or explicit foreign obligation");
+                assert!(report.native_use.is_some());
+                assert_eq!(
+                    report.sources[&f.first.event.event_id][&original.address_digest]
+                        .observed_versions
+                        .len(),
+                    1
+                );
+            }
+        }
+        let mut families = RawKeyFamilies::new(std::iter::once(f.first.event.event_id));
+        families
+            .observe(original.clone())
+            .expect("first observation");
+        let mut contradictory = original;
+        contradictory.value_digest = "0".repeat(64);
+        assert!(families.observe(contradictory).is_err());
     }
 }

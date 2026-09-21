@@ -249,8 +249,10 @@ and restart recovery distinguish committed, aborted and still-pending attempts.
 Fresh restore instances preserve imported ciphertext IDs. Bounded journal and
 change pages expose this evidence; full open verification replays instance history.
 Actual process-crash and uncertain-Sync recovery preserve native sequences and
-data, while missing or replayed controls fail. Source ownership joins, legacy
-history, safe disablement and physical-copy closure remain open.
+data, while missing or replayed controls fail. Source-selected key reports join
+their ownership addresses to fully verified native-use transitions and per-instance
+acknowledged values, including raw ciphertext/value checks. Shared-version
+dispositions, legacy history, safe disablement and physical-copy closure remain open.
 Mixed assertion ownership is retained independently without source values or full
 envelopes. Its key inventory distinguishes shared batch versions from selected
 mutation bodies and labels through sequential cleanup, actual authority/native

@@ -34,6 +34,10 @@ pub struct NativeRecordKeyInventory {
     pub allocation_revision: u64,
     /// Authenticated commitment at that revision.
     pub allocation_digest: Option<String>,
+    /// Tracked history for these selected addresses. None supplies no use evidence
+    /// (legacy profile or older serialized report). This does not retire keys.
+    #[serde(default)]
+    pub native_use: Option<NativeKeyUseInventory>,
     /// Every expected body family and all accepted keys for its address.
     /// An empty allocation list does not prove native or physical absence.
     pub bodies: BTreeMap<NativeRecordBodyKind, Vec<NativeKeyAllocation>>,
@@ -94,6 +98,7 @@ impl NativeService {
             custody_authority_id: selected.authority_id,
             allocation_revision: selected.revision,
             allocation_digest: selected.digest,
+            native_use: selected.native_use,
             bodies: selected.owners,
         };
         retention::keys::charge_report(&report, budget)?;

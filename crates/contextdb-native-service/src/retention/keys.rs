@@ -11,6 +11,7 @@ pub(crate) struct KeyAllocationSelection<T> {
     pub revision: u64,
     pub digest: Option<String>,
     pub owners: BTreeMap<T, Vec<NativeKeyAllocation>>,
+    pub native_use: Option<NativeKeyUseInventory>,
 }
 
 pub(crate) fn charge_report<T: Serialize>(
@@ -45,6 +46,10 @@ pub struct NativePrimaryKeyInventory {
     pub allocation_revision: u64,
     /// Authenticated journal commitment at that allocation revision.
     pub allocation_digest: Option<String>,
+    /// Tracked history for these selected addresses. None supplies no use evidence
+    /// (legacy profile or older serialized report). This does not retire keys.
+    #[serde(default)]
+    pub native_use: Option<NativeKeyUseInventory>,
     /// Every retained source, including descendants, with all allocated keys for
     /// its primary-value address. Independent source addresses are excluded.
     pub sources: BTreeMap<ObservationId, Vec<NativeKeyAllocation>>,
@@ -90,6 +95,7 @@ impl NativeService {
             custody_authority_id: selected.authority_id,
             allocation_revision: selected.revision,
             allocation_digest: selected.digest,
+            native_use: selected.native_use,
             sources: selected.owners,
         };
         charge_report(&report, budget)?;
@@ -114,6 +120,10 @@ impl NativeService {
             .cloned()
             .map(|owner| (owner, Vec::new()))
             .collect();
+        let mut used_keys: BTreeMap<_, BTreeSet<_>> = addresses
+            .keys()
+            .map(|address| (address.clone(), BTreeSet::new()))
+            .collect();
         let mut cursor = None;
         let mut count = 0;
         let last = loop {
@@ -130,6 +140,10 @@ impl NativeService {
                         .get_mut(id)
                         .ok_or_else(|| integrity("key inventory owner is absent"))?
                         .push(entry.clone());
+                    used_keys
+                        .get_mut(&entry.address_digest)
+                        .ok_or_else(|| integrity("selected key address is absent"))?
+                        .insert(entry.key_id);
                     count += 1;
                 }
             }
@@ -138,11 +152,18 @@ impl NativeService {
             };
             cursor = Some(next);
         };
+        let native_use = keys.selected_native_use_inventory(
+            &used_keys,
+            last.revision,
+            last.revision_digest.as_deref(),
+            budget,
+        )?;
         Ok(KeyAllocationSelection {
             authority_id: last.authority_id,
             revision: last.revision,
             digest: last.revision_digest,
             owners,
+            native_use,
         })
     }
 }

@@ -115,6 +115,7 @@ fn assertion_witness_inventory_retains_mixed_copy_boundaries_through_cleanup_and
     assert_eq!(before.batches[&NativeAssertionBatchKind::Original].len(), 1);
     assert!(before.batches[&NativeAssertionBatchKind::Retained].is_empty());
     assert_eq!(before.mutations[&1].len(), 3);
+    assert!(before.native_use.is_some());
     assert!(before.mutations[&1].values().all(|keys| keys.len() == 1));
     let independent_address =
         crate::encryption::address(&f.native.keyspaces.continuous, &claim_key(f.independent));
@@ -125,6 +126,14 @@ fn assertion_witness_inventory_retains_mixed_copy_boundaries_through_cleanup_and
             .flat_map(|copies| copies.values())
             .flatten()
             .all(|key| key.address_digest != independent_address)
+    );
+    assert!(
+        !before
+            .native_use
+            .as_ref()
+            .expect("tracked use")
+            .addresses
+            .contains_key(&independent_address)
     );
     assert_eq!(retry(&f).expect("retry before pruning"), f.witness);
     prepare_sources(&f.native, &f.first, &f.removal);
@@ -173,6 +182,31 @@ fn assertion_witness_inventory_retains_mixed_copy_boundaries_through_cleanup_and
         assert_ne!(
             after.mutations[&1][&kind][0].key_id,
             after.mutations[&1][&kind][1].key_id
+        );
+        let family = &after.mutations[&1][&kind];
+        let history = &after
+            .native_use
+            .as_ref()
+            .expect("cleaned and historical use")
+            .addresses[&family[0].address_digest];
+        assert_eq!(history.transitions.len(), 2);
+        assert_eq!(
+            history.transitions[0]
+                .after
+                .as_ref()
+                .expect("old label")
+                .key_id,
+            family[0].key_id
+        );
+        assert_eq!(history.transitions[1].before, history.transitions[0].after);
+        assert_eq!(
+            history
+                .acknowledged
+                .values()
+                .next()
+                .expect("cleaned label")
+                .key_id,
+            family[1].key_id
         );
     }
     assert_eq!(

@@ -329,6 +329,13 @@ fn native_use_catalog_rejects_missing_history_and_deep_replay_rejects_false_prei
             tx.commit(Durability::Sync).expect("commit");
         }
         let transaction = catalog(&keys, 64).pop().expect("transaction");
+        let allocated = keys
+            .key_catalog_page(None, 256, &mut budget())
+            .expect("allocation frontier");
+        let selected = BTreeMap::from([(
+            address(&space, b"value"),
+            allocated.entries.iter().map(|entry| entry.key_id).collect(),
+        )]);
         let prepared = transaction.preparation.sequence;
         let completed = transaction.resolution.as_ref().expect("committed").sequence;
         let mut tx = keys.engine.begin_write().expect("damage fixture");
@@ -431,6 +438,16 @@ fn native_use_catalog_rejects_missing_history_and_deep_replay_rejects_false_prei
         assert!(
             keys.verify().is_err(),
             "{damage}: complete replay must fail"
+        );
+        assert!(
+            keys.selected_native_use_inventory(
+                &selected,
+                allocated.revision,
+                allocated.revision_digest.as_deref(),
+                &mut budget()
+            )
+            .is_err(),
+            "{damage}: selected inventory requires complete replay and indexes"
         );
         if !matches!(damage, "instance" | "instance-reference" | "false-preimage") {
             assert!(

@@ -55,8 +55,9 @@ pub use custody::CustodyProgress;
 pub use deletion::{NativeDeletionLineage, NativeDeletionSource};
 pub use encryption::{
     CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
-    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyUseCatalogPage, NativeKeyUseChange,
-    NativeKeyUseChangesPage, NativeKeyUseOutcome, NativeKeyUseReceipt, NativeKeyUseTransaction,
+    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyUseAddressInventory,
+    NativeKeyUseCatalogPage, NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory,
+    NativeKeyUseOutcome, NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition,
     NativeKeyUseVersion,
 };
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};

@@ -7,6 +7,7 @@ use contextdb_storage::{CommitReceipt, ScanPageRequest};
 use super::*;
 
 mod catalog;
+mod inventory;
 mod journal;
 mod publication;
 mod reads;
@@ -14,6 +15,7 @@ pub use catalog::{
     NativeKeyUseCatalogPage, NativeKeyUseChangesPage, NativeKeyUseOutcome, NativeKeyUseReceipt,
     NativeKeyUseTransaction,
 };
+pub use inventory::{NativeKeyUseAddressInventory, NativeKeyUseInventory, NativeKeyUseTransition};
 #[cfg(test)]
 mod tests;
 

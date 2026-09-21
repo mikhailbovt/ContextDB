@@ -2,6 +2,7 @@
 //! journal detects missing families. This profile retains old versions; key
 //! retirement requires a separate independently verified deletion transition.
 
+use contextdb_storage::ScanPageRequest;
 use std::collections::BTreeSet;
 
 use super::*;
@@ -73,7 +74,7 @@ impl NativeCustodyKeys {
         if !tx
             .scan_prefix_page(
                 &self.rows,
-                contextdb_storage::ScanPageRequest {
+                ScanPageRequest {
                     prefix: BATCHES,
                     start_after: Some(&batch_key(head.sequence)),
                     max_entries: 1,
@@ -89,7 +90,7 @@ impl NativeCustodyKeys {
             && !tx
                 .scan_prefix_page(
                     &self.rows,
-                    contextdb_storage::ScanPageRequest {
+                    ScanPageRequest {
                         prefix: b"key/",
                         start_after: None,
                         max_entries: 1,
@@ -145,6 +146,28 @@ impl NativeCustodyKeys {
             self.seal_key_log(HEAD, &encode(&head)?)?,
         )?;
         Ok(())
+    }
+
+    pub(super) fn matches_key_frontier<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        sequence: u64,
+        digest: Option<&str>,
+    ) -> contextdb_storage::Result<bool> {
+        let head = self.key_version_head(snapshot)?;
+        let tail = snapshot.scan_prefix_page(
+            &self.rows,
+            ScanPageRequest {
+                prefix: BATCHES,
+                start_after: Some(&batch_key(head.sequence)),
+                max_entries: 1,
+                max_bytes: MAX_BATCH_BYTES + NONCE_BYTES + TAG_BYTES,
+            },
+        )?;
+        if !tail.entries.is_empty() || tail.continuation.is_some() {
+            return Err(failure("key version head is behind its accepted journal"));
+        }
+        Ok(head.sequence == sequence && head.digest.as_deref() == digest)
     }
 
     fn key_version_head<S: ReadSnapshot>(&self, snapshot: &S) -> contextdb_storage::Result<Head> {

@@ -19,8 +19,9 @@ pub(super) mod uses;
 mod versions;
 pub use backups::{NativeBackupCatalogPage, NativeBackupRegistration};
 pub use uses::{
-    NativeKeyUseCatalogPage, NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseOutcome,
-    NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseVersion,
+    NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
+    NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
+    NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
 };
 pub use versions::{NativeKeyAllocation, NativeKeyCatalogPage};
 

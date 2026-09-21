@@ -12,7 +12,7 @@ use crate::{
 
 /// Allocated chunk keys for one block selected by an independent removal request.
 /// This excludes retained shared blocks and includes historical/unused allocations;
-/// it proves neither native use, other physical copies nor completed key erasure.
+/// the separate native-use field reports tracked outcomes, not physical erasure.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativePayloadKeyInventory {
@@ -30,6 +30,10 @@ pub struct NativePayloadKeyInventory {
     pub allocation_revision: u64,
     /// Authenticated commitment at that allocation revision.
     pub allocation_digest: Option<String>,
+    /// Tracked history for these selected addresses. None supplies no use evidence
+    /// (legacy profile or older serialized report). This does not retire keys.
+    #[serde(default)]
+    pub native_use: Option<crate::NativeKeyUseInventory>,
     /// Every expected chunk ordinal with all accepted keys for its value address.
     /// An empty list is not physical-absence evidence.
     pub chunks: BTreeMap<u32, Vec<NativeKeyAllocation>>,
@@ -92,6 +96,7 @@ impl NativeService {
             custody_authority_id: selected.authority_id,
             allocation_revision: selected.revision,
             allocation_digest: selected.digest,
+            native_use: selected.native_use,
             chunks: selected.owners,
         };
         retention::keys::charge_report(&report, budget)?;
