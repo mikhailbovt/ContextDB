@@ -44,6 +44,18 @@ impl NativeKeyRetirementReceipt {
     }
 }
 
+/// Independent classification authority fenced when a shared key is retired.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeKeyRetirementClassification {
+    /// Independent removal authority retaining shared-value composition.
+    pub authority_id: Uuid,
+    /// Complete classification/removal journal position fenced through acceptance.
+    pub sequence: u64,
+    /// Commitment at that position.
+    pub digest: String,
+}
+
 /// Verified ownership/use/archive snapshot from which current refusal was accepted.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -60,9 +72,12 @@ pub struct NativeKeyRetirementEvidence {
     pub backups: NativeBackupFrontier,
     /// Commitment to the exact service-derived ownership and preservation report.
     pub report_digest: String,
+    /// Shared keys additionally fence their independent classification authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification: Option<NativeKeyRetirementClassification>,
 }
 
-/// Independently retained refusal of exclusively owned ciphertext-version keys.
+/// Independently retained refusal of selected ciphertext-version keys.
 /// Wrapped descriptors remain for verification; physical erasure is separate.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -167,6 +182,8 @@ impl NativeCustodyKeys {
         mut value: NativeKeyRetirement,
         usage: &NativeKeyUseInventory,
         targets: &BTreeSet<String>,
+        preserved: &BTreeSet<Uuid>,
+        ledger: Option<&crate::NativeSuppressionLedger>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeKeyRetirement> {
         if value.evidence.use_revision != usage.revision
@@ -181,6 +198,19 @@ impl NativeCustodyKeys {
             budget,
         )?;
         self.require_backup_frontier(&value.evidence.backups, budget)?;
+        let _classification_guard = match (&value.evidence.classification, ledger) {
+            (Some(frontier), Some(ledger)) if frontier.authority_id == ledger.authority_id() => {
+                Some(ledger.lock_removal_frontier(
+                    &crate::suppression::RemovalCheckpoint {
+                        sequence: frontier.sequence,
+                        digest: frontier.digest.clone(),
+                    },
+                    budget,
+                )?)
+            }
+            (None, None) => None,
+            _ => return Err(integrity("key retirement classification authority differs")),
+        };
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
         let mut next = self.load_retirements(&tx, budget)?;
         {
@@ -221,6 +251,13 @@ impl NativeCustodyKeys {
             ));
         }
         self.require_backup_available_keys(&tx, targets, &selected, budget)?;
+        for key in preserved {
+            budget.charge(1, 0).map_err(budget_error)?;
+            if selected.contains(key) {
+                return Err(invalid("native preservation still uses a selected key"));
+            }
+            drop(self.admit_key(*key).map_err(storage_error)?);
+        }
         value.receipt = NativeKeyRetirementReceipt {
             authority_id: self.authority_id(),
             sequence: next
@@ -457,6 +494,24 @@ impl NativeCustodyKeys {
     ) -> ServiceResult<()> {
         let value = &event.value;
         value.receipt.validate(self).map_err(storage_error)?;
+        match (&value.selection, &value.evidence.classification) {
+            (NativeRemovalKeySelection::Assertions { witness }, Some(frontier)) => {
+                if frontier.authority_id != value.request.authority_id
+                    || witness.authority_id != frontier.authority_id
+                    || witness.removal_sequence != value.request.sequence
+                    || witness.witness_sequence <= witness.removal_sequence
+                    || frontier.sequence < witness.witness_sequence
+                    || blake3::Hash::from_hex(&frontier.digest).is_err()
+                    || blake3::Hash::from_hex(&witness.digest).is_err()
+                {
+                    return Err(integrity("shared key retirement classification is invalid"));
+                }
+            }
+            (NativeRemovalKeySelection::Assertions { .. }, None) | (_, Some(_)) => {
+                return Err(integrity("key retirement classification scope differs"));
+            }
+            (_, None) => {}
+        }
         if let Some(retired) = &value.evidence.backups.retirements {
             retired.validate(self).map_err(storage_error)?;
             if event.previous.as_ref() != Some(retired) {

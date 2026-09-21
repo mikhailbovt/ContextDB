@@ -176,11 +176,7 @@ impl WriteTransaction for NativeTransaction<'_> {
             keys.publish(&self.pending)?;
         }
         #[cfg(test)]
-        BEFORE_NATIVE_COMMIT.with(|hook| {
-            if let Some(hook) = hook.take() {
-                hook();
-            }
-        });
+        BEFORE_NATIVE_COMMIT.with(|hook| hook.take().map_or(Ok(()), |hook| hook()))?;
         self.inner.commit(durability)
     }
 
@@ -259,6 +255,9 @@ fn decode_page(
 }
 
 #[cfg(test)]
+type BeforeCommitHook = Box<dyn FnOnce() -> Result<()>>;
+
+#[cfg(test)]
 thread_local! {
-    pub(super) static BEFORE_NATIVE_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(super) static BEFORE_NATIVE_COMMIT: std::cell::RefCell<Option<BeforeCommitHook>> = const { std::cell::RefCell::new(None) };
 }

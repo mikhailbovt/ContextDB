@@ -10,11 +10,17 @@ use contextdb_core::ContentBlockId;
 #[cfg(test)]
 mod tests;
 
-/// Explicit scope of a request-owned archive inspection. Shared assertion
-/// versions require their separate composition/preservation contract.
+/// Key family selected by a retained removal request. Shared assertions use
+/// their separate composition/preservation inventory.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum NativeRemovalKeySelection {
+    /// Shared semantic batches and selected mutation copies. Inspect with
+    /// `read_assertion_backup_inventory` before requesting current key refusal.
+    Assertions {
+        /// Exact retained ownership selecting source-supported mutations.
+        witness: NativeAssertionRemovalWitnessReceipt,
+    },
     /// Primary values of all retained sources in this removal request.
     Originals,
     /// All chunks of an exclusively selected payload.
@@ -84,6 +90,11 @@ impl NativeService {
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeRemovalBackupInventory> {
         let inventory = match selection {
+            NativeRemovalKeySelection::Assertions { .. } => {
+                return Err(unsupported(
+                    "shared assertions require read_assertion_backup_inventory",
+                ));
+            }
             NativeRemovalKeySelection::Originals => NativeRemovalKeyInventory::Originals(
                 self.read_original_key_inventory(context, request, budget)?,
             ),

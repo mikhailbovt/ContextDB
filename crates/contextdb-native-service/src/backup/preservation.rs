@@ -60,6 +60,50 @@ pub(crate) enum CopyDisposition {
     Unknown,
 }
 
+// Only service-derived reports reach this helper. Preserve every issued archive
+// obligation, including unknown membership and incomplete replacement artifacts.
+pub(crate) fn retained_targets(
+    backups: &NativeBackupKeyInventory,
+    preservation: &BTreeMap<u64, NativeBackupPreservation>,
+    budget: &mut QueryBudget,
+) -> ServiceResult<std::collections::BTreeSet<String>> {
+    let archives: BTreeMap<_, _> = backups
+        .archives
+        .iter()
+        .map(|archive| (archive.registration.sequence, archive))
+        .collect();
+    if archives.keys().ne(preservation.keys()) {
+        return Err(integrity("key retirement archive coverage differs"));
+    }
+    let mut targets = std::collections::BTreeSet::new();
+    for status in preservation.values() {
+        budget.charge(1, 0).map_err(budget_error)?;
+        match status {
+            NativeBackupPreservation::NotRequired => {}
+            NativeBackupPreservation::Preserved { path, artifact } => {
+                let target = archives
+                    .get(&path.target_sequence)
+                    .ok_or_else(|| integrity("key retirement preservation target is absent"))?;
+                if !target.keys_available
+                    || target
+                        .artifact
+                        .as_ref()
+                        .is_none_or(|progress| !progress.complete || progress.receipt != *artifact)
+                {
+                    return Err(integrity("key retirement preservation artifact differs"));
+                }
+                targets.insert(target.registration.archive_digest.clone());
+            }
+            _ => {
+                return Err(crate::invalid(
+                    "selected archive preservation remains unresolved",
+                ));
+            }
+        }
+    }
+    Ok(targets)
+}
+
 #[derive(Clone, Copy)]
 struct Route<'a> {
     target: u64,

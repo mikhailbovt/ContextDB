@@ -13,6 +13,14 @@ use contextdb_storage::{
 use super::*;
 use crate::{NATIVE_ENCRYPTED_BACKUP_FORMAT, NativeService, NativeSuppressionLedger};
 
+pub(crate) fn fail_next_native_commit() {
+    storage::BEFORE_NATIVE_COMMIT.with(|hook| {
+        hook.replace(Some(Box::new(|| {
+            Err(failure("injected interrupted native publication"))
+        })));
+    });
+}
+
 fn master() -> CustodyMasterKey {
     CustodyMasterKey::from_zeroizing(Zeroizing::new([79; 32])).expect("fixture custody key")
 }

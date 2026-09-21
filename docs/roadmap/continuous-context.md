@@ -259,7 +259,7 @@ mutation bodies and labels through sequential cleanup, actual authority/native
 reopen and encrypted restore, including archives predating the batch. Tests cover
 independent data, retractions, policy, lost acknowledgement, publication races,
 missing witnesses and rehashed false selection. Shared and cleaned replacement
-keys remain available; this does not establish safe key retirement.
+keys remain available after pruning; retirement requires the separate checks below.
 V4 pruning now retains custody-authenticated before/after value compositions.
 The key report classifies exact versions relative to each request, preserving
 independent mutations, host policies and cleaned replay controls. Sequential
@@ -341,11 +341,18 @@ publishing a complete retained replacement. Independent branch history, original
 mixed assertions and generic revisions remain preserved. Unknown origins,
 unretained descendants and missing roots require explicit reconciliation;
 discovery still rescans within a shared budget.
-Exclusively owned keys can now be retired after fresh native-use and complete
-archive-preservation verification. Current refusal applies to old snapshots and
+Owned and mixed assertion keys can now be retired after fresh native-use and
+complete archive-preservation verification. Mixed selections require classified
+replacement batches in every affected native instance, preserving controls,
+host policies and independently needed mutations. Other authorized removals are
+verified against exact retained ownership; pending replacement publications block
+acceptance. The independent classification frontier is fenced through Sync.
+Current refusal applies to old snapshots and
 staged imports, survives cold custody reopen and native restore, and fences native
 transactions through Sync. Tests cover competing imports, sequential removals,
 partial archive bytes, lost responses, ambiguous Sync, journal corruption and real
-process exits around publication. Wrapped keys remain; this is not destruction.
-Mixed-key retirement, remaining replacement execution, version 1/2 key migration,
+process exits around publication. Mixed-key tests also cover two native instances,
+independent deletions in both orders, missing preservation, unknown composition
+and classification races. Wrapped keys remain; this is not destruction.
+Remaining replacement execution, version 1/2 key migration,
 physical/external-copy closure and verified deletion completion/admission remain open.

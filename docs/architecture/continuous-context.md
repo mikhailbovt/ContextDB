@@ -531,11 +531,21 @@ path order; issuance order and a newer clean archive alone prove no preservation
 These scope-specific reports neither change keys nor authorize deletion completion;
 key retirement must revalidate current coverage and all independently needed copies.
 
-`retire_removal_keys` accepts 1..256 exclusively owned primary, payload, revision or
-observed raw keys after deriving fresh removal, native-use and archive evidence.
+`retire_removal_keys` accepts 1..256 primary, payload, revision, observed raw or
+assertion keys after deriving fresh removal, native-use and archive evidence.
 Prepared or acknowledged native copies, unknown membership and unresolved
 preservation block acceptance. Every key needed to read a selected clean target
 must remain available. The custody queue rechecks all frontiers through Sync.
+
+Assertion selections bind an exact retained ownership witness. Every known value
+of a retiring key must contain selected mutations. Each native instance that
+committed such a value must acknowledge a usable replacement batch preserving
+replay controls, host policies and still-required independent mutations. Other
+removals can reduce that set only through their exact authorized ownership
+witnesses. Pending batch publications require reconciliation. Acceptance holds
+both custody and classification publication queues through Sync and records the
+classification frontier. These acknowledgements do not prove that every physical
+copy remains intact or that unobserved copies have been erased.
 
 Current refusal is an independently sealed, append-only journal anchored in the
 allocation head. Exact retries recover the original receipt; new allocations and
@@ -549,8 +559,7 @@ closes ordinary key use until authority recovery establishes the durable outcome
 Retirement receipts contain commitments and allocation identities, bounded to
 128 KiB. Wrapped descriptors remain for verification: this is current refusal,
 not physical destruction or protection against a holder of the master key and its
-copies. Mixed assertion keys require separate independent-version preservation;
-this API does not retire them or grant deletion completion/disclosure admission.
+copies. This API does not grant deletion completion or disclosure admission.
 
 `create_removal_backup` issues actual encrypted replacement bytes after existing
 request-authorized cleanup. Both archives undergo full native verification. The
@@ -591,7 +600,7 @@ target with completely retained bytes; it does not cover later writes or other
 archives. Unclassified records, unretained branch descendants and missing roots
 require explicit reconciliation. Discovery rescans remain budgeted administrative
 work. The inventory reports identify remaining replacement obligations; executing
-all of them, mixed-key retirement and physical/external-copy dispositions remain
+all of them and physical/external-copy dispositions remain
 open. These operations do not complete deletion.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted

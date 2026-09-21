@@ -64,10 +64,11 @@ pub use encryption::{
     NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
     NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
     NativeBackupReplacement, NativeBackupReplacementReceipt, NativeCustodyKeys,
-    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyRetirement, NativeKeyRetirementEvidence,
-    NativeKeyRetirementReceipt, NativeKeyUseAddressInventory, NativeKeyUseCatalogPage,
-    NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome,
-    NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
+    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyRetirement,
+    NativeKeyRetirementClassification, NativeKeyRetirementEvidence, NativeKeyRetirementReceipt,
+    NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
+    NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
+    NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
 };
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{

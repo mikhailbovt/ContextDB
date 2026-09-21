@@ -152,11 +152,7 @@ impl NativeTransaction<'_> {
             keys.seal_local_marker(&marker)?,
         )?;
         #[cfg(test)]
-        BEFORE_NATIVE_COMMIT.with(|hook| {
-            if let Some(hook) = hook.take() {
-                hook();
-            }
-        });
+        BEFORE_NATIVE_COMMIT.with(|hook| hook.take().map_or(Ok(()), |hook| hook()))?;
         let receipt = self.inner.commit(durability)?;
         #[cfg(test)]
         AFTER_NATIVE_COMMIT.with(|hook| {

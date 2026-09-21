@@ -4,7 +4,7 @@ use super::*;
 use crate::{NativeBackupKeyInventory, retention::keys::charge_report};
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 /// Complete selected assertion-key coverage across all issued native archives.
 /// Content classifications, native uses and archive observations remain distinct;

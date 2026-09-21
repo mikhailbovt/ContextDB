@@ -1,4 +1,4 @@
-//! Verify owned native and archive obligations before accepting current key refusal.
+//! Verify native and archive preservation before accepting current key refusal.
 
 use super::*;
 use uuid::Uuid;
@@ -7,11 +7,11 @@ use uuid::Uuid;
 mod tests;
 
 impl NativeService {
-    /// Retire 1..256 exclusively owned v4 keys after their tracked native copies
+    /// Retire 1..256 selected v4 keys after their tracked native copies
     /// are removed and all selected archive obligations have available replacements.
     /// The service derives current ownership/use/preservation evidence; serialized
-    /// caller reports never authorize this mutation. Mixed assertion keys require
-    /// their independent-version preservation contract and are not owned selections.
+    /// caller reports never authorize this mutation. Mixed assertion selections
+    /// additionally preserve independent mutations and controls per native instance.
     ///
     /// Current refusal survives native restore and covers old snapshots and new
     /// native publication/import. It does not destroy wrapped keys, erase external
@@ -29,6 +29,9 @@ impl NativeService {
             return Err(invalid(
                 "key retirement requires 1..256 distinct key identities",
             ));
+        }
+        if let NativeRemovalKeySelection::Assertions { witness } = selection {
+            return self.retire_assertion_keys(context, request, witness, key_ids, budget);
         }
         let report = self.read_removal_backup_inventory(context, request, selection, budget)?;
         let mut allocations = BTreeMap::new();
@@ -51,33 +54,8 @@ impl NativeService {
                 "key retirement contains identities outside retained ownership",
             ));
         }
-        let mut targets = BTreeSet::new();
-        let archives: BTreeMap<_, _> = report
-            .backups
-            .archives
-            .iter()
-            .map(|archive| (archive.registration.sequence, archive))
-            .collect();
-        for status in report.preservation.values() {
-            budget.charge(1, 0).map_err(raw_index::budget_error)?;
-            match status {
-                NativeBackupPreservation::NotRequired => {}
-                NativeBackupPreservation::Preserved { path, artifact } => {
-                    let target = archives
-                        .get(&path.target_sequence)
-                        .ok_or_else(|| integrity("key retirement preservation target is absent"))?;
-                    if target
-                        .artifact
-                        .as_ref()
-                        .is_none_or(|progress| !progress.complete || progress.receipt != *artifact)
-                    {
-                        return Err(integrity("key retirement preservation artifact differs"));
-                    }
-                    targets.insert(target.registration.archive_digest.clone());
-                }
-                _ => return Err(invalid("selected archive preservation remains unresolved")),
-            }
-        }
+        let targets =
+            backup::preservation::retained_targets(&report.backups, &report.preservation, budget)?;
         let (revision, digest, usage) = match &report.key_inventory {
             NativeRemovalKeyInventory::Originals(primary) => (
                 primary.allocation_revision,
@@ -111,6 +89,7 @@ impl NativeService {
                 use_digest: usage.revision_digest.clone(),
                 backups: report.backups.frontier.clone(),
                 report_digest: digest_bytes(&report_bytes),
+                classification: None,
             },
         };
         #[cfg(test)]
@@ -123,7 +102,7 @@ impl NativeService {
             .keys
             .as_ref()
             .ok_or_else(|| unsupported("key retirement requires retained custody"))?
-            .accept_key_retirement(value, usage, &targets, budget)
+            .accept_key_retirement(value, usage, &targets, &BTreeSet::new(), None, budget)
     }
 }
 

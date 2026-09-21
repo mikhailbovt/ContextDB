@@ -12,21 +12,21 @@ use contextdb_service::{
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
-struct Fixture {
-    root: tempfile::TempDir,
-    native: Arc<NativeService>,
-    ledger: Arc<NativeSuppressionLedger>,
-    keys: Arc<NativeCustodyKeys>,
-    first: CaptureRequest,
-    second: CaptureRequest,
-    accepted: AssertionReceipt,
-    removal: NativeRemovalRequestReceipt,
-    witness: NativeAssertionRemovalWitnessReceipt,
-    empty: BackupResponse,
-    old: BackupResponse,
+pub(crate) struct Fixture {
+    pub(crate) root: tempfile::TempDir,
+    pub(crate) native: Arc<NativeService>,
+    pub(crate) ledger: Arc<NativeSuppressionLedger>,
+    pub(crate) keys: Arc<NativeCustodyKeys>,
+    pub(crate) first: CaptureRequest,
+    pub(crate) second: CaptureRequest,
+    pub(crate) accepted: AssertionReceipt,
+    pub(crate) removal: NativeRemovalRequestReceipt,
+    pub(crate) witness: NativeAssertionRemovalWitnessReceipt,
+    pub(crate) empty: BackupResponse,
+    pub(crate) old: BackupResponse,
 }
 
-fn master() -> CustodyMasterKey {
+pub(crate) fn master() -> CustodyMasterKey {
     CustodyMasterKey::from_zeroizing(Zeroizing::new([97; 32])).expect("fixture master")
 }
 
@@ -38,7 +38,7 @@ fn archive(native: &NativeService, input: &CaptureRequest) -> BackupResponse {
         .expect("archive")
 }
 
-fn fixture() -> Fixture {
+pub(crate) fn fixture() -> Fixture {
     let root = tempfile::tempdir().expect("root");
     let keys = NativeCustodyKeys::create(root.path().join("keys"), "assertion-archives", master())
         .expect("keys");
@@ -96,7 +96,7 @@ fn report(f: &Fixture) -> ServiceResult<NativeAssertionBackupInventory> {
     )
 }
 
-fn prune(f: &Fixture) {
+pub(crate) fn prune(f: &Fixture) {
     prepare(&f.native, &f.first, &f.removal);
     f.native
         .prune_source_assertions(

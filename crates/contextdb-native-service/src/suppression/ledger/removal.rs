@@ -102,6 +102,18 @@ pub(super) fn genesis(identity: &Identity) -> ServiceResult<RemovalCheckpoint> {
 }
 
 impl NativeSuppressionLedger {
+    // Call only after custody publication admission. Keep this guard through
+    // retirement Sync so classification/request changes cannot race acceptance.
+    pub(crate) fn lock_removal_frontier(
+        &self,
+        expected: &RemovalCheckpoint,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<publication::PublicationGuard<'_>> {
+        let guard = self.writes.enter(|| budget.check().map_err(budget_error))?;
+        self.require_removal_frontier(expected, budget)?;
+        Ok(guard)
+    }
+
     // A caller holding custody publication authority can use this final check to
     // establish one consistent archive/allocation/use/classification snapshot.
     pub(crate) fn require_removal_frontier(

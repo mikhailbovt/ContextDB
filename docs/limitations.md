@@ -53,13 +53,16 @@ and release verifier—not the presence of an API name—determine completion.
   preservation paths or artifacts for each selected family. Each path verifies
   every exact removal request and ends at completely retained clean bytes with
   currently usable keys. These reports require retry after concurrent key retirement.
-  Owned-key retirement rejects unresolved native/archive obligations and denies
-  decryption through old snapshots or restored archives. Its independent journal
+  Owned and mixed-key retirement reject unresolved native/archive obligations and
+  deny decryption through old snapshots or restored archives. Mixed keys require
+  classified replacement batches preserving independent data and controls in every
+  affected native instance. Acknowledged use does not prove physical copy integrity.
+  The independent retirement journal
   survives native restore; uncertain Sync closes key use until authority recovery.
   Wrapped descriptors remain, so retirement does not certify physical destruction.
   Unknown origins, unretained descendants and missing-root reconciliation remain
   explicit requirements. Discovery rescans after restart. Hash-only migration,
-  complete copy coverage, mixed-key retirement and verified
+  complete copy coverage and verified
   deletion completion that reopens disclosure remain unfinished.
   See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector

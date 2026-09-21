@@ -27,7 +27,8 @@ pub use backups::{
     NativeBackupReplacementReceipt,
 };
 pub use retirement::{
-    NativeKeyRetirement, NativeKeyRetirementEvidence, NativeKeyRetirementReceipt,
+    NativeKeyRetirement, NativeKeyRetirementClassification, NativeKeyRetirementEvidence,
+    NativeKeyRetirementReceipt,
 };
 pub use uses::{
     NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
