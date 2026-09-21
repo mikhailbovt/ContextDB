@@ -81,9 +81,11 @@ pub use raw_index::{
     NativeRawKeyFamily, NativeRawKeyInventory, NativeRawRemovalCopy, NativeRawRemovalCopyPage,
 };
 pub use retention::{
-    NativePrimaryKeyAction, NativePrimaryKeyDisposition, NativePrimaryKeyInventory,
-    NativePrimaryKeyRemovalReceipt, NativePrimaryKeyRemovalWitness,
-    NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt, NativeSourcePruningReceipt,
+    NativeOwnedKeyAction, NativeOwnedKeyDisposition, NativeOwnedKeyInventory, NativeOwnedKeyOwner,
+    NativeOwnedKeyRemovalReceipt, NativeOwnedKeyRemovalWitness, NativePrimaryKeyAction,
+    NativePrimaryKeyDisposition, NativePrimaryKeyInventory, NativePrimaryKeyRemovalReceipt,
+    NativePrimaryKeyRemovalWitness, NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt,
+    NativeSourcePruningReceipt,
 };
 pub use suppression::{NativeSuppressionLedger, SuppressionProgress};
 

@@ -3,6 +3,13 @@
 
 use super::*;
 
+mod decisions;
+pub(crate) mod owned;
+pub use decisions::{NativeOwnedKeyAction, NativeOwnedKeyDisposition};
+pub use owned::{
+    NativeOwnedKeyInventory, NativeOwnedKeyOwner, NativeOwnedKeyRemovalReceipt,
+    NativeOwnedKeyRemovalWitness,
+};
 pub(crate) mod witness;
 pub use witness::{
     NativePrimaryKeyAction, NativePrimaryKeyDisposition, NativePrimaryKeyRemovalReceipt,

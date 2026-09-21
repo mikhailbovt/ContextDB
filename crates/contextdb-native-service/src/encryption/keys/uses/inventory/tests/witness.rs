@@ -1,6 +1,6 @@
 use super::*;
 use crate::NativePrimaryKeyAction;
-use contextdb_service::CapturePort;
+use contextdb_service::{CapturePort, PayloadPort, StagePayloadRequest};
 
 #[test]
 fn primary_witness_requires_real_v4_history_not_legacy_allocations() {
@@ -23,7 +23,20 @@ fn primary_witness_requires_real_v4_history_not_legacy_allocations() {
         keys,
     )
     .expect("legacy native");
-    let input = crate::capture::tests::request(1, "legacy original");
+    let mut input = crate::capture::tests::request(1, "legacy original");
+    let staged = native
+        .stage_payload(StagePayloadRequest {
+            context: input.context.clone(),
+            idempotency_key: "legacy-payload".into(),
+            block_id: contextdb_core::ContentBlockId::new(),
+            bytes: b"legacy payload".to_vec(),
+        })
+        .expect("legacy staged payload")
+        .reference;
+    input.event.payload = contextdb_core::EventPayload::Staged {
+        reference: staged.clone(),
+        media_type: "text/plain".into(),
+    };
     native.append_event(input.clone()).expect("capture");
     let removal = native
         .request_original_removal(
@@ -37,6 +50,13 @@ fn primary_witness_requires_real_v4_history_not_legacy_allocations() {
         native
             .retain_original_key_removal(&input.context, &removal, &mut budget())
             .expect_err("explicit migration required")
+            .code,
+        ErrorCode::FormatIncompatible
+    );
+    assert_eq!(
+        native
+            .retain_payload_key_removal(&input.context, &removal, staged.block_id, &mut budget())
+            .expect_err("payload witness requires explicit migration")
             .code,
         ErrorCode::FormatIncompatible
     );

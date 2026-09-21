@@ -10,8 +10,10 @@ pub(crate) mod keys;
 mod preparation;
 mod pruning;
 pub use keys::{
-    NativePrimaryKeyAction, NativePrimaryKeyDisposition, NativePrimaryKeyInventory,
-    NativePrimaryKeyRemovalReceipt, NativePrimaryKeyRemovalWitness,
+    NativeOwnedKeyAction, NativeOwnedKeyDisposition, NativeOwnedKeyInventory, NativeOwnedKeyOwner,
+    NativeOwnedKeyRemovalReceipt, NativeOwnedKeyRemovalWitness, NativePrimaryKeyAction,
+    NativePrimaryKeyDisposition, NativePrimaryKeyInventory, NativePrimaryKeyRemovalReceipt,
+    NativePrimaryKeyRemovalWitness,
 };
 pub use preparation::NativeRemovalPreparationReceipt;
 pub(super) use preparation::RemovalPreparationPublication;

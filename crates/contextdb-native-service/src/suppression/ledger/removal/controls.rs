@@ -60,6 +60,7 @@ impl NativeSuppressionLedger {
                 Operation::RecordValidation { validation } => validation.key() == key,
                 Operation::RawIndexInventory { witness } => witness.key() == key,
                 Operation::PrimaryKeys { witness } => witness.key() == key,
+                Operation::OwnedKeys { witness } => witness.key() == key,
                 _ => false,
             };
             if matches {

@@ -345,6 +345,16 @@ decisions are derived from it, without another stored copy. This v4 API covers
 exclusively owned primary rows. Shared versions, archives, physical key destruction,
 current key disablement and deletion completion remain separate gates.
 
+`retain_payload_key_removal` and `retain_record_key_removal` use the same fenced
+decisions and historical replay for selected chunks and generic revision bodies.
+Their corresponding read methods verify the exact owner, complete address/key
+membership, journal acceptance and both custody checkpoints. Payloads require
+Admin and the retained workspace/request; records additionally retain all stored
+access labels. Shared blocks are excluded. One bounded inventory survives partial
+cleanup, both authority restarts and archives predating the selected payload.
+These witnesses preserve pending and retained-copy obligations; they do not disable
+keys or establish archive preservation or physical absence.
+
 `key_catalog_page` enumerates at most 256 accepted descriptors with a shared
 work/byte/time budget and an authenticated continuation. Pages bind the authority,
 allocation revision and exact batch chain; new allocations invalidate a pending

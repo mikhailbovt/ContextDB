@@ -9,6 +9,7 @@ mod assertion_values;
 mod assertion_witness;
 mod controls;
 mod inventory;
+mod owned_keys;
 mod primary_keys;
 mod raw_copies;
 mod raw_inventory;
@@ -66,6 +67,9 @@ enum Operation {
     },
     RawIndexInventory {
         witness: raw_inventory::RawIndexDeclaration,
+    },
+    OwnedKeys {
+        witness: owned_keys::OwnedKeyDeclaration,
     },
     PrimaryKeys {
         witness: primary_keys::PrimaryKeyDeclaration,
@@ -458,6 +462,7 @@ impl NativeSuppressionLedger {
             Operation::RawCopies { observation } => observation.validate()?,
             Operation::RawIndexInventory { witness } => witness.validate(sequence)?,
             Operation::PrimaryKeys { witness } => witness.validate(sequence)?,
+            Operation::OwnedKeys { witness } => witness.validate(sequence)?,
             Operation::Request {
                 intent,
                 source_pages,
@@ -569,6 +574,9 @@ impl NativeSuppressionLedger {
                 }
                 Operation::RawIndexInventory { witness } => {
                     self.verify_raw_index_inventory_rows(snapshot, &event, witness, expected)?;
+                }
+                Operation::OwnedKeys { witness } => {
+                    self.verify_owned_key_rows(snapshot, &event, witness, expected)?;
                 }
                 Operation::PrimaryKeys { witness } => {
                     self.verify_primary_key_rows(snapshot, &event, witness, expected)?;

@@ -177,6 +177,16 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
     let chunk_keys = native
         .read_payload_key_inventory(&selected.context, &removal, block.block_id, &mut budget())
         .expect("selected block key inventory");
+    let chunk_decisions = native
+        .retain_payload_key_removal(&selected.context, &removal, block.block_id, &mut budget())
+        .expect("retained chunk decisions");
+    assert_eq!(chunk_decisions.dispositions.len(), 4);
+    assert!(
+        native
+            .retain_payload_key_removal(&selected.context, &removal, keep.block_id, &mut budget())
+            .is_err(),
+        "shared block stays independently needed"
+    );
     assert_eq!(chunk_keys.payload, block);
     assert_eq!(chunk_keys.chunks.len(), 4);
     assert!(
@@ -194,6 +204,9 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
     let novel_keys = native
         .read_payload_key_inventory(&selected.context, &removal, orphan.block_id, &mut budget())
         .expect("request-only novel block with verified absence of independent owners");
+    let novel_decisions = native
+        .retain_payload_key_removal(&selected.context, &removal, orphan.block_id, &mut budget())
+        .expect("request-only chunk decisions");
     assert_eq!(novel_keys.chunks.len(), 1);
     assert_eq!(novel_keys.chunks[&0].len(), 1);
     let mut denied = selected.context.clone();
@@ -268,6 +281,39 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
     .expect("reopen unfinished cleanup");
     assert_eq!(
         native
+            .read_payload_key_removal(
+                &selected.context,
+                &removal,
+                block.block_id,
+                &chunk_decisions.receipt,
+                &mut budget()
+            )
+            .expect("old decisions after partial reopen"),
+        chunk_decisions
+    );
+    let partial_decisions = native
+        .retain_payload_key_removal(&selected.context, &removal, block.block_id, &mut budget())
+        .expect("partial decisions");
+    assert_eq!(
+        partial_decisions
+            .dispositions
+            .values()
+            .flatten()
+            .filter(|key| key.action == crate::NativeOwnedKeyAction::RemoveAcknowledgedCopies)
+            .count(),
+        3
+    );
+    assert_eq!(
+        partial_decisions
+            .dispositions
+            .values()
+            .flatten()
+            .filter(|key| key.action == crate::NativeOwnedKeyAction::AssessRetainedCopies)
+            .count(),
+        1
+    );
+    assert_eq!(
+        native
             .read_payload_key_inventory(&selected.context, &removal, block.block_id, &mut budget())
             .expect("chunk keys survive partial cleanup and reopen")
             .chunks,
@@ -319,6 +365,16 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
         }
     }
     assert!(last.complete);
+    let cleaned_decisions = native
+        .retain_payload_key_removal(&selected.context, &removal, block.block_id, &mut budget())
+        .expect("cleaned decisions");
+    assert!(
+        cleaned_decisions
+            .dispositions
+            .values()
+            .flatten()
+            .all(|key| key.action == crate::NativeOwnedKeyAction::AssessRetainedCopies)
+    );
     assert_eq!(
         native
             .read_payload_key_inventory(&selected.context, &removal, block.block_id, &mut budget())
@@ -407,6 +463,20 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
             digest: empty.digest,
         })
         .expect("restore archive predating the block");
+    for saved in [&chunk_decisions, &partial_decisions, &cleaned_decisions] {
+        assert_eq!(
+            empty_restore
+                .read_payload_key_removal(
+                    &selected.context,
+                    &removal,
+                    block.block_id,
+                    &saved.receipt,
+                    &mut budget()
+                )
+                .expect("decisions when the block is absent"),
+            *saved
+        );
+    }
     assert_eq!(
         empty_restore
             .read_payload_key_inventory(&selected.context, &removal, block.block_id, &mut budget())
@@ -431,6 +501,32 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
                 digest: archive.digest,
             })
             .expect("restore exact remaining rows");
+        for saved in [&chunk_decisions, &partial_decisions, &cleaned_decisions] {
+            assert_eq!(
+                restored
+                    .read_payload_key_removal(
+                        &selected.context,
+                        &removal,
+                        block.block_id,
+                        &saved.receipt,
+                        &mut budget()
+                    )
+                    .expect("historical decisions after old/partial/clean restore"),
+                *saved
+            );
+        }
+        assert_eq!(
+            restored
+                .read_payload_key_removal(
+                    &selected.context,
+                    &removal,
+                    orphan.block_id,
+                    &novel_decisions.receipt,
+                    &mut budget()
+                )
+                .expect("request-only historical decisions"),
+            novel_decisions
+        );
         assert_eq!(
             restored
                 .read_payload_key_inventory(

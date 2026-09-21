@@ -9,37 +9,10 @@ pub(crate) mod tests;
 
 pub(crate) const MAX_WITNESS_BYTES: usize = 5 * 1024 * 1024;
 
-/// Next native task for an exclusively owned primary-value key. None of these
-/// actions proves physical absence or authorizes key disablement.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NativePrimaryKeyAction {
-    /// Resolve the listed preparations; their data may already be durable.
-    ResolvePreparedUse,
-    /// Remove the acknowledged values from the listed registered instances.
-    RemoveAcknowledgedCopies,
-    /// No current tracked value remains. Old snapshots, archives, unused keys,
-    /// external authorities and physical media still require their own decisions.
-    AssessRetainedCopies,
-}
-
-/// A selected primary allocation, its exact known ciphertexts and pending work.
-/// Empty versions means no final value was declared in this tracked history;
-/// it never proves absence of an external or intermediate ciphertext.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NativePrimaryKeyDisposition {
-    /// Immutable descriptor selected by the retained source ownership.
-    pub allocation: NativeKeyAllocation,
-    /// Distinct exact versions, including aborted and unresolved after-values.
-    pub versions: Vec<NativeKeyUseVersion>,
-    /// Instances whose last acknowledged value still uses this key.
-    pub acknowledged_instances: BTreeSet<Uuid>,
-    /// Unresolved changes involving this key as either preimage or after-value.
-    pub unresolved_preparations: Vec<NativeKeyUseTransaction>,
-    /// First unresolved native task; the other evidence remains independently relevant.
-    pub action: NativePrimaryKeyAction,
-}
+pub use super::decisions::{
+    NativeOwnedKeyAction as NativePrimaryKeyAction,
+    NativeOwnedKeyDisposition as NativePrimaryKeyDisposition,
+};
 
 /// Exact independent acceptance of one primary inventory and its derived decisions.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

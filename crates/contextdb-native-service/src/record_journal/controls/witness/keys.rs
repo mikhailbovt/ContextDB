@@ -66,27 +66,7 @@ impl NativeService {
         if !policy_allows(&context.request, &access) {
             return Err(permission_denied());
         }
-        let history = encryption::address(
-            &self.keyspaces.content_history,
-            &history_key(&policy.record_digest, policy.revision),
-        );
-        let mut addresses = BTreeMap::from([(history, NativeRecordBodyKind::ContentHistory)]);
-        for control in witness.controls() {
-            let closed = control.policy.transaction_to;
-            let mutation = closed.unwrap_or(control.policy.transaction_from);
-            let address = encryption::address(
-                &self.keyspaces.continuous,
-                &pruning::mutation_address(mutation, &policy.record_digest, policy.revision),
-            );
-            let kind = if closed.is_some() {
-                NativeRecordBodyKind::AcceptedClosure
-            } else {
-                NativeRecordBodyKind::AcceptedBirth
-            };
-            if addresses.insert(address, kind).is_some() {
-                return Err(integrity("record body key addresses are ambiguous"));
-            }
-        }
+        let addresses = witness.key_addresses()?;
         budget
             .charge(addresses.len() as u64, (addresses.len() * 72) as u64)
             .map_err(raw_index::budget_error)?;
@@ -103,5 +83,34 @@ impl NativeService {
         };
         retention::keys::charge_report(&report, budget)?;
         Ok(report)
+    }
+}
+
+impl RecordRemovalWitness {
+    pub(crate) fn key_addresses(&self) -> ServiceResult<BTreeMap<String, NativeRecordBodyKind>> {
+        let spaces = Keyspaces::new()?;
+        let policy = self.policy();
+        let history = encryption::address(
+            &spaces.content_history,
+            &history_key(&policy.record_digest, policy.revision),
+        );
+        let mut addresses = BTreeMap::from([(history, NativeRecordBodyKind::ContentHistory)]);
+        for control in self.controls() {
+            let closed = control.policy.transaction_to;
+            let mutation = closed.unwrap_or(control.policy.transaction_from);
+            let address = encryption::address(
+                &spaces.continuous,
+                &pruning::mutation_address(mutation, &policy.record_digest, policy.revision),
+            );
+            let kind = if closed.is_some() {
+                NativeRecordBodyKind::AcceptedClosure
+            } else {
+                NativeRecordBodyKind::AcceptedBirth
+            };
+            if addresses.insert(address, kind).is_some() {
+                return Err(integrity("record body key addresses are ambiguous"));
+            }
+        }
+        Ok(addresses)
     }
 }

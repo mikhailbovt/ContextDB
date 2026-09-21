@@ -70,23 +70,10 @@ impl NativeService {
             return Err(invalid("payload key inventory request differs"));
         }
         let payload = ledger.removal_payload(&workspace, &request, block, budget)?;
-        if payload.byte_length > CAPTURE_MAX_PAYLOAD_BYTES as u64 {
-            return Err(integrity(
-                "retained payload exceeds its accepted size profile",
-            ));
-        }
-        let mut addresses = BTreeMap::new();
-        let count = payload.byte_length.div_ceil(CHUNK_BYTES as u64) as u32;
-        for ordinal in 0..count {
-            budget
-                .charge(1, 68)
-                .map_err(crate::raw_index::budget_error)?;
-            let address =
-                encryption::address(&self.keyspaces.continuous, &chunk_key(block, ordinal));
-            if addresses.insert(address, ordinal).is_some() {
-                return Err(integrity("payload chunk key addresses are ambiguous"));
-            }
-        }
+        let addresses = chunk_addresses(&payload)?;
+        budget
+            .charge(addresses.len() as u64, (addresses.len() * 68) as u64)
+            .map_err(crate::raw_index::budget_error)?;
         let selected = self.select_key_allocations(addresses, budget)?;
         let report = NativePayloadKeyInventory {
             database_id: self.database_id.clone(),
@@ -102,4 +89,24 @@ impl NativeService {
         retention::keys::charge_report(&report, budget)?;
         Ok(report)
     }
+}
+
+pub(crate) fn chunk_addresses(
+    payload: &OriginalPayloadRef,
+) -> ServiceResult<BTreeMap<String, u32>> {
+    if payload.byte_length > CAPTURE_MAX_PAYLOAD_BYTES as u64 {
+        return Err(integrity(
+            "retained payload exceeds its accepted size profile",
+        ));
+    }
+    let space = crate::Keyspaces::new()?.continuous;
+    let count = payload.byte_length.div_ceil(CHUNK_BYTES as u64) as u32;
+    let mut addresses = BTreeMap::new();
+    for ordinal in 0..count {
+        let address = encryption::address(&space, &chunk_key(payload.block_id, ordinal));
+        if addresses.insert(address, ordinal).is_some() {
+            return Err(integrity("payload chunk key addresses are ambiguous"));
+        }
+    }
+    Ok(addresses)
 }
