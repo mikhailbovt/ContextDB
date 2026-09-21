@@ -53,9 +53,10 @@ and release verifier—not the presence of an API name—determine completion.
   preservation paths or artifacts for each selected family. Each path verifies
   every exact removal request and ends at completely retained clean bytes with
   currently usable keys. These reports require retry after concurrent key retirement.
-  Cleanup can resume from a complete readable successor through separately verified
-  replacement receipts. Hosts still select the path and restore an isolated owner;
-  execution of every outstanding archive obligation remains unfinished.
+  Original archives can also be retained, and recovery automatically selects a
+  readable original or separately authorized successor. Readable input bytes may
+  still need cleanup. Hosts restore isolated owners and preserve job baselines;
+  automatic execution of every outstanding archive obligation remains unfinished.
   Owned and mixed-key retirement reject unresolved native/archive obligations and
   deny decryption through old snapshots or restored archives. Mixed keys require
   classified replacement batches preserving independent data and controls in every

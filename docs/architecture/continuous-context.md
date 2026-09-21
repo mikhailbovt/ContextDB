@@ -589,6 +589,17 @@ replacement proof and a complete artifact receipt. Request binding precedes byte
 access; recovery verifies both the full digest and native replay. Actual bytes and
 progress survive native restore and custody restart.
 
+`retain_issued_backup` also retains original archive bytes in the same bounded
+artifact journal. It requires Admin, verified native replay and existing complete
+membership; legacy membership needs explicit backfill. It creates no replacement
+proof or new issuance. `read_removal_backup_recovery` finds inputs for every issued
+archive through separately authorized replacement edges, distinguishing unknown
+membership, unavailable keys, missing bytes and complete readable artifacts.
+`read_removal_backup_input` selects and reads an available original or successor
+without a caller-supplied path, then verifies native replay and rechecks the
+custody frontier under publication authority. An available input can still require
+cleanup. Hosts must preserve its selected baseline for an isolated cleanup job.
+
 `advance_removal_backup` coordinates logical cleanup in a separate encrypted native
 owner restored from the exact issued original. Each call verifies request, ancestry
 and native replay, then advances bounded source/origin preparation, custody,

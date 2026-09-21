@@ -349,6 +349,12 @@ intermediate keys have been refused. Every earlier request is verified separatel
 only complete readable terminal bytes become the next coordinator baseline.
 Restart tests preserve the separate edges, independent data and exact retries;
 invalid paths, divergent owners and incomplete artifacts cannot start cleanup.
+Issued originals now use the same bounded artifact retention as replacements.
+Recovery automatically finds readable inputs for every issued archive, preserving
+unknown membership, unavailable keys and incomplete bytes as distinct outcomes.
+Shared DAG routing keeps recovery-input availability separate from clean-copy
+preservation. Actual input reads verify replay and the current custody frontier;
+durable job baselines and automatic execution across isolated owners remain open.
 Owned and mixed assertion keys can now be retired after fresh native-use and
 complete archive-preservation verification. Mixed selections require classified
 replacement batches in every affected native instance, preserving controls,

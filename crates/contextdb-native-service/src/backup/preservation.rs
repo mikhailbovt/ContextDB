@@ -6,16 +6,18 @@ use contextdb_recall::QueryBudget;
 use contextdb_service::ServiceResult;
 use serde::{Deserialize, Serialize};
 
+use super::routing::{ArchiveRoutes, reserve};
+
 use crate::{
     NativeBackupArtifactReceipt, NativeBackupKeyCopy, NativeBackupKeyInventory,
-    NativeBackupReplacement, NativeBackupReplacementReceipt, encode, exhausted, integrity,
-    raw_index::budget_error,
+    NativeBackupReplacement, NativeBackupReplacementReceipt, integrity, raw_index::budget_error,
 };
 
 #[cfg(test)]
 mod tests;
 
-/// Accepted preservation edges from one issued archive to a clean target.
+/// Accepted preservation edges from one issued archive to a target. The enclosing
+/// report determines whether that target is clean, readable or awaiting bytes.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeBackupPreservationPath {
@@ -104,18 +106,6 @@ pub(crate) fn retained_targets(
     Ok(targets)
 }
 
-#[derive(Clone, Copy)]
-struct Route<'a> {
-    target: u64,
-    next: Option<&'a NativeBackupReplacement>,
-}
-
-#[derive(Default)]
-struct Routes<'a> {
-    clean: Option<Route<'a>>,
-    available: Option<Route<'a>>,
-}
-
 // Both inputs come from one fully verified custody snapshot. Replacement proofs
 // have already been filtered by workspace/authority and each exact request was
 // independently verified. Matching roots alone never authorizes another edge.
@@ -125,14 +115,10 @@ pub(crate) fn inventory(
     mut classify: impl FnMut(&NativeBackupKeyCopy) -> ServiceResult<CopyDisposition>,
     budget: &mut QueryBudget,
 ) -> ServiceResult<BTreeMap<u64, NativeBackupPreservation>> {
-    let mut archives = BTreeMap::new();
     let mut statuses = BTreeMap::new();
     for archive in &backups.archives {
         budget.charge(1, 0).map_err(budget_error)?;
         let sequence = archive.registration.sequence;
-        if archives.insert(sequence, archive).is_some() {
-            return Err(integrity("archive preservation repeats an issuance"));
-        }
         let mut unknown = false;
         let mut removed = false;
         for copy in &archive.copies {
@@ -152,125 +138,35 @@ pub(crate) fn inventory(
         } else {
             NativeBackupPreservation::NotRequired
         };
-        statuses.insert(sequence, status);
-    }
-    let mut edges = BTreeMap::<_, Vec<_>>::new();
-    for proof in replacements {
-        budget.charge(1, 0).map_err(budget_error)?;
-        let source = proof.source.registration.sequence;
-        let target = proof.target.registration.sequence;
-        if archives.get(&source).and_then(|a| a.contents.as_ref()) != Some(&proof.source)
-            || archives.get(&target).and_then(|a| a.contents.as_ref()) != Some(&proof.target)
-            || proof.target.registration.native_commit <= proof.source.registration.native_commit
-        {
-            return Err(integrity(
-                "archive preservation edge has different contents or ancestry",
-            ));
+        if statuses.insert(sequence, status).is_some() {
+            return Err(integrity("archive preservation repeats an issuance"));
         }
-        edges.entry(source).or_default().push(proof);
     }
-    // Issuance order is not ancestry: an older native snapshot can be issued later.
-    // Strictly increasing native commits make verified preservation edges a DAG.
-    let mut ordered: Vec<_> = archives.values().copied().collect();
-    ordered.sort_by_key(|archive| {
-        std::cmp::Reverse((
-            archive.registration.native_commit,
-            archive.registration.sequence,
-        ))
-    });
-    let mut routes = BTreeMap::<u64, Routes<'_>>::new();
-    for archive in ordered {
-        budget.charge(1, 0).map_err(budget_error)?;
-        let sequence = archive.registration.sequence;
-        let mut route = Routes::default();
-        if statuses[&sequence] == NativeBackupPreservation::NotRequired && archive.keys_available {
-            route.clean = Some(Route {
-                target: sequence,
-                next: None,
-            });
-            if archive.artifact.as_ref().is_some_and(|a| a.complete) {
-                route.available = route.clean;
-            }
-        }
-        for proof in edges.get(&sequence).into_iter().flatten() {
-            budget.charge(1, 0).map_err(budget_error)?;
-            let target = routes
-                .get(&proof.target.registration.sequence)
-                .ok_or_else(|| integrity("archive preservation target is not ordered"))?;
-            for (current, candidate) in [
-                (&mut route.clean, target.clean),
-                (&mut route.available, target.available),
-            ] {
-                if current.is_none()
-                    && let Some(candidate) = candidate
-                {
-                    *current = Some(Route {
-                        target: candidate.target,
-                        next: Some(proof),
-                    });
-                }
-            }
-        }
-        routes.insert(sequence, route);
-    }
+    let routes = ArchiveRoutes::new(
+        backups,
+        replacements,
+        |sequence| statuses[&sequence] == NativeBackupPreservation::NotRequired,
+        budget,
+    )?;
     let mut report_bytes = 0usize;
     for (sequence, status) in &mut statuses {
-        if *status == NativeBackupPreservation::ReplacementRequired {
-            let route = &routes[sequence];
-            if let Some(terminal) = route.available.or(route.clean) {
-                let available = route.available.is_some();
-                let mut path = NativeBackupPreservationPath {
-                    target_sequence: terminal.target,
-                    replacements: Vec::new(),
-                };
-                let mut cursor = *sequence;
-                while cursor != terminal.target {
-                    let next = &routes[&cursor];
-                    let step = if available {
-                        next.available
-                    } else {
-                        next.clean
-                    }
-                    .and_then(|route| route.next)
-                    .ok_or_else(|| integrity("archive preservation path is incomplete"))?;
-                    reserve(&step.receipt, &mut report_bytes, budget)?;
-                    path.replacements.push(step.receipt.clone());
-                    cursor = step.target.registration.sequence;
+        if *status == NativeBackupPreservation::ReplacementRequired
+            && let Some(route) = routes.best(*sequence, &mut report_bytes, budget)?
+        {
+            *status = if let Some(artifact) = route.artifact {
+                NativeBackupPreservation::Preserved {
+                    path: route.path,
+                    artifact,
                 }
-                *status = if available {
-                    let artifact = archives[&terminal.target]
-                        .artifact
-                        .as_ref()
-                        .ok_or_else(|| integrity("archive preservation artifact disappeared"))?;
-                    NativeBackupPreservation::Preserved {
-                        path,
-                        artifact: artifact.receipt.clone(),
-                    }
-                } else {
-                    NativeBackupPreservation::AwaitingArtifact { path }
-                };
-            }
+            } else {
+                NativeBackupPreservation::AwaitingArtifact { path: route.path }
+            };
         }
         // Path receipts were reserved before cloning, so long chains cannot build
         // an unbounded quadratic result; routing stores one next step per archive.
         reserve(&(*sequence, &status), &mut report_bytes, budget)?;
     }
     Ok(statuses)
-}
-
-fn reserve<T: Serialize>(
-    value: &T,
-    total: &mut usize,
-    budget: &mut QueryBudget,
-) -> ServiceResult<()> {
-    let bytes = encode(value)?.len() + 64;
-    *total = total
-        .checked_add(bytes)
-        .ok_or_else(|| exhausted("archive preservation size overflow"))?;
-    if *total > 32 * 1024 * 1024 {
-        return Err(exhausted("archive preservation exceeds 32 MiB"));
-    }
-    budget.charge(1, bytes as u64).map_err(budget_error)
 }
 
 impl crate::NativeService {

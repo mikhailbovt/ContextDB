@@ -294,6 +294,16 @@ impl NativeCustodyKeys {
         Ok((report, replacements))
     }
 
+    pub(crate) fn lock_backup_frontier(
+        &self,
+        expected: &NativeBackupFrontier,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<crate::publication::PublicationGuard<'_>> {
+        let guard = self.writes.enter(|| budget.check().map_err(budget_error))?;
+        self.require_backup_frontier(expected, budget)?;
+        Ok(guard)
+    }
+
     // Caller holds the same custody publication guard as native and archive
     // writers. Issuance alone misses backfill, byte retention and key retirement.
     pub(crate) fn require_backup_frontier(

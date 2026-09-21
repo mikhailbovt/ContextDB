@@ -95,7 +95,7 @@ impl NativeService {
         }
         let backup = keys.read_archive_artifact(&artifact.receipt, budget)?;
         self.verify_encrypted_archive(&backup, budget)?;
-        keys.require_backup_frontier(&catalog.frontier, budget)?;
+        let _guard = keys.lock_backup_frontier(&catalog.frontier, budget)?;
         Ok(backup)
     }
 

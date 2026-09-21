@@ -59,6 +59,17 @@ fn archive_successor_cleanup_resumes_after_original_and_intermediate_keys_are_re
             &mut budget(),
         )
         .expect("second request");
+    let automatic = f
+        .native
+        .read_removal_backup_input(
+            context,
+            &second,
+            &first_proof.source.registration,
+            &mut budget(),
+        )
+        .expect("automatically resolve separately authorized successor");
+    assert_eq!(automatic.backup, middle);
+    assert_eq!(automatic.replacements, path);
     assert_eq!(
         f.native
             .read_removal_backup_successor(context, &second, &original, &path, &mut budget())
@@ -125,6 +136,16 @@ fn archive_successor_cleanup_resumes_after_original_and_intermediate_keys_are_re
         "unreadable terminal is not usable preservation"
     );
     let full_path = vec![first_proof.receipt.clone(), second_proof.receipt.clone()];
+    let automatic = native
+        .read_removal_backup_input(
+            context,
+            &second,
+            &first_proof.source.registration,
+            &mut budget(),
+        )
+        .expect("automatically bypass both refused ancestors");
+    assert_eq!(automatic.backup, clean);
+    assert_eq!(automatic.replacements, full_path);
     assert_eq!(
         native
             .read_removal_backup_successor(context, &second, &original, &full_path, &mut budget())

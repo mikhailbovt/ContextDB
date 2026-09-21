@@ -1,12 +1,12 @@
 use super::*;
 
 impl NativeCustodyKeys {
-    // The native service verifies the complete archive and request-bound replacement
-    // before supplying bytes. Every partial publication still checks current custody.
+    // The native service verifies the complete issued archive before supplying
+    // bytes. Every partial publication still checks current custody and membership.
     pub(crate) fn retain_archive_artifact(
         &self,
         backup: &BackupResponse,
-        replacement: &NativeBackupReplacement,
+        contents: &NativeBackupContentsInventory,
         from: u32,
         max_pages: u32,
         budget: &mut QueryBudget,
@@ -17,7 +17,6 @@ impl NativeCustodyKeys {
                 "archive retention requires 1..16 pages per publication",
             ));
         }
-        let contents = &replacement.target;
         if backup.digest != contents.registration.archive_digest
             || backup.bytes.len() as u64 != contents.registration.encoded_bytes
             || backup.bytes.len() > crate::backup::MAX_BACKUP_BYTES
@@ -25,7 +24,7 @@ impl NativeCustodyKeys {
             || backup.format != crate::NATIVE_ENCRYPTED_BACKUP_FORMAT
             || crate::digest_bytes(&backup.bytes) != backup.digest
         {
-            return Err(integrity("retained bytes differ from accepted replacement"));
+            return Err(integrity("retained bytes differ from accepted archive"));
         }
         let _guard = self.writes.enter(|| budget.check().map_err(budget_error))?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
