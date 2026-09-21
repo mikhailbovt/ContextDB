@@ -6,6 +6,7 @@ use std::{path::Path, sync::Arc};
 
 mod payload;
 mod records;
+mod successor;
 
 fn archive(native: &NativeService, context: &AuthenticatedRequestContext) -> BackupResponse {
     native

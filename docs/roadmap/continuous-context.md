@@ -341,6 +341,11 @@ publishing a complete retained replacement. Independent branch history, original
 mixed assertions and generic revisions remain preserved. Unknown origins,
 unretained descendants and missing roots require explicit reconciliation;
 discovery still rescans within a shared budget.
+Cleanup can continue through exact accepted replacement paths after original or
+intermediate keys have been refused. Every earlier request is verified separately;
+only complete readable terminal bytes become the next coordinator baseline.
+Restart tests preserve the separate edges, independent data and exact retries;
+invalid paths, divergent owners and incomplete artifacts cannot start cleanup.
 Owned and mixed assertion keys can now be retired after fresh native-use and
 complete archive-preservation verification. Mixed selections require classified
 replacement batches in every affected native instance, preserving controls,

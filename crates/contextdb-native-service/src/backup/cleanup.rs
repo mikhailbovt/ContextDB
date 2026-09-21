@@ -7,6 +7,7 @@ use contextdb_service::AuthenticatedRequestContext;
 use serde::{Deserialize, Serialize};
 
 mod index;
+mod successor;
 
 #[cfg(test)]
 mod tests;
