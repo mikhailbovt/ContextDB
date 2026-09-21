@@ -9,14 +9,15 @@ mod storage;
 pub(crate) mod tests;
 
 pub use keys::{
-    CustodyMasterKey, NativeBackupCatalogPage, NativeBackupContentsInventory,
-    NativeBackupContentsPage, NativeBackupContentsReceipt, NativeBackupFrontier,
-    NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
-    NativeBackupPruningCounts, NativeBackupRegistration, NativeBackupReplacement,
-    NativeBackupReplacementReceipt, NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage,
-    NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
-    NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
-    NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
+    CustodyMasterKey, NativeBackupArtifactProgress, NativeBackupArtifactReceipt,
+    NativeBackupCatalogPage, NativeBackupContentsInventory, NativeBackupContentsPage,
+    NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
+    NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
+    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeCustodyKeys,
+    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyUseAddressInventory,
+    NativeKeyUseCatalogPage, NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory,
+    NativeKeyUseOutcome, NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition,
+    NativeKeyUseVersion,
 };
 pub(super) use storage::{NativeSnapshot, NativeStorage};
 

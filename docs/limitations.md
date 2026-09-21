@@ -45,8 +45,11 @@ and release verifier—not the presence of an API name—determine completion.
   current 64-source profile remain unfinished.
   Unclassified records remain unavailable. New mutations bind compact body-free
   controls; older full mutation groups support explicit verified preparation.
-  Hash-only migration, generic-record cleanup and
-  verified deletion completion that reopens disclosure remain unfinished.
+  Generic revision cleanup and verified replacement archives preserve independent
+  data through interrupted cleanup and restore. Replacement bytes can be retained
+  independently in bounded portions; complete availability requires their full
+  digest. Hash-only migration, complete copy coverage, key retirement and verified
+  deletion completion that reopens disclosure remain unfinished.
   See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector
   certification shape; E01/E02/E03 remain open.

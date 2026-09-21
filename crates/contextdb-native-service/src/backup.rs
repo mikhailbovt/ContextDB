@@ -21,6 +21,7 @@ use super::{
     validate_workspace_state, workspace_map_key,
 };
 
+mod artifacts;
 mod contents;
 pub(crate) mod replacements;
 pub use replacements::NativeRemovalBackup;
@@ -34,7 +35,7 @@ pub const NATIVE_ENCRYPTED_BACKUP_FORMAT: &str = "contextdb.native-fjall.encrypt
 
 const BACKUP_MAGIC: &[u8] = b"contextdb/native-backup/v1\0";
 const BACKUP_FOOTER_BYTES: usize = 32;
-const MAX_BACKUP_BYTES: usize = 256 * 1024 * 1024;
+pub(crate) const MAX_BACKUP_BYTES: usize = 256 * 1024 * 1024;
 const MAX_BACKUP_RAW_BYTES: usize = 128 * 1024 * 1024;
 pub(crate) const MAX_BACKUP_ENTRIES: usize = 2_000_000;
 const MAX_BACKUP_KEY_BYTES: usize = 64 * 1024;

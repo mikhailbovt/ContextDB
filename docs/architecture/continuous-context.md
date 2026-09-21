@@ -506,8 +506,8 @@ payload, revision or observed raw keys to every issued archive. It applies curre
 Admin/workspace/owner policy, verifies complete issuance and membership closure,
 and returns exact matching copies alongside explicit unknown legacy archives.
 An empty match list means selected keys are absent only from verified contents.
-One custody guard rechecks allocation, native-use, issuance, membership and
-replacement frontiers together; concurrent publication requires a retry. The shared
+One custody guard rechecks allocation, native-use, issuance, membership,
+replacement and artifact frontiers together; concurrent publication requires a retry. The shared
 budget and 32 MiB result bound apply to the whole report. This inspection neither
 replaces archives nor changes keys; mixed assertion preservation remains separate.
 
@@ -523,9 +523,23 @@ Target issuance, complete membership and source-to-target provenance share one
 custody Sync. `backup_replacement` recovers the immutable proof; catalog verification
 checks its sealed chain and reverse closure. Exact retries and native restore do
 not duplicate or rewind acceptance. Verified source backfill can precede that Sync.
-The caller must durably store the returned bytes. Partial cleanup is explicit;
-isolated cleanup of divergent archive branches, replacement availability, safe key
-retirement and complete physical/external-copy dispositions remain open.
+
+`retain_removal_backup` stores the verified encrypted bytes in independent custody,
+in authenticated chunks of at most 256 KiB and at most 4 MiB per Sync. Callers resume
+from the accepted page prefix; an exact start/limit retry returns its original
+immutable receipt, even after a lost response. The artifact journal binds issuance,
+complete membership and each prefix, with its own required registry-head anchor.
+Complete availability requires every byte and the original full archive digest.
+Missing, extra or changed chunks fail verification; incomplete receipts stay
+incomplete. Opening custody scans bounded pages rather than collecting all archive
+payloads in memory.
+
+`read_retained_removal_backup` requires Admin, the exact retained removal request,
+replacement proof and a complete artifact receipt. Request binding precedes byte
+access; recovery verifies both the full digest and native replay. Actual bytes and
+progress survive native restore and custody restart. Partial cleanup remains
+explicit; isolated cleanup of divergent archive branches, complete replacement
+coverage, safe key retirement and physical/external-copy dispositions remain open.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
 profile. Record addresses, sizes, lexical hashes and archive metadata remain

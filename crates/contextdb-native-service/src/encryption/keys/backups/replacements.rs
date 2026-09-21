@@ -135,18 +135,46 @@ impl NativeCustodyKeys {
         receipt: &NativeBackupReplacementReceipt,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupReplacement> {
+        self.read_backup_replacement(receipt, None, budget)
+    }
+
+    pub(crate) fn backup_replacement_for_request(
+        &self,
+        receipt: &NativeBackupReplacementReceipt,
+        workspace_digest: &str,
+        request: &NativeRemovalRequestReceipt,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupReplacement> {
+        self.read_backup_replacement(receipt, Some((workspace_digest, request)), budget)
+    }
+
+    fn read_backup_replacement(
+        &self,
+        receipt: &NativeBackupReplacementReceipt,
+        request: Option<(&str, &NativeRemovalRequestReceipt)>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupReplacement> {
         self.require_backup_contents()?;
         receipt.validate(self).map_err(storage_error)?;
         let snapshot = self
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
-        self.selected_backup_keys_at(&snapshot, &BTreeMap::new(), budget)?;
         let event: ReplacementEvent =
             self.read_replacement_record(&snapshot, &event_key(receipt.sequence), budget)?;
         if event.value.receipt != *receipt {
             return Err(integrity("archive replacement receipt differs"));
         }
+        // Request binding precedes catalog verification, which now reads actual
+        // artifact bytes. The full catalog still validates this proof before return.
+        if request.is_some_and(|(workspace, request)| {
+            event.value.workspace_digest != workspace || event.value.request != *request
+        }) {
+            return Err(integrity(
+                "retained archive replacement belongs to another request",
+            ));
+        }
+        self.selected_backup_keys_at(&snapshot, &BTreeMap::new(), budget)?;
         Ok(event.value)
     }
 

@@ -19,10 +19,11 @@ mod backups;
 pub(super) mod uses;
 mod versions;
 pub use backups::{
-    NativeBackupCatalogPage, NativeBackupContentsInventory, NativeBackupContentsPage,
-    NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
-    NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
-    NativeBackupReplacement, NativeBackupReplacementReceipt,
+    NativeBackupArtifactProgress, NativeBackupArtifactReceipt, NativeBackupCatalogPage,
+    NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
+    NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
+    NativeBackupPruningCounts, NativeBackupRegistration, NativeBackupReplacement,
+    NativeBackupReplacementReceipt,
 };
 pub use uses::{
     NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
@@ -429,30 +430,47 @@ impl NativeCustodyKeys {
         {
             return Err(failure("custody master-key proof differs"));
         }
-        for row in snapshot.scan_prefix(&self.rows, b"")? {
-            if row.key == b"identity" || row.key == b"proof" {
-                continue;
+        // Archive artifacts may be large; verification must not materialize the
+        // entire independent custody store merely to classify row families.
+        let mut after = None;
+        loop {
+            let page = snapshot.scan_prefix_page(
+                &self.rows,
+                contextdb_storage::ScanPageRequest {
+                    prefix: b"",
+                    start_after: after.as_deref(),
+                    max_entries: 256,
+                    max_bytes: contextdb_storage::MAX_SCAN_PAGE_BYTES,
+                },
+            )?;
+            let continuation = page.continuation;
+            for row in page.entries {
+                if row.key == b"identity" || row.key == b"proof" {
+                    continue;
+                }
+                if row.key.starts_with(b"backup/") {
+                    continue; // Verified as an exact ordered registry below.
+                }
+                if self.identity.version >= 3
+                    && (row.key.starts_with(b"key/") || row.key.starts_with(b"key-log/"))
+                {
+                    continue; // The immutable allocation journal closes both families.
+                }
+                if self.tracks_native_use() && row.key.starts_with(b"use/") {
+                    continue; // The native-use journal closes its pages and instance states.
+                }
+                let address = row
+                    .key
+                    .strip_prefix(b"key/")
+                    .and_then(|suffix| std::str::from_utf8(suffix).ok())
+                    .ok_or_else(|| failure("unknown custody inventory row"))?;
+                if blake3::Hash::from_hex(address).is_err() {
+                    return Err(failure("custody value address is invalid"));
+                }
+                self.unwrap(address, &decode(&row.value)?)?;
             }
-            if row.key.starts_with(b"backup/") {
-                continue; // Verified as an exact ordered registry below.
-            }
-            if self.identity.version >= 3
-                && (row.key.starts_with(b"key/") || row.key.starts_with(b"key-log/"))
-            {
-                continue; // The immutable allocation journal closes both families.
-            }
-            if self.tracks_native_use() && row.key.starts_with(b"use/") {
-                continue; // The native-use journal closes its pages and instance states.
-            }
-            let address = row
-                .key
-                .strip_prefix(b"key/")
-                .and_then(|suffix| std::str::from_utf8(suffix).ok())
-                .ok_or_else(|| failure("unknown custody inventory row"))?;
-            if blake3::Hash::from_hex(address).is_err() {
-                return Err(failure("custody value address is invalid"));
-            }
-            self.unwrap(address, &decode(&row.value)?)?;
+            let Some(next) = continuation else { break };
+            after = Some(next);
         }
         if self.identity.version >= 3 {
             self.verify_key_versions(&snapshot)?;

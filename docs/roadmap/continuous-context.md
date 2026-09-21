@@ -315,8 +315,14 @@ payload manifests and independent bodies under full native replay. Actual target
 bytes, membership and independent provenance are issued with one custody Sync.
 Tests cover mixed assertions, generic revisions, partial chunks, both-authority
 reopen, full/cleaned restore, divergent histories, other removal requests, missing
-or rehashed metadata and actual process exits before/after Sync. Isolated branch
-cleanup, durable replacement availability, safe key retirement and complete
-physical/external-copy closure remain open; these receipts do not complete deletion.
+or rehashed metadata and actual process exits before/after Sync. Replacement bytes
+can now be retained independently in resumable portions of at most 4 MiB. Immutable
+prefix receipts, exact retries and full-digest verification distinguish partial
+from complete availability. Tests cover interleaved archives, old native restore,
+cold authority reopen, false rehashed prefixes, missing/extra chunks, request-first
+access and actual process exits before/after artifact Sync. Archive frontiers also
+fence byte publication. Isolated branch cleanup, complete replacement coverage,
+safe key retirement and physical/external-copy closure remain open; these receipts
+do not complete deletion.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

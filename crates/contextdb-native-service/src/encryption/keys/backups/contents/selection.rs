@@ -23,6 +23,9 @@ pub struct NativeBackupFrontier {
     /// Latest independently accepted replacement provenance, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replacements: Option<NativeBackupReplacementReceipt>,
+    /// Latest retained archive-byte progress, including incomplete artifacts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifacts: Option<NativeBackupArtifactReceipt>,
 }
 
 /// One issued archive's relation to the selected key allocations. An empty copy
@@ -38,6 +41,9 @@ pub struct NativeBackupKeyArchive {
     /// Exact copies using selected keys, in the archive's original row order.
     /// They need not appear in a selected native-use history; no instance is inferred.
     pub copies: Vec<NativeBackupKeyCopy>,
+    /// Actual independently retained archive bytes; absence is not availability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<NativeBackupArtifactProgress>,
 }
 
 /// Complete issued-archive coverage at one immutable frontier. No archive bytes,
@@ -59,6 +65,7 @@ impl Head {
             issued_digest: self.digest.clone(),
             contents: self.contents.clone(),
             replacements: self.replacements.clone(),
+            artifacts: self.artifacts.clone(),
         }
     }
 }
@@ -103,6 +110,7 @@ impl NativeCustodyKeys {
                     registration: entry.clone(),
                     contents: None,
                     copies: Vec::new(),
+                    artifact: None,
                 },
             );
             Ok(())
@@ -152,6 +160,13 @@ impl NativeCustodyKeys {
             event.add_expected_keys(&mut expected);
             Ok(())
         })?;
+        for (_, state) in self.walk_backup_artifacts(snapshot, &head, &mut expected, budget)? {
+            let archive = archives
+                .get_mut(&state.progress.contents.registration.sequence)
+                .ok_or_else(|| integrity("retained artifact has no issuance"))?;
+            reserve(&mut report_bytes, &state.progress, budget)?;
+            archive.artifact = Some(state.progress);
+        }
         // Reverse closure includes unknown legacy archives: orphan pages or
         // locators cannot silently turn lost accepted contents into unknown.
         let mut after = None;
@@ -213,7 +228,7 @@ impl NativeCustodyKeys {
         if head.frontier(self.authority_id()) != *expected {
             return Err(ServiceError::new(
                 ErrorCode::IndexTooStale,
-                "archive issuance, membership or replacement changed; restart inventory",
+                "archive custody frontier changed; restart inventory",
                 true,
             ));
         }

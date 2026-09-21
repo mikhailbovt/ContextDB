@@ -5,8 +5,10 @@ use contextdb_storage::ScanPageRequest;
 
 use super::*;
 
+mod artifacts;
 mod contents;
 mod replacements;
+pub use artifacts::{NativeBackupArtifactProgress, NativeBackupArtifactReceipt};
 pub use contents::{
     NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
     NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
@@ -61,6 +63,8 @@ struct Head {
     contents: Option<NativeBackupContentsReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     replacements: Option<NativeBackupReplacementReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    artifacts: Option<NativeBackupArtifactReceipt>,
 }
 
 impl NativeCustodyKeys {
@@ -241,6 +245,7 @@ impl NativeCustodyKeys {
                     digest: Some(digest.into()),
                     contents: head.contents,
                     replacements: head.replacements,
+                    artifacts: head.artifacts,
                 },
             )?,
         )?;
@@ -285,6 +290,9 @@ impl NativeCustodyKeys {
         }
         if let Some(replacement) = &head.replacements {
             replacement.validate(self)?;
+        }
+        if let Some(artifact) = &head.artifacts {
+            artifact.validate(self)?;
         }
         Ok(head)
     }
@@ -337,45 +345,63 @@ impl NativeCustodyKeys {
         &self,
         snapshot: &S,
     ) -> contextdb_storage::Result<()> {
-        let rows = snapshot.scan_prefix(&self.rows, b"backup/")?;
-        if self.identity.version == 1 {
-            return if rows.is_empty() {
-                Ok(())
-            } else {
-                Err(failure(
-                    "legacy custody authority contains undeclared backup data",
-                ))
-            };
-        }
-        let head = self.backup_head(snapshot)?;
-        let mut reconstructed = Head::default();
-        let mut expected = std::collections::BTreeSet::from([HEAD.to_vec()]);
-        for row in rows.iter().filter(|row| row.key.starts_with(ISSUED)) {
-            let entry = self.decode_registration(&row.key, &row.value)?;
-            if entry.sequence != reconstructed.sequence + 1
-                || entry.previous_archive_digest != reconstructed.digest
-                || self.find_backup(snapshot, &entry.archive_digest)?.as_ref() != Some(&entry)
-            {
-                return Err(failure("issued backup registry chain differs"));
+        let mut expected = std::collections::BTreeSet::new();
+        if self.identity.version >= 2 {
+            let head = self.backup_head(snapshot)?;
+            expected.insert(HEAD.to_vec());
+            let mut previous = None;
+            for sequence in 1..=head.sequence {
+                let key = issued_key(sequence);
+                let entry = self.decode_registration(
+                    &key,
+                    &snapshot
+                        .get(&self.rows, &key)?
+                        .ok_or_else(|| failure("issued backup registration is missing"))?,
+                )?;
+                if entry.previous_archive_digest != previous
+                    || self.find_backup(snapshot, &entry.archive_digest)?.as_ref() != Some(&entry)
+                {
+                    return Err(failure("issued backup registry chain differs"));
+                }
+                expected.insert(key);
+                expected.insert(index_key(&entry.archive_digest));
+                previous = Some(entry.archive_digest);
             }
-            expected.insert(row.key.clone());
-            expected.insert(index_key(&entry.archive_digest));
-            reconstructed = Head {
-                sequence: entry.sequence,
-                digest: Some(entry.archive_digest),
-                contents: None,
-                replacements: None,
-            };
+            if previous != head.digest {
+                return Err(failure("issued backup registry terminal differs"));
+            }
+            self.verify_backup_contents(snapshot, &head, &mut expected)?;
+            self.verify_backup_replacements(snapshot, &head, &mut expected)?;
+            let mut budget = contextdb_recall::QueryBudget::new(
+                u64::MAX,
+                u64::MAX,
+                std::time::Duration::from_secs(300),
+                Default::default(),
+            );
+            self.walk_backup_artifacts(snapshot, &head, &mut expected, &mut budget)
+                .map_err(|_| failure("retained archive bytes verification failed"))?;
         }
-        self.verify_backup_contents(snapshot, &head, &mut expected)?;
-        self.verify_backup_replacements(snapshot, &head, &mut expected)?;
-        reconstructed.contents = head.contents.clone();
-        reconstructed.replacements = head.replacements.clone();
-        if reconstructed != head
-            || rows.len() != expected.len()
-            || rows.iter().any(|row| !expected.contains(&row.key))
-        {
-            return Err(failure("issued backup registry closure differs"));
+        let mut after = None;
+        loop {
+            let page = snapshot.scan_prefix_page(
+                &self.rows,
+                ScanPageRequest {
+                    prefix: b"backup/",
+                    start_after: after.as_deref(),
+                    max_entries: 256,
+                    max_bytes: 1024 * 1024,
+                },
+            )?;
+            for row in page.entries {
+                if !expected.remove(&row.key) {
+                    return Err(failure("issued backup registry has undeclared rows"));
+                }
+            }
+            let Some(next) = page.continuation else { break };
+            after = Some(next);
+        }
+        if !expected.is_empty() {
+            return Err(failure("issued backup registry lost accepted rows"));
         }
         Ok(())
     }

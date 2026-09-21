@@ -57,14 +57,15 @@ pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
 pub use deletion::{NativeDeletionLineage, NativeDeletionSource};
 pub use encryption::{
-    CustodyMasterKey, NativeBackupCatalogPage, NativeBackupContentsInventory,
-    NativeBackupContentsPage, NativeBackupContentsReceipt, NativeBackupFrontier,
-    NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
-    NativeBackupPruningCounts, NativeBackupRegistration, NativeBackupReplacement,
-    NativeBackupReplacementReceipt, NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage,
-    NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
-    NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
-    NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
+    CustodyMasterKey, NativeBackupArtifactProgress, NativeBackupArtifactReceipt,
+    NativeBackupCatalogPage, NativeBackupContentsInventory, NativeBackupContentsPage,
+    NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
+    NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
+    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeCustodyKeys,
+    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyUseAddressInventory,
+    NativeKeyUseCatalogPage, NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory,
+    NativeKeyUseOutcome, NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition,
+    NativeKeyUseVersion,
 };
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{
