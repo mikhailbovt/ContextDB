@@ -10,6 +10,15 @@ impl NativeCustodyKeys {
         snapshot: &S,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
+        self.walk_issuance(snapshot, budget, |_, _| Ok(()))
+    }
+
+    pub(super) fn walk_issuance<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        budget: &mut QueryBudget,
+        mut visit: impl FnMut(&NativeBackupRegistration, &mut QueryBudget) -> ServiceResult<()>,
+    ) -> ServiceResult<()> {
         let head = self.backup_head(snapshot).map_err(storage_error)?;
         let mut previous = None;
         for sequence in 1..=head.sequence {
@@ -32,6 +41,7 @@ impl NativeCustodyKeys {
                 ));
             }
             budget.charge(1, 0).map_err(budget_error)?;
+            visit(&entry, budget)?;
             previous = Some(entry.archive_digest);
         }
         let tail = snapshot
@@ -75,7 +85,7 @@ impl NativeCustodyKeys {
         self.open_backup_record(key, &bytes).map_err(storage_error)
     }
 
-    fn walk_contents_events<S: ReadSnapshot>(
+    pub(super) fn walk_contents_events<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         head: &Head,

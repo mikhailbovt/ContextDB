@@ -3,7 +3,11 @@
 
 use super::*;
 
+mod archives;
 mod decisions;
+pub use archives::{
+    NativeRemovalBackupInventory, NativeRemovalKeyInventory, NativeRemovalKeySelection,
+};
 pub(crate) mod owned;
 pub use decisions::{NativeOwnedKeyAction, NativeOwnedKeyDisposition};
 pub use owned::{

@@ -13,7 +13,8 @@ pub use keys::{
     NativeOwnedKeyAction, NativeOwnedKeyDisposition, NativeOwnedKeyInventory, NativeOwnedKeyOwner,
     NativeOwnedKeyRemovalReceipt, NativeOwnedKeyRemovalWitness, NativePrimaryKeyAction,
     NativePrimaryKeyDisposition, NativePrimaryKeyInventory, NativePrimaryKeyRemovalReceipt,
-    NativePrimaryKeyRemovalWitness,
+    NativePrimaryKeyRemovalWitness, NativeRemovalBackupInventory, NativeRemovalKeyInventory,
+    NativeRemovalKeySelection,
 };
 pub use preparation::NativeRemovalPreparationReceipt;
 pub(super) use preparation::RemovalPreparationPublication;

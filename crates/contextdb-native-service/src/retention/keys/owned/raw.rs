@@ -64,7 +64,7 @@ impl NativeService {
         self.read_owned_key_inventory(current, receipt, budget)
     }
 
-    fn owned_reclaimed_raw_inventory(
+    pub(in crate::retention::keys) fn owned_reclaimed_raw_inventory(
         &self,
         context: &AuthenticatedRequestContext,
         request: &NativeRemovalRequestReceipt,
@@ -88,7 +88,7 @@ impl NativeService {
         })
     }
 
-    fn owned_inspected_raw_inventory(
+    pub(in crate::retention::keys) fn owned_inspected_raw_inventory(
         &self,
         context: &AuthenticatedRequestContext,
         request: &NativeRemovalRequestReceipt,

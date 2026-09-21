@@ -82,6 +82,33 @@ fn closed_revision_key_inventory_preserves_all_body_families_through_pruning_and
             context: f.context.clone(),
         })
         .expect("cleaned encrypted archive");
+    let archive_inventory = f
+        .service
+        .read_removal_backup_inventory(
+            &f.context,
+            &f.removal,
+            &NativeRemovalKeySelection::Record {
+                witness: witness.clone(),
+            },
+            &mut budget(),
+        )
+        .expect("request-owned revision archive inventory");
+    assert_eq!(archive_inventory.backups.archives.len(), 2);
+    assert_eq!(
+        archive_inventory.backups.archives[0]
+            .registration
+            .archive_digest,
+        old.digest
+    );
+    assert_eq!(archive_inventory.backups.archives[0].copies.len(), 3);
+    assert!(
+        archive_inventory.backups.archives[0]
+            .copies
+            .iter()
+            .all(|copy| selected_ids.contains(&copy.version.key_id))
+    );
+    assert!(archive_inventory.backups.archives[1].copies.is_empty());
+    assert!(archive_inventory.backups.archives[1].contents.is_some());
     let cleaned_decisions = f
         .service
         .retain_record_key_removal(&f.context, &f.removal, &witness, &mut budget())
@@ -169,6 +196,20 @@ fn closed_revision_key_inventory_preserves_all_body_families_through_pruning_and
                 *saved
             );
         }
+        assert_eq!(
+            restored
+                .read_removal_backup_inventory(
+                    &f.context,
+                    &f.removal,
+                    &NativeRemovalKeySelection::Record {
+                        witness: witness.clone()
+                    },
+                    &mut budget(),
+                )
+                .expect("archive obligations after old restore")
+                .backups,
+            archive_inventory.backups
+        );
         assert_eq!(
             restored
                 .read_record_key_inventory(&f.context, &witness, &mut budget())

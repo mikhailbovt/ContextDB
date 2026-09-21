@@ -57,7 +57,8 @@ pub use custody::CustodyProgress;
 pub use deletion::{NativeDeletionLineage, NativeDeletionSource};
 pub use encryption::{
     CustodyMasterKey, NativeBackupCatalogPage, NativeBackupContentsInventory,
-    NativeBackupContentsPage, NativeBackupContentsReceipt, NativeBackupKeyCopy,
+    NativeBackupContentsPage, NativeBackupContentsReceipt, NativeBackupFrontier,
+    NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
     NativeBackupRegistration, NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage,
     NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
     NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
@@ -86,7 +87,8 @@ pub use retention::{
     NativeOwnedKeyAction, NativeOwnedKeyDisposition, NativeOwnedKeyInventory, NativeOwnedKeyOwner,
     NativeOwnedKeyRemovalReceipt, NativeOwnedKeyRemovalWitness, NativePrimaryKeyAction,
     NativePrimaryKeyDisposition, NativePrimaryKeyInventory, NativePrimaryKeyRemovalReceipt,
-    NativePrimaryKeyRemovalWitness, NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt,
+    NativePrimaryKeyRemovalWitness, NativeRemovalBackupInventory, NativeRemovalKeyInventory,
+    NativeRemovalKeySelection, NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt,
     NativeSourcePruningReceipt,
 };
 pub use suppression::{NativeSuppressionLedger, SuppressionProgress};

@@ -501,6 +501,16 @@ without membership remain unknown. These observations survive native restore;
 they do not infer the original native instance, preserve a replacement archive or
 authorize disabling keys needed by independent data.
 
+`read_removal_backup_inventory` joins a retained removal request's primary,
+payload, revision or observed raw keys to every issued archive. It applies current
+Admin/workspace/owner policy, verifies complete issuance and membership closure,
+and returns exact matching copies alongside explicit unknown legacy archives.
+An empty match list means selected keys are absent only from verified contents.
+One custody guard rechecks allocation, native-use, issuance and membership
+frontiers together; concurrent issuance or backfill requires a retry. The shared
+budget and 32 MiB result bound apply to the whole report. This inspection neither
+replaces archives nor changes keys; mixed assertion preservation remains separate.
+
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
 profile. Record addresses, sizes, lexical hashes and archive metadata remain
 visible. Values are limited to 16 MiB before encryption; each envelope adds 64

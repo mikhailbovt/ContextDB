@@ -134,7 +134,7 @@ impl NativeOwnedKeyOwner {
 }
 
 impl NativeOwnedKeyInventory {
-    fn addresses(&self) -> ServiceResult<BTreeMap<String, Vec<NativeKeyAllocation>>> {
+    pub(super) fn addresses(&self) -> ServiceResult<BTreeMap<String, Vec<NativeKeyAllocation>>> {
         let mut addresses: BTreeMap<_, Vec<_>> = self
             .native_use
             .addresses
@@ -208,7 +208,7 @@ impl NativeService {
         self.read_owned_key_inventory(current, receipt, budget)
     }
 
-    fn owned_payload_inventory(
+    pub(super) fn owned_payload_inventory(
         &self,
         context: &AuthenticatedRequestContext,
         request: &NativeRemovalRequestReceipt,
@@ -232,7 +232,7 @@ impl NativeService {
         })
     }
 
-    fn owned_record_inventory(
+    pub(super) fn owned_record_inventory(
         &self,
         context: &AuthenticatedRequestContext,
         request: &NativeRemovalRequestReceipt,

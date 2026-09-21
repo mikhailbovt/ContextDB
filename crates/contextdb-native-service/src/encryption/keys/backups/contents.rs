@@ -7,6 +7,8 @@ use super::*;
 use crate::{integrity, invalid, raw_index::budget_error, storage_error};
 
 mod publication;
+mod selection;
+pub use selection::{NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyInventory};
 #[cfg(test)]
 mod tests;
 mod verification;

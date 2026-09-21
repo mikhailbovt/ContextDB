@@ -8,7 +8,7 @@ use super::*;
 mod contents;
 pub use contents::{
     NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
-    NativeBackupKeyCopy,
+    NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
 };
 
 #[cfg(test)]

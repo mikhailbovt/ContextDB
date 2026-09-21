@@ -306,6 +306,10 @@ V4 backup issuance now retains complete ciphertext membership in the same Sync,
 with immutable paged receipts surviving older restore and custody reopen. Admin
 backfill verifies supplied archive bytes against their original issuance; missing
 older coverage stays unknown. Interrupted registration/page writes leave no partial
-acceptance. Preserving independent data in replacement archives remains open.
+acceptance. Request-owned primary, payload, revision and observed raw keys now join
+every issued archive under one budget and current custody frontiers. Complete
+membership distinguishes no matches from unknown older coverage; concurrent
+issuance/backfill rejects stale reports. Preserving independent data in replacement
+archives remains open.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

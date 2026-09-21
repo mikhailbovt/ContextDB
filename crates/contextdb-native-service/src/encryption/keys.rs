@@ -20,7 +20,8 @@ pub(super) mod uses;
 mod versions;
 pub use backups::{
     NativeBackupCatalogPage, NativeBackupContentsInventory, NativeBackupContentsPage,
-    NativeBackupContentsReceipt, NativeBackupKeyCopy, NativeBackupRegistration,
+    NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
+    NativeBackupKeyInventory, NativeBackupRegistration,
 };
 pub use uses::{
     NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
