@@ -51,7 +51,7 @@ mod suppression;
 
 pub use backup::{
     NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NATIVE_ENCRYPTED_BACKUP_FORMAT,
-    NativeRemovalBackup,
+    NativeBackupCleanupProgress, NativeBackupCleanupStage, NativeRemovalBackup,
 };
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;

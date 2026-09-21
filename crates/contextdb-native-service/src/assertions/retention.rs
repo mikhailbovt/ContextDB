@@ -380,6 +380,47 @@ fn pruning_receipt(publication: &AssertionPruningPublication) -> NativeAssertion
 }
 
 impl NativeService {
+    pub(crate) fn next_removal_assertion(
+        &self,
+        context: &AuthenticatedRequestContext,
+        selected: &BTreeSet<ObservationId>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Option<u64>> {
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        let workspace = workspace(context);
+        self.verify_assertion_records_budget(&snapshot, budget)?;
+        let bindings = self.assertion_pruning_bindings(&snapshot, budget)?;
+        let world = self.workspace_state(&snapshot, &context.request.workspace_id)?;
+        for commit in 1..=world.watermarks.journal {
+            let (_, event) = self.recovery_event(&snapshot, &workspace, commit, budget)?;
+            if event.operation != "assertions" {
+                continue;
+            }
+            let (_, _, batch) = self.load_retained_assertions(
+                &snapshot,
+                &event,
+                bindings.get(&(workspace.clone(), commit)),
+                budget,
+            )?;
+            for retained in &batch.mutations {
+                let RetainedMutation::Live { mutation } = retained else {
+                    continue;
+                };
+                if !matches!(mutation, AssertionMutation::Policy { .. })
+                    && !RemovedMutation::from_mutation(mutation)?
+                        .sources
+                        .is_disjoint(selected)
+                {
+                    return Ok(Some(commit));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// Remove source-supported assertions/retractions in one accepted batch,
     /// retaining independent mutations and content-free replay controls. Analysis
     /// verifies semantic history outside the writer; publication compares the

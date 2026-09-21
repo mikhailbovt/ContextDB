@@ -56,6 +56,18 @@ impl ControlPreparation {
 }
 
 impl NativeService {
+    pub(in crate::record_journal) fn has_record_control_preparation<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        global: u64,
+    ) -> ServiceResult<bool> {
+        // This only chooses the next operation. Publication verifies the complete
+        // accepted suffix before treating a missing locator as new work.
+        Ok(self
+            .raw_value::<u64, _>(snapshot, &group_key(global))?
+            .is_some())
+    }
+
     /// Retain verified controls for one complete pre-control mutation group.
     /// Requires Admin and access to every revision's policy. Analysis is bounded
     /// by the shared budget and 1024 mutations/16 MiB each of bodies and controls.

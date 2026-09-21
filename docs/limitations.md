@@ -48,7 +48,10 @@ and release verifier—not the presence of an API name—determine completion.
   Generic revision cleanup and verified replacement archives preserve independent
   data through interrupted cleanup and restore. Replacement bytes can be retained
   independently in bounded portions; complete availability requires their full
-  digest. Hash-only migration, complete copy coverage, key retirement and verified
+  digest. A bounded coordinator cleans exact archives in separate restored owners;
+  unknown origins, unretained descendants and missing-root reconciliation remain
+  explicit requirements. Discovery rescans after restart. Hash-only migration,
+  complete copy coverage, key retirement and verified
   deletion completion that reopens disclosure remain unfinished.
   See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector

@@ -57,6 +57,21 @@ pub struct NativePayloadPruningProgress {
 }
 
 impl NativeService {
+    pub(crate) fn removal_payload_complete(
+        &self,
+        block: ContentBlockId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<bool> {
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        let header = self.payload_header(&snapshot, block)?;
+        Ok(self
+            .verified_payload_pruning(&snapshot, &header, budget)?
+            .is_some_and(|state| state.through == header.chunks))
+    }
+
     /// Prune up to 32 chunks (8 MiB) of one selected block per publication.
     /// First use verifies its complete original (at most 64 MiB), fresh ownership
     /// and all affected primary tombstones outside the native publication lock.

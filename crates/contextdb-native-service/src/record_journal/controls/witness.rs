@@ -7,6 +7,7 @@ use contextdb_recall::QueryBudget;
 use super::*;
 use crate::suppression::{RecordSourceControl, RemovalCheckpoint};
 
+mod cleanup;
 mod graph;
 mod keys;
 pub use keys::{NativeRecordBodyKind, NativeRecordKeyInventory};

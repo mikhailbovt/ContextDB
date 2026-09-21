@@ -321,7 +321,13 @@ prefix receipts, exact retries and full-digest verification distinguish partial
 from complete availability. Tests cover interleaved archives, old native restore,
 cold authority reopen, false rehashed prefixes, missing/extra chunks, request-first
 access and actual process exits before/after artifact Sync. Archive frontiers also
-fence byte publication. Isolated branch cleanup, complete replacement coverage,
+fence byte publication. A native coordinator now advances cleanup in separate
+owners restored from exact issued archives. It verifies ancestry before work,
+recovers existing maintenance journals and rechecks the storage sequence before
+publishing a complete retained replacement. Independent branch history, originals,
+mixed assertions and generic revisions remain preserved. Unknown origins,
+unretained descendants and missing roots require explicit reconciliation;
+discovery still rescans within a shared budget. Complete replacement coverage,
 safe key retirement and physical/external-copy closure remain open; these receipts
 do not complete deletion.
 Version 1/2 key migration, current key disablement, complete copy dispositions and

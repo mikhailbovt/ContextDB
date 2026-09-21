@@ -44,6 +44,85 @@ fn pending_write(
 }
 
 #[test]
+fn archive_cleanup_finishes_an_interrupted_record_origin_transfer_before_pruning() {
+    use contextdb_service::{CreateBackupRequest, RestoreBackupRequest};
+    let root = tempfile::tempdir().expect("root");
+    let (_keys_directory, keys) = encryption::tests::authority("cleanup-pending");
+    let (_ledger_directory, ledger) = suppression::tests::authority("cleanup-pending");
+    let service = NativeService::open_encrypted(
+        root.path().join("native"),
+        "cleanup-pending",
+        [7; 32],
+        ledger.clone(),
+        keys.clone(),
+    )
+    .expect("native");
+    let source = input(1, "selected source");
+    let context = &source.context;
+    service.append_event(source.clone()).expect("capture");
+    pending_write(&service, context, source.event.event_id, "pending");
+    let old = service
+        .create_backup(CreateBackupRequest {
+            context: context.clone(),
+        })
+        .expect("archive with pending transfer");
+    let removal = service
+        .request_original_removal(
+            context,
+            &BTreeSet::from([source.event.event_id]),
+            "remove",
+            &mut budget(),
+        )
+        .expect("removal");
+    let worker = NativeService::open_encrypted(
+        root.path().join("cleanup"),
+        "cleanup-pending",
+        [9; 32],
+        ledger,
+        keys,
+    )
+    .expect("separate owner");
+    worker
+        .restore_backup(RestoreBackupRequest {
+            context: context.clone(),
+            format: old.format.clone(),
+            bytes: old.bytes.clone(),
+            digest: old.digest.clone(),
+        })
+        .expect("actual restore");
+    assert_eq!(
+        worker
+            .advance_removal_backup(context, &removal, &old, &mut budget())
+            .expect("repair first")
+            .stage,
+        NativeBackupCleanupStage::RecordOrigins
+    );
+    assert!(
+        worker
+            .pending_record_source_writes(context, None, 256, &mut budget())
+            .expect("no pending origin")
+            .pending
+            .is_empty()
+    );
+    let mut ready = None;
+    for _ in 0..16 {
+        let progress = worker
+            .advance_removal_backup(context, &removal, &old, &mut budget())
+            .expect("continue cleanup");
+        if progress.stage == NativeBackupCleanupStage::Available {
+            ready = Some(progress);
+            break;
+        }
+    }
+    let ready = ready.expect("available replacement");
+    assert_eq!(ready.replacement.expect("proof").pruning.records, 1);
+    assert!(ready.artifact.expect("bytes").complete);
+    worker
+        .verify_native(true)
+        .expect("origin completion and pruning remain replayable");
+}
+
+#[test]
 fn paged_discovery_and_repair_follow_the_workspace_journal_across_appends() {
     let root = tempfile::tempdir().expect("root");
     let (_authority, ledger) = suppression::tests::authority("record-discovery");

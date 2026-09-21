@@ -537,9 +537,20 @@ payloads in memory.
 `read_retained_removal_backup` requires Admin, the exact retained removal request,
 replacement proof and a complete artifact receipt. Request binding precedes byte
 access; recovery verifies both the full digest and native replay. Actual bytes and
-progress survive native restore and custody restart. Partial cleanup remains
-explicit; isolated cleanup of divergent archive branches, complete replacement
-coverage, safe key retirement and physical/external-copy dispositions remain open.
+progress survive native restore and custody restart.
+
+`advance_removal_backup` coordinates logical cleanup in a separate encrypted native
+owner restored from the exact issued original. Each call verifies request, ancestry
+and native replay, then advances bounded source/origin preparation, custody,
+index rebuild/reclamation, assertion/revision pruning, original/chunk pruning or
+replacement-byte retention. Accepted journals determine restart progress; no caller
+stage or filesystem marker grants authority. Final publication rechecks the native
+storage sequence, including after restore. `Available` identifies one verified
+target with completely retained bytes; it does not cover later writes or other
+archives. Unclassified records, unretained branch descendants and missing roots
+require explicit reconciliation. Discovery rescans remain budgeted administrative
+work. Complete replacement coverage, safe key retirement and physical/external-copy
+dispositions remain open; these operations do not complete deletion.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
 profile. Record addresses, sizes, lexical hashes and archive metadata remain

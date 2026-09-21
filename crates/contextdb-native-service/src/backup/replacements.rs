@@ -15,7 +15,7 @@ use crate::{
 mod tests;
 
 /// Actual encrypted replacement bytes and independently retained preservation proof.
-/// The caller must store the bytes; custody retains only their verified commitments.
+/// Use `retain_removal_backup` to store the returned bytes in independent custody.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeRemovalBackup {
@@ -54,6 +54,17 @@ impl NativeService {
         original: &BackupResponse,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeRemovalBackup> {
+        self.create_removal_backup_at(context, request, original, None, budget)
+    }
+
+    pub(super) fn create_removal_backup_at(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        original: &BackupResponse,
+        expected_storage_sequence: Option<u64>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeRemovalBackup> {
         require_capability(context, Capability::Admin)?;
         let lineage = self.read_original_removal_inventory(context, request, budget)?;
         let source = self.verify_encrypted_archive(original, budget)?;
@@ -68,6 +79,15 @@ impl NativeService {
             ));
         }
         let _guard = self.lock_index_publication(budget)?;
+        if let Some(expected) = expected_storage_sequence
+            && self.engine.head_sequence().map_err(storage_error)? != expected
+        {
+            return Err(ServiceError::new(
+                ErrorCode::IndexTooStale,
+                "archive changed during cleanup verification; repeat the advance",
+                true,
+            ));
+        }
         let (target, backup) = self.build_native_backup()?;
         budget
             .charge(
@@ -94,6 +114,11 @@ impl NativeService {
             request,
             budget,
         )?;
+        if pruning.total().is_none_or(|total| total == 0) {
+            return Err(crate::invalid(
+                "archive replacement requires accepted pruning progress",
+            ));
+        }
         let source = self.retain_verified_backup_contents(&source, original, false, budget)?;
         let replacement = keys.accept_backup_replacement(
             &backup,
@@ -119,7 +144,7 @@ impl NativeService {
         })
     }
 
-    fn verify_replacement_history<S: ReadSnapshot, T: ReadSnapshot>(
+    pub(super) fn verify_replacement_history<S: ReadSnapshot, T: ReadSnapshot>(
         &self,
         before: &S,
         after: &T,
@@ -202,11 +227,6 @@ impl NativeService {
                 }
                 pruning.records += 1;
             }
-        }
-        if pruning.total().is_none_or(|total| total == 0) {
-            return Err(crate::invalid(
-                "archive replacement requires accepted pruning progress",
-            ));
         }
         // Native replay verifies accepted bodies and all derived rows. Also retain
         // receipts and original payload manifests exactly, without relying on the
