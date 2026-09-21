@@ -8,6 +8,9 @@ use contextdb_service::CaptureReceipt;
 
 use super::*;
 
+mod local;
+pub use local::NativeRemovalLocalInventory;
+
 const DOMAIN: &str = "contextdb/native-source-deletion-lineage/v2";
 const PAGE_ENTRIES: usize = 256;
 const PAGE_BYTES: usize = 1024 * 1024;

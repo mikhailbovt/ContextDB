@@ -599,6 +599,14 @@ storage sequence, including after restore. `Available` identifies one verified
 target with completely retained bytes; it does not cover later writes or other
 archives.
 
+`read_original_removal_local_inventory` reconciles the exact retained selection
+with the complete current source history. Older archives can lack the requested
+roots while containing earlier selected co-owners or staged blocks. Cleanup
+includes those present copies and preserves globally shared novel blocks even
+before their independent owners appear locally. Absence requires a verified
+history and no orphan capture or payload rows; the final storage sequence is
+rechecked. This local report grants no pruning or completion authority.
+
 When original keys have been retired, `read_removal_backup_successor` follows
 1..256 exact replacement receipts from an original membership receipt. Every
 edge must match the previous complete target and an independently retained
@@ -609,7 +617,7 @@ not be decrypted. Restore that successor into an isolated owner, then use
 New proofs start at that successor; earlier requests retain separate proofs.
 If its keys are later retired, supply the accepted path to a usable successor.
 
-Unclassified records, unretained branch descendants and missing roots
+Unclassified records and unretained branch descendants
 require explicit reconciliation. Discovery rescans remain budgeted administrative
 work. The inventory reports identify remaining replacement obligations; executing
 all of them and physical/external-copy dispositions remain

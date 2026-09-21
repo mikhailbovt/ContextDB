@@ -63,9 +63,10 @@ and release verifier—not the presence of an API name—determine completion.
   The independent retirement journal
   survives native restore; uncertain Sync closes key use until authority recovery.
   Wrapped descriptors remain, so retirement does not certify physical destruction.
-  Unknown origins, unretained descendants and missing-root reconciliation remain
-  explicit requirements. Discovery rescans after restart. Hash-only migration,
-  complete copy coverage and verified
+  Older archives may lack selected roots; verified local history determines which
+  retained sources and blocks are present. Unknown origins and unretained branch
+  descendants still require reconciliation. Discovery rescans after restart.
+  Hash-only migration, complete copy coverage and verified
   deletion completion that reopens disclosure remain unfinished.
   See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector

@@ -57,6 +57,48 @@ pub struct NativePayloadPruningProgress {
 }
 
 impl NativeService {
+    pub(crate) fn require_absent_payload<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        block: ContentBlockId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<()> {
+        for key in [header_key(block), pruning_key(block)] {
+            budget
+                .charge(1, 0)
+                .map_err(crate::raw_index::budget_error)?;
+            if snapshot
+                .get(&self.keyspaces.continuous, &key)
+                .map_err(storage_error)?
+                .is_some()
+            {
+                return Err(integrity(
+                    "selected payload has controls outside its accepted staging history",
+                ));
+            }
+        }
+        budget
+            .charge(1, 0)
+            .map_err(crate::raw_index::budget_error)?;
+        let page = snapshot
+            .scan_prefix_page(
+                &self.keyspaces.continuous,
+                contextdb_storage::ScanPageRequest {
+                    prefix: format!("payload/chunk/{block}/").as_bytes(),
+                    start_after: None,
+                    max_entries: 1,
+                    max_bytes: 512 * 1024,
+                },
+            )
+            .map_err(storage_error)?;
+        if !page.entries.is_empty() || page.continuation.is_some() {
+            return Err(integrity(
+                "selected payload has chunks outside its accepted staging history",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn removal_payload_complete(
         &self,
         block: ContentBlockId,
@@ -128,7 +170,7 @@ impl NativeService {
             return Ok(progress(state, header.chunks));
         }
         if previous.is_none() {
-            let closure = self.inspect_original_deletion(context, &receipt.roots, budget)?;
+            let closure = self.read_original_removal_local_inventory(context, receipt, budget)?;
             if closure.workspace_commit != world.watermarks.journal {
                 return Err(stale());
             }
@@ -201,6 +243,10 @@ impl NativeService {
             encode(&state)?,
         )
         .map_err(storage_error)?;
+        // An older archive can contain this block before any owning capture.
+        // Declare the existing prerequisite format even when no source body
+        // needed pruning; only accepted journals prove actual removals.
+        self.enable_capture_extension(&mut tx, retention::PRUNING_FEATURE)?;
         self.enable_capture_extension(&mut tx, PAYLOAD_PRUNING_FEATURE)?;
         let digest = publication_digest(&workspace, &publication)?;
         self.finish_frame(

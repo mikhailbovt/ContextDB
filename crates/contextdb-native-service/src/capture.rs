@@ -175,6 +175,32 @@ impl CapturePort for NativeService {
 }
 
 impl NativeService {
+    // Called only after a retained request and the complete local source history
+    // have been verified. Missing journal membership cannot hide orphan controls.
+    pub(crate) fn require_absent_capture<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<()> {
+        let original = digest_bytes(id.to_string().as_bytes()).into_bytes();
+        for (space, key) in [
+            (&self.keyspaces.continuous, record_key(id)),
+            (&self.keyspaces.observations_content, original.clone()),
+            (&self.keyspaces.observations_policy, original),
+        ] {
+            budget
+                .charge(1, 0)
+                .map_err(super::raw_index::budget_error)?;
+            if snapshot.get(space, &key).map_err(storage_error)?.is_some() {
+                return Err(integrity(
+                    "selected source has rows outside its accepted local history",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn captured_receipt_metadata<S: ReadSnapshot>(
         &self,
         snapshot: &S,

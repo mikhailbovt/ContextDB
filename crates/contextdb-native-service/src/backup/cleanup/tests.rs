@@ -4,6 +4,7 @@ use crate::retention::keys::witness::tests::{budget, fixture};
 use contextdb_service::{CapturePort, CognitiveMemoryService};
 use std::{path::Path, sync::Arc};
 
+mod local;
 mod payload;
 mod records;
 mod successor;

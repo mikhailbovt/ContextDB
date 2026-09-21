@@ -122,27 +122,7 @@ impl NativeService {
                     .journal,
             )
         };
-        let local = self.inspect_original_deletion(context, &request.roots, budget)?;
-        let retained_sources: BTreeMap<_, _> = retained
-            .sources
-            .iter()
-            .map(|source| (source.receipt.event_id, source))
-            .collect();
-        if local
-            .sources
-            .iter()
-            .any(|source| retained_sources.get(&source.receipt.event_id).copied() != Some(source))
-            || local
-                .payloads
-                .iter()
-                .any(|payload| !retained.payloads.contains(payload))
-        {
-            return Err(ServiceError::new(
-                ErrorCode::EvidenceRequired,
-                "archive cleanup requires retained coverage of this branch's complete source lineage",
-                false,
-            ));
-        }
+        let local = self.read_original_removal_local_inventory(context, request, budget)?;
         let selected: BTreeSet<_> = local
             .sources
             .iter()

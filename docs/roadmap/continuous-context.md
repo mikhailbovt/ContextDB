@@ -338,9 +338,12 @@ fence byte publication. A native coordinator now advances cleanup in separate
 owners restored from exact issued archives. It verifies ancestry before work,
 recovers existing maintenance journals and rechecks the storage sequence before
 publishing a complete retained replacement. Independent branch history, originals,
-mixed assertions and generic revisions remain preserved. Unknown origins,
-unretained descendants and missing roots require explicit reconciliation;
-discovery still rescans within a shared budget.
+mixed assertions and generic revisions remain preserved. Fresh local inventory
+also covers archives before a selected root: earlier retained co-owners and staged
+blocks are cleaned, globally shared novel bytes remain, and verified empty
+histories require no pruning. Orphan rows cannot count as absence. Unknown origins
+and unretained descendants require explicit reconciliation; discovery still
+rescans within a shared budget.
 Cleanup can continue through exact accepted replacement paths after original or
 intermediate keys have been refused. Every earlier request is verified separately;
 only complete readable terminal bytes become the next coordinator baseline.
