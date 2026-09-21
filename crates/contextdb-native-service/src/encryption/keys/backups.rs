@@ -7,11 +7,15 @@ use super::*;
 
 mod artifacts;
 mod contents;
+mod jobs;
 mod replacements;
 pub use artifacts::{NativeBackupArtifactProgress, NativeBackupArtifactReceipt};
 pub use contents::{
     NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
     NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
+};
+pub use jobs::{
+    NativeBackupCleanupJob, NativeBackupCleanupJobBinding, NativeBackupCleanupJobReceipt,
 };
 pub use replacements::{
     NativeBackupPruningCounts, NativeBackupReplacement, NativeBackupReplacementReceipt,
@@ -65,6 +69,8 @@ struct Head {
     replacements: Option<NativeBackupReplacementReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     artifacts: Option<NativeBackupArtifactReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    jobs: Option<NativeBackupCleanupJobReceipt>,
 }
 
 impl NativeCustodyKeys {
@@ -246,6 +252,7 @@ impl NativeCustodyKeys {
                     contents: head.contents,
                     replacements: head.replacements,
                     artifacts: head.artifacts,
+                    jobs: head.jobs,
                 },
             )?,
         )?;
@@ -293,6 +300,9 @@ impl NativeCustodyKeys {
         }
         if let Some(artifact) = &head.artifacts {
             artifact.validate(self)?;
+        }
+        if let Some(job) = &head.jobs {
+            job.validate(self)?;
         }
         Ok(head)
     }
@@ -380,6 +390,8 @@ impl NativeCustodyKeys {
             );
             self.walk_backup_artifacts(snapshot, &head, &mut expected, &mut budget)
                 .map_err(|_| failure("retained archive bytes verification failed"))?;
+            self.walk_backup_jobs(snapshot, &head, &mut expected, &mut budget)
+                .map_err(|_| failure("archive cleanup job verification failed"))?;
         }
         let mut after = None;
         loop {

@@ -17,6 +17,8 @@ mod tests;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeBackupCleanupStage {
+    /// Imported the fixed input into its job's pristine registered worker.
+    Restored,
     /// Completed or caught up retained record-origin declarations.
     RecordOrigins,
     /// Prepared immutable source controls before removing their bodies.
@@ -78,6 +80,17 @@ impl NativeService {
         original: &BackupResponse,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupCleanupProgress> {
+        self.advance_removal_backup_for_job(context, request, original, budget)
+            .map(|(progress, _)| progress)
+    }
+
+    pub(super) fn advance_removal_backup_for_job(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        original: &BackupResponse,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(NativeBackupCleanupProgress, Option<String>)> {
         let retained = self.read_original_removal_inventory(context, request, budget)?;
         let source = self.verify_encrypted_archive(original, budget)?;
         let keys = self
@@ -88,7 +101,7 @@ impl NativeService {
         if keys.backup_registration(&original.digest)?.is_none() {
             return Err(crate::invalid("archive cleanup requires original issuance"));
         }
-        let (pruning, admitted_sequence, admitted_workspace_commit) = {
+        let (pruning, admitted_sequence, admitted_workspace_commit, admitted_digest) = {
             let _guard = self.lock_index_publication(budget)?;
             let (current, bytes) = self.build_native_backup()?;
             budget
@@ -120,6 +133,7 @@ impl NativeService {
                 self.workspace_state(&after, &context.request.workspace_id)?
                     .watermarks
                     .journal,
+                bytes.digest,
             )
         };
         let local = self.read_original_removal_local_inventory(context, request, budget)?;
@@ -238,7 +252,9 @@ impl NativeService {
                     true,
                 ));
             }
-            return self.backup_cleanup_progress(context, NativeBackupCleanupStage::Unchanged);
+            return self
+                .backup_cleanup_progress(context, NativeBackupCleanupStage::Unchanged)
+                .map(|(progress, _)| (progress, Some(admitted_digest)));
         }
         let replacement = self.create_removal_backup_at(
             context,
@@ -259,36 +275,43 @@ impl NativeService {
                 budget,
             )?,
         };
-        Ok(NativeBackupCleanupProgress {
-            stage: if artifact.complete {
-                NativeBackupCleanupStage::Available
-            } else {
-                NativeBackupCleanupStage::Artifact
+        let terminal_digest = artifact.complete.then_some(replacement.backup.digest);
+        Ok((
+            NativeBackupCleanupProgress {
+                stage: if artifact.complete {
+                    NativeBackupCleanupStage::Available
+                } else {
+                    NativeBackupCleanupStage::Artifact
+                },
+                workspace_commit: admitted_workspace_commit,
+                replacement: Some(replacement.replacement),
+                artifact: Some(artifact),
             },
-            workspace_commit: admitted_workspace_commit,
-            replacement: Some(replacement.replacement),
-            artifact: Some(artifact),
-        })
+            terminal_digest,
+        ))
     }
 
     fn backup_cleanup_progress(
         &self,
         context: &AuthenticatedRequestContext,
         stage: NativeBackupCleanupStage,
-    ) -> ServiceResult<NativeBackupCleanupProgress> {
+    ) -> ServiceResult<(NativeBackupCleanupProgress, Option<String>)> {
         let snapshot = self
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
-        Ok(NativeBackupCleanupProgress {
-            stage,
-            workspace_commit: self
-                .workspace_state(&snapshot, &context.request.workspace_id)?
-                .watermarks
-                .journal,
-            replacement: None,
-            artifact: None,
-        })
+        Ok((
+            NativeBackupCleanupProgress {
+                stage,
+                workspace_commit: self
+                    .workspace_state(&snapshot, &context.request.workspace_id)?
+                    .watermarks
+                    .journal,
+                replacement: None,
+                artifact: None,
+            },
+            None,
+        ))
     }
 }
 

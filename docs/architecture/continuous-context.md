@@ -598,7 +598,21 @@ membership, unavailable keys, missing bytes and complete readable artifacts.
 `read_removal_backup_input` selects and reads an available original or successor
 without a caller-supplied path, then verifies native replay and rechecks the
 custody frontier under publication authority. An available input can still require
-cleanup. Hosts must preserve its selected baseline for an isolated cleanup job.
+cleanup. The selected baseline can be bound to a durable isolated cleanup job.
+
+`start_removal_backup_job` retains the exact request, input artifact, replacement
+path and registered worker instance before importing anything. The worker must
+initially be pristine; hosts retain its directory. `advance_removal_backup_job`
+imports once, then resumes native journals on that same instance. Interrupted
+import acknowledgement verifies the exact restored bytes and native sequence;
+unrelated worker writes cannot replace initialization. Start and finish
+receipts resolve to the latest accepted state after cold reopen or a lost response.
+The sealed custody journal verifies every event and locator; caller stage markers
+cannot finish a job. A subsequent request continues the prior result without
+reimporting its original. Job advances share bounded FIFO admission, and native
+publication fences initial binding. Unfinished jobs retain their input-key
+dependency through finish Sync. Terminal retries need no old-input decryption;
+they report historical logical cleanup, not current availability or global removal.
 
 `advance_removal_backup` coordinates logical cleanup in a separate encrypted native
 owner restored from the exact issued original. Each call verifies request, ancestry
@@ -631,7 +645,8 @@ If its keys are later retired, supply the accepted path to a usable successor.
 Unclassified records and unretained branch descendants
 require explicit reconciliation. Discovery rescans remain budgeted administrative
 work. The inventory reports identify remaining replacement obligations; executing
-all of them and physical/external-copy dispositions remain
+all of them, worker replacement/disposal, cross-workspace reassignment and
+physical/external-copy dispositions remain
 open. These operations do not complete deletion.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted

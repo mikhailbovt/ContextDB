@@ -123,6 +123,21 @@ pub(super) struct ArtifactState {
 }
 
 impl NativeCustodyKeys {
+    // Used only inside a catalog walk that already verifies all artifact events.
+    pub(super) fn artifact_at<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        receipt: &NativeBackupArtifactReceipt,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupArtifactProgress> {
+        let event: ArtifactEvent =
+            self.read_artifact_record(snapshot, &event_key(receipt.sequence), budget)?;
+        if event.receipt() != *receipt {
+            return Err(integrity("archive job artifact receipt differs"));
+        }
+        Ok(event.progress())
+    }
+
     /// Latest verified byte availability. Absence and incomplete progress must not
     /// be used as proof that the archive has a recoverable replacement.
     pub fn backup_artifact(

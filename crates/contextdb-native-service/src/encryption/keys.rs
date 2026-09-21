@@ -21,6 +21,7 @@ pub(super) mod uses;
 mod versions;
 pub use backups::{
     NativeBackupArtifactProgress, NativeBackupArtifactReceipt, NativeBackupCatalogPage,
+    NativeBackupCleanupJob, NativeBackupCleanupJobBinding, NativeBackupCleanupJobReceipt,
     NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
     NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
     NativeBackupPruningCounts, NativeBackupRegistration, NativeBackupReplacement,

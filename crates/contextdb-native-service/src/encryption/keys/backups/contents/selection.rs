@@ -27,6 +27,9 @@ pub struct NativeBackupFrontier {
     /// Latest retained archive-byte progress, including incomplete artifacts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<NativeBackupArtifactReceipt>,
+    /// Latest accepted cleanup-job binding or terminal result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jobs: Option<NativeBackupCleanupJobReceipt>,
     /// Current key refusal at this inspection, independent of archive issuance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retirements: Option<NativeKeyRetirementReceipt>,
@@ -64,6 +67,9 @@ pub struct NativeBackupKeyInventory {
     pub frontier: NativeBackupFrontier,
     /// Every issued archive, including unknown legacy contents and no-match archives.
     pub archives: Vec<NativeBackupKeyArchive>,
+    /// Latest state of every retained cleanup job, including earlier requests.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jobs: Vec<NativeBackupCleanupJob>,
 }
 
 impl Head {
@@ -79,12 +85,46 @@ impl Head {
             contents: self.contents.clone(),
             replacements: self.replacements.clone(),
             artifacts: self.artifacts.clone(),
+            jobs: self.jobs.clone(),
             retirements,
         }
     }
 }
 
 impl NativeCustodyKeys {
+    // Called under custody publication after the complete inventory frontier is
+    // verified. An unfinished job must retain its fixed input until finish Sync.
+    pub(crate) fn require_active_job_keys<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        retiring: &BTreeSet<Uuid>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        let head = self.backup_head(snapshot).map_err(storage_error)?;
+        let jobs = self.walk_backup_jobs(snapshot, &head, &mut BTreeSet::new(), budget)?;
+        for job in jobs.into_iter().filter(|job| job.terminal.is_none()) {
+            let contents = self
+                .find_contents(snapshot, &job.binding.source.receipt.archive_digest, budget)?
+                .ok_or_else(|| integrity("active archive job input is absent"))?;
+            for page in 0..contents.pages {
+                for copy in self
+                    .read_copy_page(snapshot, &contents, page, budget)?
+                    .copies
+                {
+                    budget.charge(1, 0).map_err(budget_error)?;
+                    if retiring.contains(&copy.version.key_id) {
+                        return Err(ServiceError::new(
+                            ErrorCode::EvidenceRequired,
+                            "unfinished archive job still requires its fixed input keys",
+                            false,
+                        ));
+                    }
+                }
+            }
+        }
+        budget.check().map_err(budget_error)
+    }
+
     // The caller holds custody publication authority and already verified the
     // complete archive catalog/frontier. Check every target row, including keys
     // outside the selected removal family: retained bytes alone are not readable
@@ -254,6 +294,8 @@ impl NativeCustodyKeys {
         }
         // Reverse closure includes unknown legacy archives: orphan pages or
         // locators cannot silently turn lost accepted contents into unknown.
+        let jobs = self.walk_backup_jobs(snapshot, &head, &mut expected, budget)?;
+        reserve(&mut report_bytes, &jobs, budget)?;
         let mut after = None;
         loop {
             budget.check().map_err(budget_error)?;
@@ -289,6 +331,7 @@ impl NativeCustodyKeys {
         let report = NativeBackupKeyInventory {
             frontier: head.frontier(self.authority_id(), retired.frontier()),
             archives: archives.into_values().collect(),
+            jobs,
         };
         crate::retention::keys::charge_report(&report, budget)?;
         Ok((report, replacements))

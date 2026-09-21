@@ -250,6 +250,7 @@ impl NativeCustodyKeys {
                 "selection includes a key already retired by another acceptance",
             ));
         }
+        self.require_active_job_keys(&tx, &selected, budget)?;
         self.require_backup_available_keys(&tx, targets, &selected, budget)?;
         for key in preserved {
             budget.charge(1, 0).map_err(budget_error)?;

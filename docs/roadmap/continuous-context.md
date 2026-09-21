@@ -353,8 +353,14 @@ Issued originals now use the same bounded artifact retention as replacements.
 Recovery automatically finds readable inputs for every issued archive, preserving
 unknown membership, unavailable keys and incomplete bytes as distinct outcomes.
 Shared DAG routing keeps recovery-input availability separate from clean-copy
-preservation. Actual input reads verify replay and the current custody frontier;
-durable job baselines and automatic execution across isolated owners remain open.
+preservation. Actual input reads verify replay and the current custody frontier.
+Durable jobs now bind an exact request, input and registered pristine worker before
+import. Cold restart and uncertain responses resume that same worker; subsequent
+requests continue its prior result. Only actual terminal cleanup enters the sealed
+job journal. Unfinished jobs prevent refusal of required input keys. Checks cover
+partial-cleanup inputs, empty archives, successive requests, lost finish responses,
+wrong owners and missing or rehashed controls. Automatic execution across all
+archives, worker replacement/disposal and cross-workspace reassignment remain open.
 Owned and mixed assertion keys can now be retired after fresh native-use and
 complete archive-preservation verification. Mixed selections require classified
 replacement batches in every affected native instance, preserving controls,

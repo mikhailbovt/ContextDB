@@ -10,7 +10,8 @@ pub(crate) mod tests;
 
 pub use keys::{
     CustodyMasterKey, NativeBackupArtifactProgress, NativeBackupArtifactReceipt,
-    NativeBackupCatalogPage, NativeBackupContentsInventory, NativeBackupContentsPage,
+    NativeBackupCatalogPage, NativeBackupCleanupJob, NativeBackupCleanupJobBinding,
+    NativeBackupCleanupJobReceipt, NativeBackupContentsInventory, NativeBackupContentsPage,
     NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
     NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
     NativeBackupReplacement, NativeBackupReplacementReceipt, NativeCustodyKeys,

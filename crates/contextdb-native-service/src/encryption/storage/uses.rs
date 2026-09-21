@@ -5,6 +5,15 @@ use super::*;
 use crate::encryption::keys::uses::{LOCAL_HEAD, LOCAL_SPACE, MAX_CHANGES};
 
 impl NativeStorage {
+    pub(crate) fn registered_instance(&self) -> Result<uuid::Uuid> {
+        let keys = self
+            .keys
+            .as_ref()
+            .filter(|keys| keys.tracks_native_use())
+            .ok_or_else(|| failure("archive jobs require registered native-use custody"))?;
+        Ok(keys.use_publication()?.reconcile(&self.inner)?.instance)
+    }
+
     pub(crate) fn is_protocol_genesis(&self) -> Result<bool> {
         let Some(keys) = self.keys.as_ref().filter(|keys| keys.tracks_native_use()) else {
             return Ok(false);

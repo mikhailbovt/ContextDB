@@ -52,16 +52,18 @@ mod suppression;
 
 pub use backup::{
     NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NATIVE_ENCRYPTED_BACKUP_FORMAT,
-    NativeBackupCleanupProgress, NativeBackupCleanupStage, NativeBackupPreservation,
-    NativeBackupPreservationPath, NativeBackupRecovery, NativeBackupRecoveryInput,
-    NativeBackupRecoveryInventory, NativeBackupRecoveryState, NativeRemovalBackup,
+    NativeBackupCleanupJobProgress, NativeBackupCleanupProgress, NativeBackupCleanupStage,
+    NativeBackupPreservation, NativeBackupPreservationPath, NativeBackupRecovery,
+    NativeBackupRecoveryInput, NativeBackupRecoveryInventory, NativeBackupRecoveryState,
+    NativeRemovalBackup,
 };
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
 pub use deletion::{NativeDeletionLineage, NativeDeletionSource, NativeRemovalLocalInventory};
 pub use encryption::{
     CustodyMasterKey, NativeBackupArtifactProgress, NativeBackupArtifactReceipt,
-    NativeBackupCatalogPage, NativeBackupContentsInventory, NativeBackupContentsPage,
+    NativeBackupCatalogPage, NativeBackupCleanupJob, NativeBackupCleanupJobBinding,
+    NativeBackupCleanupJobReceipt, NativeBackupContentsInventory, NativeBackupContentsPage,
     NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
     NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
     NativeBackupReplacement, NativeBackupReplacementReceipt, NativeCustodyKeys,
@@ -429,6 +431,7 @@ pub struct NativeService {
     database_id: String,
     token_key: Zeroizing<[u8; 32]>,
     writes: publication::PublicationQueue,
+    backup_jobs: publication::PublicationQueue,
     index_views: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     leases: Mutex<lease::LeaseRegistry>,
     lease_started: std::time::Instant,
@@ -516,6 +519,7 @@ impl NativeService {
             database_id,
             token_key: Zeroizing::new(token_key),
             writes: publication::PublicationQueue::default(),
+            backup_jobs: publication::PublicationQueue::default(),
             index_views: std::sync::Arc::default(),
             leases: Mutex::new(lease::LeaseRegistry::default()),
             lease_started: std::time::Instant::now(),

@@ -55,8 +55,11 @@ and release verifier—not the presence of an API name—determine completion.
   currently usable keys. These reports require retry after concurrent key retirement.
   Original archives can also be retained, and recovery automatically selects a
   readable original or separately authorized successor. Readable input bytes may
-  still need cleanup. Hosts restore isolated owners and preserve job baselines;
-  automatic execution of every outstanding archive obligation remains unfinished.
+  still need cleanup. Durable jobs bind inputs to registered isolated workers and
+  survive restart or lost responses; hosts must retain those worker directories.
+  Successive requests continue the prior result. Unfinished jobs keep input keys
+  usable until finish acceptance. Automatic scheduling, worker replacement/disposal
+  and cross-workspace reassignment remain unfinished.
   Owned and mixed-key retirement reject unresolved native/archive obligations and
   deny decryption through old snapshots or restored archives. Mixed keys require
   classified replacement batches preserving independent data and controls in every

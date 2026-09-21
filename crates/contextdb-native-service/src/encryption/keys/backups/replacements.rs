@@ -128,6 +128,21 @@ impl ReplacementEvent {
 }
 
 impl NativeCustodyKeys {
+    // Used only inside a catalog walk that already verifies all replacement events.
+    pub(super) fn replacement_at<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        receipt: &NativeBackupReplacementReceipt,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupReplacement> {
+        let event: ReplacementEvent =
+            self.read_replacement_record(snapshot, &event_key(receipt.sequence), budget)?;
+        if event.value.receipt != *receipt {
+            return Err(integrity("archive job replacement receipt differs"));
+        }
+        Ok(event.value)
+    }
+
     /// Recover a retained preservation proof after native restore or lost response.
     /// Verifies the complete custody archive catalog under the supplied budget.
     pub fn backup_replacement(

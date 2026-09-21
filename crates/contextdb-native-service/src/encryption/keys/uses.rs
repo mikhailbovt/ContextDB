@@ -34,6 +34,16 @@ pub(in crate::encryption) const CHANGES_PER_PAGE: usize = 256;
 pub(in crate::encryption) const MAX_CHANGES: usize = 2_100_000;
 const MAX_EVENT_BYTES: usize = 1024 * 1024;
 
+impl NativeCustodyKeys {
+    pub(super) fn require_registered_instance<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        instance: Uuid,
+    ) -> contextdb_storage::Result<()> {
+        self.use_state(snapshot, instance).map(|_| ())
+    }
+}
+
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::encryption) struct UseCheckpoint {
