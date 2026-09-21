@@ -70,7 +70,7 @@ pub struct NativeKeyUseChange {
 }
 
 impl NativeKeyUseChange {
-    fn validate(&self) -> contextdb_storage::Result<()> {
+    pub(super) fn validate(&self) -> contextdb_storage::Result<()> {
         valid_digest(&self.address_digest)?;
         for version in self.before.iter().chain(self.after.iter()) {
             if version.key_id.is_nil()
@@ -194,6 +194,15 @@ impl NativeCustodyKeys {
             keys: self,
             _guard: guard,
         })
+    }
+
+    pub(crate) fn observe_archived_version(
+        &self,
+        space: &Keyspace,
+        key: &[u8],
+        value: &[u8],
+    ) -> contextdb_storage::Result<NativeKeyUseVersion> {
+        self.observe_use_version(space, key, value, None)
     }
 
     pub(in crate::encryption) fn observe_use_version(

@@ -9,11 +9,12 @@ mod storage;
 pub(crate) mod tests;
 
 pub use keys::{
-    CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
-    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyUseAddressInventory,
-    NativeKeyUseCatalogPage, NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory,
-    NativeKeyUseOutcome, NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition,
-    NativeKeyUseVersion,
+    CustodyMasterKey, NativeBackupCatalogPage, NativeBackupContentsInventory,
+    NativeBackupContentsPage, NativeBackupContentsReceipt, NativeBackupKeyCopy,
+    NativeBackupRegistration, NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage,
+    NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
+    NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
+    NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
 };
 pub(super) use storage::{NativeSnapshot, NativeStorage};
 

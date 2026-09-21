@@ -5,6 +5,12 @@ use contextdb_storage::ScanPageRequest;
 
 use super::*;
 
+mod contents;
+pub use contents::{
+    NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
+    NativeBackupKeyCopy,
+};
+
 #[cfg(test)]
 mod tests;
 
@@ -47,6 +53,8 @@ pub struct NativeBackupCatalogPage {
 struct Head {
     sequence: u64,
     digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    contents: Option<NativeBackupContentsReceipt>,
 }
 
 impl NativeCustodyKeys {
@@ -162,16 +170,36 @@ impl NativeCustodyKeys {
             .enter(|| Ok(()))
             .map_err(|_| failure("backup custody admission unavailable"))?;
         let mut tx = self.engine.begin_write()?;
-        if let Some(previous) = self.find_backup(&tx, digest)? {
+        if !self
+            .stage_backup_registration(&mut tx, digest, commit, logical_digest, encoded_bytes)?
+            .1
+        {
+            return Ok(());
+        }
+        if tx.commit(Durability::Sync)?.durability != Durability::Sync {
+            return Err(failure("issued archive registration was not synchronized"));
+        }
+        Ok(())
+    }
+
+    fn stage_backup_registration<T: WriteTransaction>(
+        &self,
+        tx: &mut T,
+        digest: &str,
+        commit: u64,
+        logical_digest: &str,
+        encoded_bytes: u64,
+    ) -> contextdb_storage::Result<(NativeBackupRegistration, bool)> {
+        if let Some(previous) = self.find_backup(tx, digest)? {
             if previous.native_commit != commit
                 || previous.logical_digest != logical_digest
                 || previous.encoded_bytes != encoded_bytes
             {
                 return Err(failure("issued archive metadata changed"));
             }
-            return Ok(());
+            return Ok((previous, false));
         }
-        let head = self.backup_head(&tx)?;
+        let head = self.backup_head(tx)?;
         let sequence = head
             .sequence
             .checked_add(1)
@@ -205,13 +233,11 @@ impl NativeCustodyKeys {
                 &Head {
                     sequence,
                     digest: Some(digest.into()),
+                    contents: head.contents,
                 },
             )?,
         )?;
-        if tx.commit(Durability::Sync)?.durability != Durability::Sync {
-            return Err(failure("issued archive registration was not synchronized"));
-        }
-        Ok(())
+        Ok((entry, true))
     }
 
     fn backup_aad(&self, key: &[u8]) -> contextdb_storage::Result<Vec<u8>> {
@@ -246,6 +272,9 @@ impl NativeCustodyKeys {
         }
         if let Some(digest) = &head.digest {
             valid_digest(digest)?;
+        }
+        if let Some(contents) = &head.contents {
+            contents.validate(self)?;
         }
         Ok(head)
     }
@@ -324,8 +353,11 @@ impl NativeCustodyKeys {
             reconstructed = Head {
                 sequence: entry.sequence,
                 digest: Some(entry.archive_digest),
+                contents: None,
             };
         }
+        self.verify_backup_contents(snapshot, &head, &mut expected)?;
+        reconstructed.contents = head.contents.clone();
         if reconstructed != head
             || rows.len() != expected.len()
             || rows.iter().any(|row| !expected.contains(&row.key))

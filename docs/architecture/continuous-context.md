@@ -489,6 +489,18 @@ explicit registry migration; a missing required registry is corruption, never an
 replacement. Registrations count distinct issued archives, not physical copies.
 They contain no source payload and prove neither external-copy erasure nor absence.
 
+V4 issuance also accepts complete archive membership in the same Sync: address
+digests, immutable key UUIDs, ciphertext/value commitments and lengths, in pages
+of 256. The required registry head anchors this separate contents journal;
+original archive bytes and issuance receipts remain unchanged. `backup_contents`
+resolves the immutable inventory, and `backup_contents_page` reads its receipt-bound
+pages under a shared budget. Full custody verification checks every page and the
+event/index closure. `retain_backup_contents` permits Admin backfill only from
+fully verified bytes matching an already issued archive. Older registrations
+without membership remain unknown. These observations survive native restore;
+they do not infer the original native instance, preserve a replacement archive or
+authorize disabling keys needed by independent data.
+
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
 profile. Record addresses, sizes, lexical hashes and archive metadata remain
 visible. Values are limited to 16 MiB before encryption; each envelope adds 64

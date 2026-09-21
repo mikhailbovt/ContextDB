@@ -21,6 +21,8 @@ use super::{
     validate_workspace_state, workspace_map_key,
 };
 
+mod contents;
+
 /// Exact format returned by the native administrative backup operation.
 pub const NATIVE_BACKUP_FORMAT: &str = "contextdb.native-fjall.logical-backup.v1";
 /// Backup format including the continuous capture authority.
@@ -32,7 +34,7 @@ const BACKUP_MAGIC: &[u8] = b"contextdb/native-backup/v1\0";
 const BACKUP_FOOTER_BYTES: usize = 32;
 const MAX_BACKUP_BYTES: usize = 256 * 1024 * 1024;
 const MAX_BACKUP_RAW_BYTES: usize = 128 * 1024 * 1024;
-const MAX_BACKUP_ENTRIES: usize = 2_000_000;
+pub(crate) const MAX_BACKUP_ENTRIES: usize = 2_000_000;
 const MAX_BACKUP_KEY_BYTES: usize = 64 * 1024;
 const MAX_BACKUP_VALUE_BYTES: usize = 16 * 1024 * 1024 + 64;
 const BACKUP_SCAN_PAGE_ENTRIES: usize = 4_096;
@@ -109,14 +111,29 @@ impl NativeService {
         archive.deep_digest = deep_digest;
         let bytes = encode_backup(&archive)?;
         let digest = digest_bytes(&bytes);
+        let response = BackupResponse {
+            format: archive.format.clone(),
+            digest,
+            bytes,
+            commit_seq,
+        };
         if let Some(keys) = &self.engine.keys {
-            keys.register_backup(
-                &digest,
-                commit_seq,
-                &archive.deep_digest,
-                bytes.len() as u64,
-            )
-            .map_err(storage_error)?;
+            if keys.supports_backup_contents() {
+                self.retain_verified_backup_contents(
+                    &archive,
+                    &response,
+                    true,
+                    &mut contents::issuance_budget(),
+                )?;
+            } else {
+                keys.register_backup(
+                    &response.digest,
+                    commit_seq,
+                    &archive.deep_digest,
+                    response.bytes.len() as u64,
+                )
+                .map_err(storage_error)?;
+            }
             #[cfg(test)]
             AFTER_REGISTRATION.with(|hook| {
                 if let Some(hook) = hook.take() {
@@ -124,12 +141,7 @@ impl NativeService {
                 }
             });
         }
-        Ok(BackupResponse {
-            format: archive.format,
-            digest,
-            bytes,
-            commit_seq,
-        })
+        Ok(response)
     }
 
     pub(super) fn restore_native_backup(

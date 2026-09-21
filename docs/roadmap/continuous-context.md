@@ -302,5 +302,10 @@ prefix or complete inspection receipt. Retained pages independently establish
 source/address/version coverage. Exact retries, later observations, pruning and
 older encrypted restore preserve historical decisions; incomplete or damaged
 coverage rejects the report. Shared/unknown and untracked obligations remain open.
+V4 backup issuance now retains complete ciphertext membership in the same Sync,
+with immutable paged receipts surviving older restore and custody reopen. Admin
+backfill verifies supplied archive bytes against their original issuance; missing
+older coverage stays unknown. Interrupted registration/page writes leave no partial
+acceptance. Preserving independent data in replacement archives remains open.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

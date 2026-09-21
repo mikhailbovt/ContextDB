@@ -325,6 +325,13 @@ fn crash_before_backup_response_retains_the_potential_copy_and_retry_is_idempote
         .backup_catalog_page(0, None, 1)
         .expect("potential copy");
     assert_eq!((page.revision, page.entries.len()), (1, 1));
+    let membership = keys
+        .backup_contents(
+            &page.entries[0].archive_digest,
+            &mut crate::raw_index::copies::tests::budget(),
+        )
+        .expect("contents lookup after abrupt exit")
+        .expect("all copy pages were accepted before the lost response");
     let ledger =
         crate::NativeSuppressionLedger::open(root.path().join("ledger"), "backup-crash", ledger_id)
             .expect("ledger");
@@ -342,6 +349,14 @@ fn crash_before_backup_response_retains_the_potential_copy_and_retry_is_idempote
         })
         .expect("lost-response retry");
     assert_eq!(archive.digest, page.entries[0].archive_digest);
+    assert_eq!(
+        keys.backup_contents(
+            &archive.digest,
+            &mut crate::raw_index::copies::tests::budget()
+        )
+        .expect("contents retry"),
+        Some(membership)
+    );
     assert_eq!(
         keys.backup_catalog_page(0, None, 1)
             .expect("one registration")

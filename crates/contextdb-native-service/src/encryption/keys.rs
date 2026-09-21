@@ -18,7 +18,10 @@ mod attestations;
 mod backups;
 pub(super) mod uses;
 mod versions;
-pub use backups::{NativeBackupCatalogPage, NativeBackupRegistration};
+pub use backups::{
+    NativeBackupCatalogPage, NativeBackupContentsInventory, NativeBackupContentsPage,
+    NativeBackupContentsReceipt, NativeBackupKeyCopy, NativeBackupRegistration,
+};
 pub use uses::{
     NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
     NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
