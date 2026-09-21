@@ -20,11 +20,41 @@ impl NativeCustodyKeys {
         valid_digest(logical_digest).map_err(storage_error)?;
         let _guard = self.writes.enter(|| budget.check().map_err(budget_error))?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
+        let (inventory, changed) = self.stage_backup_contents(
+            &mut tx,
+            archive,
+            logical_digest,
+            copies,
+            allow_issue,
+            budget,
+        )?;
+        if changed {
+            budget.check().map_err(budget_error)?;
+            crate::require_sync(
+                tx.commit(Durability::Sync)
+                    .map_err(storage_error)?
+                    .durability,
+            )?;
+        }
+        Ok(inventory)
+    }
+
+    // The caller holds custody publication through the final Sync, which may
+    // atomically include independently verified replacement provenance.
+    pub(in crate::encryption::keys::backups) fn stage_backup_contents<T: WriteTransaction>(
+        &self,
+        tx: &mut T,
+        archive: &BackupResponse,
+        logical_digest: &str,
+        copies: impl Iterator<Item = ServiceResult<NativeBackupKeyCopy>>,
+        allow_issue: bool,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(NativeBackupContentsInventory, bool)> {
         // Validate before staging a fresh registration; corruption cannot be
         // mistaken for a missing sidecar and silently replace an earlier receipt.
-        let existing = self.find_contents(&tx, &archive.digest, budget)?;
+        let existing = self.find_contents(tx, &archive.digest, budget)?;
         if self
-            .find_backup(&tx, &archive.digest)
+            .find_backup(tx, &archive.digest)
             .map_err(storage_error)?
             .is_none()
         {
@@ -33,18 +63,18 @@ impl NativeCustodyKeys {
                     "archive contents backfill requires its original issuance",
                 ));
             }
-            self.verify_new_issuance(&tx, budget)?;
+            self.verify_new_issuance(tx, budget)?;
         }
         let (registration, _) = self
             .stage_backup_registration(
-                &mut tx,
+                tx,
                 &archive.digest,
                 archive.commit_seq,
                 logical_digest,
                 archive.bytes.len() as u64,
             )
             .map_err(storage_error)?;
-        let mut head = self.backup_head(&tx).map_err(storage_error)?;
+        let mut head = self.backup_head(tx).map_err(storage_error)?;
         let sequence = if let Some(event) = &existing {
             event.sequence
         } else {
@@ -73,7 +103,7 @@ impl NativeCustodyKeys {
             pending.push(copy);
             if pending.len() == PAGE_ROWS {
                 previous = self.stage_copy_page(
-                    &mut tx,
+                    tx,
                     sequence,
                     pages,
                     CopyPage {
@@ -89,7 +119,7 @@ impl NativeCustodyKeys {
         }
         if !pending.is_empty() {
             previous = self.stage_copy_page(
-                &mut tx,
+                tx,
                 sequence,
                 pages,
                 CopyPage {
@@ -113,7 +143,7 @@ impl NativeCustodyKeys {
                 ));
             }
             budget.check().map_err(budget_error)?;
-            return Ok(event.inventory());
+            return Ok((event.inventory(), false));
         }
         let mut event = ContentsEvent {
             sequence,
@@ -151,12 +181,7 @@ impl NativeCustodyKeys {
         )
         .map_err(storage_error)?;
         budget.check().map_err(budget_error)?;
-        crate::require_sync(
-            tx.commit(Durability::Sync)
-                .map_err(storage_error)?
-                .durability,
-        )?;
-        Ok(event.inventory())
+        Ok((event.inventory(), true))
     }
 
     fn stage_copy_page<T: WriteTransaction>(

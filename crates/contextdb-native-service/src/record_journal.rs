@@ -332,7 +332,7 @@ impl NativeService {
     }
 }
 
-fn owns_record_mutations(operation: &str) -> bool {
+pub(crate) fn owns_record_mutations(operation: &str) -> bool {
     matches!(
         operation,
         "publish_memory" | "propose_memory" | "correct" | "retract"

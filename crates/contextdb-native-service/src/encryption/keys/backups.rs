@@ -6,9 +6,13 @@ use contextdb_storage::ScanPageRequest;
 use super::*;
 
 mod contents;
+mod replacements;
 pub use contents::{
     NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
     NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
+};
+pub use replacements::{
+    NativeBackupPruningCounts, NativeBackupReplacement, NativeBackupReplacementReceipt,
 };
 
 #[cfg(test)]
@@ -55,6 +59,8 @@ struct Head {
     digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     contents: Option<NativeBackupContentsReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    replacements: Option<NativeBackupReplacementReceipt>,
 }
 
 impl NativeCustodyKeys {
@@ -234,6 +240,7 @@ impl NativeCustodyKeys {
                     sequence,
                     digest: Some(digest.into()),
                     contents: head.contents,
+                    replacements: head.replacements,
                 },
             )?,
         )?;
@@ -275,6 +282,9 @@ impl NativeCustodyKeys {
         }
         if let Some(contents) = &head.contents {
             contents.validate(self)?;
+        }
+        if let Some(replacement) = &head.replacements {
+            replacement.validate(self)?;
         }
         Ok(head)
     }
@@ -354,10 +364,13 @@ impl NativeCustodyKeys {
                 sequence: entry.sequence,
                 digest: Some(entry.archive_digest),
                 contents: None,
+                replacements: None,
             };
         }
         self.verify_backup_contents(snapshot, &head, &mut expected)?;
+        self.verify_backup_replacements(snapshot, &head, &mut expected)?;
         reconstructed.contents = head.contents.clone();
+        reconstructed.replacements = head.replacements.clone();
         if reconstructed != head
             || rows.len() != expected.len()
             || rows.iter().any(|row| !expected.contains(&row.key))

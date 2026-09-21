@@ -70,7 +70,7 @@ impl NativeService {
     /// partial or stale coverage returns an error, never a partial report.
     ///
     /// One custody publication guard checks allocation, native-use, issuance and
-    /// membership frontiers together before returning. Subsequent publication
+    /// membership and replacement frontiers together before returning. Subsequent publication
     /// must acquire that guard and revalidate those frontiers again. The report
     /// covers at most 65,536 selected allocations and 32 MiB of output.
     pub fn read_removal_backup_inventory(

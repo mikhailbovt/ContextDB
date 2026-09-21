@@ -7,8 +7,8 @@ use super::*;
 #[cfg(test)]
 mod tests;
 
-/// Both archive histories at one custody snapshot. Membership backfill changes
-/// this frontier even when no new archive is issued.
+/// Archive histories at one custody snapshot. Backfill and replacement acceptance
+/// change this frontier even when no new archive is issued.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeBackupFrontier {
@@ -20,6 +20,9 @@ pub struct NativeBackupFrontier {
     pub issued_digest: Option<String>,
     /// Last accepted complete membership, including later backfills.
     pub contents: Option<NativeBackupContentsReceipt>,
+    /// Latest independently accepted replacement provenance, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacements: Option<NativeBackupReplacementReceipt>,
 }
 
 /// One issued archive's relation to the selected key allocations. An empty copy
@@ -42,7 +45,7 @@ pub struct NativeBackupKeyArchive {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeBackupKeyInventory {
-    /// Both verified histories; future publication must recheck this frontier.
+    /// Verified histories; future publication must recheck this frontier.
     pub frontier: NativeBackupFrontier,
     /// Every issued archive, including unknown legacy contents and no-match archives.
     pub archives: Vec<NativeBackupKeyArchive>,
@@ -55,6 +58,7 @@ impl Head {
             issued_sequence: self.sequence,
             issued_digest: self.digest.clone(),
             contents: self.contents.clone(),
+            replacements: self.replacements.clone(),
         }
     }
 }
@@ -73,14 +77,23 @@ impl NativeCustodyKeys {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
-        let head = self.backup_head(&snapshot).map_err(storage_error)?;
+        self.selected_backup_keys_at(&snapshot, selected, budget)
+    }
+
+    pub(in crate::encryption::keys::backups) fn selected_backup_keys_at<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        selected: &BTreeMap<Uuid, String>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupKeyInventory> {
+        let head = self.backup_head(snapshot).map_err(storage_error)?;
         budget
             .charge(1, encode(&head).map_err(storage_error)?.len() as u64)
             .map_err(budget_error)?;
         let mut expected = BTreeSet::from([HEAD.to_vec()]);
         let mut archives = BTreeMap::new();
         let mut report_bytes = 0;
-        self.walk_issuance(&snapshot, budget, |entry, budget| {
+        self.walk_issuance(snapshot, budget, |entry, budget| {
             expected.insert(issued_key(entry.sequence));
             expected.insert(super::super::index_key(&entry.archive_digest));
             reserve(&mut report_bytes, entry, budget)?;
@@ -94,7 +107,7 @@ impl NativeCustodyKeys {
             );
             Ok(())
         })?;
-        self.walk_contents_events(&snapshot, &head, budget, |event, budget| {
+        self.walk_contents_events(snapshot, &head, budget, |event, budget| {
             let archive = archives
                 .get_mut(&event.registration.sequence)
                 .ok_or_else(|| integrity("archive membership has no issued catalog entry"))?;
@@ -109,7 +122,7 @@ impl NativeCustodyKeys {
             let mut previous = contents_genesis(&event.registration).map_err(storage_error)?;
             let mut addresses = BTreeSet::new();
             for page in 0..event.pages {
-                let stored = self.read_copy_page(&snapshot, event, page, budget)?;
+                let stored = self.read_copy_page(snapshot, event, page, budget)?;
                 if stored.previous != previous {
                     return Err(integrity("archive key inventory page chain differs"));
                 }
@@ -133,6 +146,10 @@ impl NativeCustodyKeys {
             if previous != event.contents_digest || addresses.len() as u64 != event.rows {
                 return Err(integrity("archive key inventory coverage is incomplete"));
             }
+            Ok(())
+        })?;
+        self.walk_backup_replacements(snapshot, &head, budget, |event, _| {
+            event.add_expected_keys(&mut expected);
             Ok(())
         })?;
         // Reverse closure includes unknown legacy archives: orphan pages or
@@ -196,7 +213,7 @@ impl NativeCustodyKeys {
         if head.frontier(self.authority_id()) != *expected {
             return Err(ServiceError::new(
                 ErrorCode::IndexTooStale,
-                "archive issuance or membership changed; restart inventory",
+                "archive issuance, membership or replacement changed; restart inventory",
                 true,
             ));
         }

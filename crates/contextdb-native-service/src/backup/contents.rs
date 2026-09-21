@@ -18,6 +18,15 @@ impl NativeService {
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupContentsInventory> {
         require_capability(context, Capability::Admin)?;
+        let archive = self.verify_encrypted_archive(backup, budget)?;
+        self.retain_verified_backup_contents(&archive, backup, false, budget)
+    }
+
+    pub(super) fn verify_encrypted_archive(
+        &self,
+        backup: &BackupResponse,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackup> {
         let keys = self.engine.keys.as_ref().ok_or_else(|| {
             super::super::unsupported("archive contents require encrypted custody")
         })?;
@@ -66,7 +75,7 @@ impl NativeService {
             return Err(integrity("archive contents differ from verified replay"));
         }
         budget.check().map_err(budget_error)?;
-        self.retain_verified_backup_contents(&archive, backup, false, budget)
+        Ok(archive)
     }
 
     pub(super) fn retain_verified_backup_contents(
@@ -81,7 +90,24 @@ impl NativeService {
             .keys
             .as_ref()
             .ok_or_else(|| integrity("archive contents custody is absent"))?;
-        let copies = archive.keyspaces.iter().flat_map(|space| {
+        keys.accept_backup_contents(
+            response,
+            &archive.deep_digest,
+            self.archive_copies(archive)?,
+            allow_issue,
+            budget,
+        )
+    }
+    pub(super) fn archive_copies<'a>(
+        &'a self,
+        archive: &'a NativeBackup,
+    ) -> ServiceResult<impl Iterator<Item = ServiceResult<NativeBackupKeyCopy>> + 'a> {
+        let keys = self
+            .engine
+            .keys
+            .as_ref()
+            .ok_or_else(|| integrity("archive contents custody is absent"))?;
+        Ok(archive.keyspaces.iter().flat_map(move |space| {
             let target = self
                 .keyspaces
                 .all()
@@ -97,8 +123,7 @@ impl NativeService {
                         .map_err(storage_error)?,
                 })
             })
-        });
-        keys.accept_backup_contents(response, &archive.deep_digest, copies, allow_issue, budget)
+        }))
     }
 }
 

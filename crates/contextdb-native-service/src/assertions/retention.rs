@@ -38,6 +38,12 @@ pub(crate) struct AssertionPruningPublication {
     value_ownership: Option<NativeAssertionValueWitnessReceipt>,
 }
 
+impl AssertionPruningPublication {
+    pub(crate) fn removal_request(&self) -> &RemovalCheckpoint {
+        &self.request
+    }
+}
+
 /// Workspace access and authority policies originate in authenticated host
 /// configuration. Interpreter strings are committed, not copied into recovery.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

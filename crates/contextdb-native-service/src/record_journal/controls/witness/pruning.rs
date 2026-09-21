@@ -38,6 +38,13 @@ pub(crate) struct PrunedRecord {
 }
 
 impl RecordPruningPublication {
+    pub(crate) fn belongs_to_removal(&self, request: &NativeRemovalRequestReceipt) -> bool {
+        // The verified witness and the supplied verified receipt share the same
+        // unique position in the independently retained removal journal.
+        self.witness.authority_id == request.authority_id
+            && self.witness.removal_sequence == request.sequence
+    }
+
     fn receipt(&self) -> NativeRecordPruningReceipt {
         NativeRecordPruningReceipt {
             workspace_commit: self.workspace_commit,

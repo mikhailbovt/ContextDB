@@ -51,6 +51,7 @@ mod suppression;
 
 pub use backup::{
     NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NATIVE_ENCRYPTED_BACKUP_FORMAT,
+    NativeRemovalBackup,
 };
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
@@ -59,7 +60,8 @@ pub use encryption::{
     CustodyMasterKey, NativeBackupCatalogPage, NativeBackupContentsInventory,
     NativeBackupContentsPage, NativeBackupContentsReceipt, NativeBackupFrontier,
     NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
-    NativeBackupRegistration, NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage,
+    NativeBackupPruningCounts, NativeBackupRegistration, NativeBackupReplacement,
+    NativeBackupReplacementReceipt, NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage,
     NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
     NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
     NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,

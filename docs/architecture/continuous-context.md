@@ -506,10 +506,26 @@ payload, revision or observed raw keys to every issued archive. It applies curre
 Admin/workspace/owner policy, verifies complete issuance and membership closure,
 and returns exact matching copies alongside explicit unknown legacy archives.
 An empty match list means selected keys are absent only from verified contents.
-One custody guard rechecks allocation, native-use, issuance and membership
-frontiers together; concurrent issuance or backfill requires a retry. The shared
+One custody guard rechecks allocation, native-use, issuance, membership and
+replacement frontiers together; concurrent publication requires a retry. The shared
 budget and 32 MiB result bound apply to the whole report. This inspection neither
 replaces archives nor changes keys; mixed assertion preservation remains separate.
+
+`create_removal_backup` issues actual encrypted replacement bytes after existing
+request-authorized cleanup. Both archives undergo full native verification. The
+target must extend the original journal byte-for-byte, retain original receipts
+and payload manifests, and preserve independent original bodies. Every new pruning
+publication must bind the supplied request and workspace; hash-only record history
+requires migration. Native replay retains independent semantic mutations and graph
+history. A later sequence alone never establishes archive ancestry.
+
+Target issuance, complete membership and source-to-target provenance share one
+custody Sync. `backup_replacement` recovers the immutable proof; catalog verification
+checks its sealed chain and reverse closure. Exact retries and native restore do
+not duplicate or rewind acceptance. Verified source backfill can precede that Sync.
+The caller must durably store the returned bytes. Partial cleanup is explicit;
+isolated cleanup of divergent archive branches, replacement availability, safe key
+retirement and complete physical/external-copy dispositions remain open.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
 profile. Record addresses, sizes, lexical hashes and archive metadata remain

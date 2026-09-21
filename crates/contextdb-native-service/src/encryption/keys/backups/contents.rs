@@ -10,7 +10,7 @@ mod publication;
 mod selection;
 pub use selection::{NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyInventory};
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 mod verification;
 
 const EVENTS: &[u8] = b"backup/contents/event/";
@@ -99,7 +99,7 @@ pub struct NativeBackupContentsPage {
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ContentsEvent {
+pub(super) struct ContentsEvent {
     sequence: u64,
     previous: Option<String>,
     registration: NativeBackupRegistration,
@@ -132,7 +132,7 @@ impl ContentsEvent {
         }
     }
 
-    fn inventory(&self) -> NativeBackupContentsInventory {
+    pub(super) fn inventory(&self) -> NativeBackupContentsInventory {
         NativeBackupContentsInventory {
             registration: self.registration.clone(),
             receipt: self.receipt(),

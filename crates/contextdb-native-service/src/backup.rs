@@ -22,6 +22,8 @@ use super::{
 };
 
 mod contents;
+pub(crate) mod replacements;
+pub use replacements::NativeRemovalBackup;
 
 /// Exact format returned by the native administrative backup operation.
 pub const NATIVE_BACKUP_FORMAT: &str = "contextdb.native-fjall.logical-backup.v1";
@@ -66,6 +68,36 @@ impl NativeService {
             keys.require_backup_registry()?;
         }
         let _guard = self.lock_writes()?;
+        let (archive, response) = self.build_native_backup()?;
+        if let Some(keys) = &self.engine.keys {
+            if keys.supports_backup_contents() {
+                self.retain_verified_backup_contents(
+                    &archive,
+                    &response,
+                    true,
+                    &mut contents::issuance_budget(),
+                )?;
+            } else {
+                keys.register_backup(
+                    &response.digest,
+                    response.commit_seq,
+                    &archive.deep_digest,
+                    response.bytes.len() as u64,
+                )
+                .map_err(storage_error)?;
+            }
+            #[cfg(test)]
+            AFTER_REGISTRATION.with(|hook| {
+                if let Some(hook) = hook.take() {
+                    hook();
+                }
+            });
+        }
+        Ok(response)
+    }
+
+    // Caller holds native publication until the verified bytes are issued.
+    fn build_native_backup(&self) -> ServiceResult<(NativeBackup, BackupResponse)> {
         self.verify_physical_backup_layout()?;
         let backend = self
             .engine
@@ -117,31 +149,7 @@ impl NativeService {
             bytes,
             commit_seq,
         };
-        if let Some(keys) = &self.engine.keys {
-            if keys.supports_backup_contents() {
-                self.retain_verified_backup_contents(
-                    &archive,
-                    &response,
-                    true,
-                    &mut contents::issuance_budget(),
-                )?;
-            } else {
-                keys.register_backup(
-                    &response.digest,
-                    commit_seq,
-                    &archive.deep_digest,
-                    response.bytes.len() as u64,
-                )
-                .map_err(storage_error)?;
-            }
-            #[cfg(test)]
-            AFTER_REGISTRATION.with(|hook| {
-                if let Some(hook) = hook.take() {
-                    hook();
-                }
-            });
-        }
-        Ok(response)
+        Ok((archive, response))
     }
 
     pub(super) fn restore_native_backup(

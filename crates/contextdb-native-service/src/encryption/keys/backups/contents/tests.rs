@@ -186,7 +186,10 @@ fn archive_contents_match_every_physical_version_and_survive_old_restore_and_reo
 
 // Construct the original, pre-contents v4 registry wire shape without changing
 // valid archive bytes, registered archive digests or retained encryption history.
-pub(super) fn legacy_registry(keys: &NativeCustodyKeys, keep_issuance: bool) {
+pub(in crate::encryption::keys::backups) fn legacy_registry(
+    keys: &NativeCustodyKeys,
+    keep_issuance: bool,
+) {
     let mut tx = keys.engine.begin_write().expect("tx");
     let mut head = if keep_issuance {
         keys.backup_head(&tx).expect("head")

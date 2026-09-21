@@ -166,7 +166,7 @@ impl NativeCustodyKeys {
         budget.check().map_err(budget_error)
     }
 
-    pub(super) fn find_contents<S: ReadSnapshot>(
+    pub(in crate::encryption::keys::backups) fn find_contents<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         digest: &str,

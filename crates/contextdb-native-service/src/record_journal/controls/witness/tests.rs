@@ -25,7 +25,7 @@ pub(crate) fn fixture() -> Fixture {
     fixture_with_keys(None)
 }
 
-fn fixture_with_keys(keys: Option<Arc<NativeCustodyKeys>>) -> Fixture {
+pub(crate) fn fixture_with_keys(keys: Option<Arc<NativeCustodyKeys>>) -> Fixture {
     let root = tempfile::tempdir().expect("root");
     let (ledger_directory, ledger) = suppression::tests::authority("record-witness");
     let service = Arc::new(

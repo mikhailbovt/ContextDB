@@ -21,7 +21,8 @@ mod versions;
 pub use backups::{
     NativeBackupCatalogPage, NativeBackupContentsInventory, NativeBackupContentsPage,
     NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
-    NativeBackupKeyInventory, NativeBackupRegistration,
+    NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
+    NativeBackupReplacement, NativeBackupReplacementReceipt,
 };
 pub use uses::{
     NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,

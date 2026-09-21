@@ -21,6 +21,12 @@ pub(crate) struct SourcePruningPublication {
     sources: BTreeMap<ObservationId, PrunedControl>,
 }
 
+impl SourcePruningPublication {
+    pub(crate) fn removal_request(&self) -> &RemovalCheckpoint {
+        &self.request
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PrunedSource {

@@ -33,6 +33,12 @@ pub(crate) struct PayloadPruningPublication {
     state: PayloadPruningState,
 }
 
+impl PayloadPruningPublication {
+    pub(crate) fn removal_request(&self) -> &RemovalCheckpoint {
+        &self.state.request
+    }
+}
+
 /// Logical chunk removal only. Physical pages, keys and external copies remain
 /// distinct obligations. `complete` applies only to this local block's chunks.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
