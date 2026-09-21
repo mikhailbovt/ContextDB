@@ -9,6 +9,7 @@ mod assertion_witness;
 mod controls;
 mod inventory;
 mod raw_copies;
+mod raw_inventory;
 mod record_witness;
 #[cfg(test)]
 mod tests;
@@ -57,6 +58,9 @@ enum Operation {
     },
     RawCopies {
         observation: raw_copies::RawCopyDeclaration,
+    },
+    RawIndexInventory {
+        witness: raw_inventory::RawIndexDeclaration,
     },
 }
 
@@ -443,6 +447,7 @@ impl NativeSuppressionLedger {
             Operation::AssertionWitness { witness } => witness.validate(sequence)?,
             Operation::RecordValidation { validation } => validation.validate(sequence)?,
             Operation::RawCopies { observation } => observation.validate()?,
+            Operation::RawIndexInventory { witness } => witness.validate(sequence)?,
             Operation::Request {
                 intent,
                 source_pages,
@@ -548,6 +553,9 @@ impl NativeSuppressionLedger {
                         ));
                     }
                     self.verify_raw_copy_rows(snapshot, &event, observation, expected)?;
+                }
+                Operation::RawIndexInventory { witness } => {
+                    self.verify_raw_index_inventory_rows(snapshot, &event, witness, expected)?;
                 }
                 Operation::Register { workspace } => {
                     if workspaces

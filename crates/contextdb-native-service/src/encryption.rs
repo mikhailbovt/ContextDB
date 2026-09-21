@@ -117,7 +117,11 @@ fn random_key() -> contextdb_storage::Result<Zeroizing<[u8; 32]>> {
     Ok(key)
 }
 
-fn seal(key: &[u8; 32], aad: &[u8], plaintext: &[u8]) -> contextdb_storage::Result<Vec<u8>> {
+pub(crate) fn seal(
+    key: &[u8; 32],
+    aad: &[u8],
+    plaintext: &[u8],
+) -> contextdb_storage::Result<Vec<u8>> {
     if plaintext.len() > MAX_VALUE_BYTES {
         return Err(failure("custody value exceeds 16 MiB"));
     }
@@ -136,7 +140,7 @@ fn seal(key: &[u8; 32], aad: &[u8], plaintext: &[u8]) -> contextdb_storage::Resu
     Ok([nonce.as_slice(), ciphertext.as_slice()].concat())
 }
 
-fn open(
+pub(crate) fn open(
     key: &[u8; 32],
     aad: &[u8],
     ciphertext: &[u8],

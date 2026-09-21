@@ -2,6 +2,7 @@
 
 pub(crate) mod copies;
 mod gc;
+pub(crate) mod inventory;
 #[cfg(test)]
 mod tests;
 mod verify;
@@ -14,6 +15,11 @@ pub use copies::{
 };
 pub use gc::RawReclaimProgress;
 pub(super) use gc::retained_generations;
+pub use inventory::{
+    NativeRawGenerationRole, NativeRawIndexGeneration, NativeRawIndexInventoryPage,
+    NativeRawIndexInventoryReceipt, NativeRawIndexInventoryWitness, NativeRawIndexKeyInventory,
+    NativeRawIndexSnapshot,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 

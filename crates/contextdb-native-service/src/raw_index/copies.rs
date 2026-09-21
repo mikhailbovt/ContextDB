@@ -8,7 +8,7 @@ pub(crate) mod discovery;
 mod observe;
 mod verify;
 pub use discovery::{NativeRawRemovalCopy, NativeRawRemovalCopyPage};
-mod keys;
+pub(super) mod keys;
 pub use keys::{NativeRawKeyFamily, NativeRawKeyInventory};
 
 #[cfg(test)]
@@ -38,9 +38,9 @@ pub enum NativeRawCopyKind {
     Route,
     /// Generation-wide policy or scope routing metadata.
     SharedMetadata,
-    /// The final generation manifest, retained when reclamation finishes.
+    /// The generation manifest at the observed snapshot.
     Manifest,
-    /// Unrecognized unreachable row; its ownership remains unresolved.
+    /// Unrecognized row; its ownership remains unresolved.
     Unknown,
 }
 
@@ -147,33 +147,7 @@ impl NativeRawCopyWitness {
         {
             return Err(integrity("raw copy witness binding or bound is invalid"));
         }
-        let mut addresses = BTreeSet::new();
-        let mut owners = BTreeSet::new();
-        for row in &self.rows {
-            if !addresses.insert(&row.address_digest)
-                || blake3::Hash::from_hex(&row.address_digest).is_err()
-                || blake3::Hash::from_hex(&row.value_digest).is_err()
-                || row.version.as_ref().is_some_and(|version| {
-                    blake3::Hash::from_hex(&version.ciphertext_digest).is_err()
-                })
-                || row.source.is_some()
-                    != matches!(
-                        row.kind,
-                        NativeRawCopyKind::Document | NativeRawCopyKind::Route
-                    )
-            {
-                return Err(integrity("raw copy row binding differs"));
-            }
-            owners.extend(row.source);
-        }
-        if owners != self.sources.keys().copied().collect()
-            || self
-                .sources
-                .values()
-                .any(|source| source.capture_commit == 0)
-        {
-            return Err(integrity("raw copy source controls differ"));
-        }
+        validate_observed_rows(&self.sources, &self.rows)?;
         Ok(())
     }
 }
@@ -198,4 +172,37 @@ impl NativeService {
             budget,
         )
     }
+}
+
+pub(in crate::raw_index) fn validate_observed_rows(
+    sources: &BTreeMap<ObservationId, NativeRawSourceControl>,
+    rows: &[NativeRawCopyObservation],
+) -> ServiceResult<()> {
+    let mut addresses = BTreeSet::new();
+    let mut owners = BTreeSet::new();
+    for row in rows {
+        if !addresses.insert(&row.address_digest)
+            || blake3::Hash::from_hex(&row.address_digest).is_err()
+            || blake3::Hash::from_hex(&row.value_digest).is_err()
+            || row.version.as_ref().is_some_and(|version| {
+                version.authority_id.is_nil()
+                    || version.key_id.is_nil()
+                    || blake3::Hash::from_hex(&version.ciphertext_digest).is_err()
+            })
+            || row.source.is_some()
+                != matches!(
+                    row.kind,
+                    NativeRawCopyKind::Document | NativeRawCopyKind::Route
+                )
+        {
+            return Err(integrity("raw copy row binding differs"));
+        }
+        owners.extend(row.source);
+    }
+    if owners != sources.keys().copied().collect()
+        || sources.values().any(|source| source.capture_commit == 0)
+    {
+        return Err(integrity("raw copy source controls differ"));
+    }
+    Ok(())
 }

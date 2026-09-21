@@ -14,6 +14,27 @@ impl NativeSuppressionLedger {
         budget: &mut QueryBudget,
     ) -> ServiceResult<Option<(RemovalCheckpoint, Operation)>> {
         let head = self.removal_global_head(snapshot)?;
+        let tail = snapshot
+            .scan_prefix_page(
+                &self.rows,
+                ScanPageRequest {
+                    prefix: b"removal/event/",
+                    start_after: Some(&event_key(head.sequence)),
+                    max_entries: 1,
+                    max_bytes: 1024 * 1024,
+                },
+            )
+            .map_err(storage_error)?;
+        for row in &tail.entries {
+            budget
+                .charge(1, (row.key.len() + row.value.len()) as u64)
+                .map_err(budget_error)?;
+        }
+        if !tail.entries.is_empty() {
+            return Err(integrity(
+                "retained control head is behind its accepted journal",
+            ));
+        }
         if requested.sequence == 0 || requested.sequence > head.sequence {
             return Err(integrity(
                 "retained control removal request is outside retained history",
@@ -36,6 +57,7 @@ impl NativeSuppressionLedger {
                 Operation::RecordWitness { witness } => witness.key() == key,
                 Operation::AssertionWitness { witness } => witness.key() == key,
                 Operation::RecordValidation { validation } => validation.key() == key,
+                Operation::RawIndexInventory { witness } => witness.key() == key,
                 _ => false,
             };
             if matches {

@@ -255,15 +255,23 @@ evidence before each page is deleted. Native verification binds that evidence to
 the accepted GC history; shared metadata stays distinct from source-owned rows.
 Tests cover pruning, actual authority/native reopen, empty/full/partial encrypted
 archives, lost acknowledgement, concurrent publication and damaged page chains.
-Older untracked prefixes, current-generation inventory and unobserved historical
-versions remain open; observation does not establish erasure or key retirement.
+Older untracked prefixes and unobserved historical versions remain open;
+observation does not establish erasure or key retirement.
 Request-bound discovery now walks the retained observation journal with
 authenticated continuations, preserving source/control identity across older
 native restore. Historical raw-key inventory separates allocated keys from
 observed ciphertexts and retains unresolved shared/unknown obligations. Tests
 cover descendant selection, independent originals, cursor replay and rotation,
 authority growth, pruning/restore and forged source or key claims. It covers
-observed reclamation history; current generations and older gaps remain open.
+observed reclamation history; older gaps remain open.
+Request-bound inspection now independently retains present rows across active,
+building, retained and partly reclaimed generations. Encrypted continuations bind
+the native snapshot; exact retries recover accepted pages without native writes.
+The selected key report verifies the entire page chain after pruning or older
+restore. Tests cover exact physical observations, restart, token rotation, native
+races, lost acknowledgement, unknown rows and damaged or rehashed page chains.
+Expected projection coverage, complete native-use history and unobserved copies
+remain separate gates; a finished inspection does not authorize key retirement.
 Encrypted projection now accepts the full 16,384-term document limit and splits
 larger batches between originals, reserving capacity for native control rows.
 Coverage advances only past complete documents and resumes after restart.

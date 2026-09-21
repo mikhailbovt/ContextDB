@@ -343,7 +343,29 @@ key, and reject authority growth. An empty page can still have a continuation.
 keys and distinct observed ciphertexts. It keeps shared/unknown witness references
 and other custody authorities explicit. Addresses, allocations, ciphertexts and
 witness pages each have a 65,536-entry cap; output is limited to 32 MiB. Current
-generations and untracked history remain outside this observed-copy inventory.
+generations and untracked history remain outside this GC observation report.
+
+Admin `inventory_raw_removal_copies` independently retains present rows in every
+generation listed by the native index state, including active, building, older and
+partly reclaimed generations. Each page observes at most 1,024 rows plus the final
+manifest, with an 8 MiB scan, a 1 MiB witness and one shared budget. The exact
+removal request, native event commitment, index state and retained manifests bind
+the page chain. A native write fence precedes independent Sync; native rows do not
+change. Exact retries recover the accepted receipt, including after a lost reply.
+Encrypted continuations bind caller and request, survive reopen with the same token
+key and require restart after native changes. Unrelated removal-journal growth is
+allowed. Raw keys and source bodies are absent from the retained witnesses.
+
+`read_raw_index_inventory_witness` verifies one accepted page and its immediate
+predecessor after pruning or older restore. `read_raw_index_key_inventory` requires
+a terminal receipt and validates every ancestor before joining selected source
+addresses to allocations and observed ciphertexts. Duplicate addresses, missing
+pages and unallocated current-authority keys reject the whole report. Selected
+addresses, allocations, ciphertexts and pages each have a 65,536-entry cap; output
+is limited to 32 MiB. Its receipt preserves shared/unknown rows and reclaimed
+prefixes in the inspected chain. Completion means that this retained snapshot was
+scanned; it does not establish expected projection coverage, complete native-use
+history, absence of unobserved copies, key disablement or erasure.
 
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never

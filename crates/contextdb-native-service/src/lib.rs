@@ -68,6 +68,11 @@ pub use raw_index::{
     RawProjectionProgress, RawReclaimProgress,
 };
 pub use raw_index::{
+    NativeRawGenerationRole, NativeRawIndexGeneration, NativeRawIndexInventoryPage,
+    NativeRawIndexInventoryReceipt, NativeRawIndexInventoryWitness, NativeRawIndexKeyInventory,
+    NativeRawIndexSnapshot,
+};
+pub use raw_index::{
     NativeRawKeyFamily, NativeRawKeyInventory, NativeRawRemovalCopy, NativeRawRemovalCopyPage,
 };
 pub use retention::{

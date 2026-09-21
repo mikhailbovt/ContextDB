@@ -35,7 +35,53 @@ impl NativeService {
         if event.global_commit != head || event.event_digest != crate::event_digest(&event)? {
             return Err(integrity("raw copy native head differs"));
         }
-        let prefix = generation_prefix(&workspace, job.generation);
+        let (sources, mut rows) =
+            self.observe_raw_generation_rows(snapshot, workspace_id, &generation, entries, budget)?;
+        if finished {
+            rows.push(self.observe_raw_row(
+                snapshot,
+                &Entry {
+                    key: manifest_key,
+                    value: manifest.clone(),
+                },
+                NativeRawCopyKind::Manifest,
+                None,
+                budget,
+            )?);
+        }
+        let witness = NativeRawCopyWitness {
+            database_id: self.database_id.clone(),
+            workspace_id: workspace_id.into(),
+            native_commit: head,
+            native_event_digest: event.event_digest,
+            generation: job.generation,
+            generation_digest: digest_bytes(&manifest),
+            removed_before: job.removed_rows,
+            previous: job.copies.clone(),
+            finished,
+            sources,
+            rows,
+        };
+        witness.validate(&digest_bytes(self.database_id.as_bytes()))?;
+        budget
+            .charge(1, encode(&witness)?.len() as u64)
+            .map_err(budget_error)?;
+        Ok(witness)
+    }
+
+    pub(in crate::raw_index) fn observe_raw_generation_rows(
+        &self,
+        snapshot: &NativeSnapshot,
+        workspace_id: &str,
+        generation: &Generation,
+        entries: &[Entry],
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(
+        BTreeMap<ObservationId, NativeRawSourceControl>,
+        Vec<NativeRawCopyObservation>,
+    )> {
+        let workspace = digest_bytes(workspace_id.as_bytes());
+        let prefix = generation_prefix(&workspace, generation.number);
         let mut sources = BTreeMap::new();
         let mut documents = BTreeMap::new();
         let mut rows = Vec::new();
@@ -93,7 +139,7 @@ impl NativeService {
                         &domain,
                         budget,
                     )?;
-                    let expected = document_rows(&workspace, job.generation, &document)?;
+                    let expected = document_rows(&workspace, generation.number, &document)?;
                     for (key, value) in &expected {
                         budget
                             .charge(1, (key.len() + value.len()) as u64)
@@ -118,39 +164,10 @@ impl NativeService {
             };
             rows.push(self.observe_raw_row(snapshot, entry, kind, source, budget)?);
         }
-        if finished {
-            rows.push(self.observe_raw_row(
-                snapshot,
-                &Entry {
-                    key: manifest_key,
-                    value: manifest.clone(),
-                },
-                NativeRawCopyKind::Manifest,
-                None,
-                budget,
-            )?);
-        }
-        let witness = NativeRawCopyWitness {
-            database_id: self.database_id.clone(),
-            workspace_id: workspace_id.into(),
-            native_commit: head,
-            native_event_digest: event.event_digest,
-            generation: job.generation,
-            generation_digest: digest_bytes(&manifest),
-            removed_before: job.removed_rows,
-            previous: job.copies.clone(),
-            finished,
-            sources,
-            rows,
-        };
-        witness.validate(&digest_bytes(self.database_id.as_bytes()))?;
-        budget
-            .charge(1, encode(&witness)?.len() as u64)
-            .map_err(budget_error)?;
-        Ok(witness)
+        Ok((sources, rows))
     }
 
-    fn observe_raw_row(
+    pub(in crate::raw_index) fn observe_raw_row(
         &self,
         snapshot: &NativeSnapshot,
         entry: &Entry,
