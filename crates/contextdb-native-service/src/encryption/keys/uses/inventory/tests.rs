@@ -2,6 +2,8 @@ use super::*;
 use crate::encryption::NativeStorage;
 use std::time::Duration;
 
+mod witness;
+
 fn budget() -> QueryBudget {
     QueryBudget::new(
         2_000_000,

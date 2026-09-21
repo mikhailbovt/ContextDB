@@ -9,7 +9,10 @@ use super::*;
 pub(crate) mod keys;
 mod preparation;
 mod pruning;
-pub use keys::NativePrimaryKeyInventory;
+pub use keys::{
+    NativePrimaryKeyAction, NativePrimaryKeyDisposition, NativePrimaryKeyInventory,
+    NativePrimaryKeyRemovalReceipt, NativePrimaryKeyRemovalWitness,
+};
 pub use preparation::NativeRemovalPreparationReceipt;
 pub(super) use preparation::RemovalPreparationPublication;
 pub use pruning::NativeSourcePruningReceipt;

@@ -8,6 +8,7 @@ use super::*;
 mod assertion_witness;
 mod controls;
 mod inventory;
+mod primary_keys;
 mod raw_copies;
 mod raw_inventory;
 mod record_witness;
@@ -61,6 +62,9 @@ enum Operation {
     },
     RawIndexInventory {
         witness: raw_inventory::RawIndexDeclaration,
+    },
+    PrimaryKeys {
+        witness: primary_keys::PrimaryKeyDeclaration,
     },
 }
 
@@ -448,6 +452,7 @@ impl NativeSuppressionLedger {
             Operation::RecordValidation { validation } => validation.validate(sequence)?,
             Operation::RawCopies { observation } => observation.validate()?,
             Operation::RawIndexInventory { witness } => witness.validate(sequence)?,
+            Operation::PrimaryKeys { witness } => witness.validate(sequence)?,
             Operation::Request {
                 intent,
                 source_pages,
@@ -556,6 +561,9 @@ impl NativeSuppressionLedger {
                 }
                 Operation::RawIndexInventory { witness } => {
                     self.verify_raw_index_inventory_rows(snapshot, &event, witness, expected)?;
+                }
+                Operation::PrimaryKeys { witness } => {
+                    self.verify_primary_key_rows(snapshot, &event, witness, expected)?;
                 }
                 Operation::Register { workspace } => {
                     if workspaces

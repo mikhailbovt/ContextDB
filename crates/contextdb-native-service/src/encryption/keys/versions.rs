@@ -170,6 +170,22 @@ impl NativeCustodyKeys {
         Ok(head.sequence == sequence && head.digest.as_deref() == digest)
     }
 
+    pub(super) fn matches_key_checkpoint<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        sequence: u64,
+        digest: Option<&str>,
+    ) -> contextdb_storage::Result<bool> {
+        if sequence == 0 {
+            return Ok(digest.is_none());
+        }
+        let key = batch_key(sequence);
+        let bytes = snapshot
+            .get(&self.rows, &key)?
+            .ok_or_else(|| failure("retained allocation checkpoint is absent"))?;
+        Ok(Some(crate::digest_bytes(&self.open_key_log(&key, &bytes)?).as_str()) == digest)
+    }
+
     fn key_version_head<S: ReadSnapshot>(&self, snapshot: &S) -> contextdb_storage::Result<Head> {
         let bytes = snapshot
             .get(&self.rows, HEAD)?

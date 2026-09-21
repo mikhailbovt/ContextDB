@@ -285,5 +285,9 @@ remain separate gates; a finished inspection does not authorize key retirement.
 Encrypted projection now accepts the full 16,384-term document limit and splits
 larger batches between originals, reserving capacity for native control rows.
 Coverage advances only past complete documents and resumes after restart.
+Primary-version decisions now survive both authority restarts and older native
+restore. Independent Sync is fenced against custody publication; readback verifies
+exact historical allocation/use frontiers and distinguishes pending, acknowledged
+and retained-copy work. These witnesses do not disable keys or complete deletion.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

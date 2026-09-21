@@ -3,6 +3,12 @@
 
 use super::*;
 
+pub(crate) mod witness;
+pub use witness::{
+    NativePrimaryKeyAction, NativePrimaryKeyDisposition, NativePrimaryKeyRemovalReceipt,
+    NativePrimaryKeyRemovalWitness,
+};
+
 const MAX_ALLOCATIONS: usize = 65_536;
 const MAX_REPORT_BYTES: usize = 32 * 1024 * 1024;
 

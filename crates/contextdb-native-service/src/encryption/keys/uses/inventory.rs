@@ -55,6 +55,69 @@ pub struct NativeKeyUseInventory {
 }
 
 impl NativeCustodyKeys {
+    // Lock order: service publication (when needed), custody, suppression. The
+    // returned guard fences native Sync/import/recovery through witness Sync.
+    pub(crate) fn lock_inventory_frontier(
+        &self,
+        allocation_revision: u64,
+        allocation_digest: Option<&str>,
+        inventory: &NativeKeyUseInventory,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<crate::publication::PublicationGuard<'_>> {
+        let guard = self
+            .writes
+            .enter(|| budget.check().map_err(crate::raw_index::budget_error))?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(crate::storage_error)?;
+        let view = BudgetedSnapshot::new(snapshot, budget);
+        let result = (|| {
+            let head = self.use_head(&view)?;
+            if inventory.authority_id != self.authority_id()
+                || head.sequence != inventory.revision
+                || head.digest != inventory.revision_digest
+                || !self.matches_key_frontier(&view, allocation_revision, allocation_digest)?
+            {
+                return Err(view.reject(stale()));
+            }
+            Ok(())
+        })();
+        view.complete(result)?;
+        Ok(guard)
+    }
+
+    // Used only after complete current inventory replay. This authenticates old
+    // checkpoint commitments; the caller also compares their exact projections.
+    pub(crate) fn verify_inventory_checkpoints(
+        &self,
+        allocation_revision: u64,
+        allocation_digest: Option<&str>,
+        inventory: &NativeKeyUseInventory,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(crate::storage_error)?;
+        let view = BudgetedSnapshot::new(snapshot, budget);
+        let result = (|| {
+            let checkpoint = if inventory.revision == 0 {
+                UseCheckpoint::default()
+            } else {
+                self.use_event(&view, inventory.revision)?.checkpoint
+            };
+            if inventory.authority_id != self.authority_id()
+                || checkpoint.digest != inventory.revision_digest
+                || !self.matches_key_checkpoint(&view, allocation_revision, allocation_digest)?
+            {
+                return Err(view.reject(crate::integrity("retained inventory checkpoint differs")));
+            }
+            Ok(())
+        })();
+        view.complete(result)
+    }
+
     /// The service supplies only addresses/keys selected from authorized retained
     /// ownership. Legacy v3 returns None rather than inventing native-use history.
     pub(crate) fn selected_native_use_inventory(

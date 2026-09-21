@@ -103,6 +103,17 @@ fn primary_pruning_preserves_replay_across_partial_restart_and_both_archive_gene
         call.event.event_id,
         output.event.event_id,
     ]);
+    let key_witness = native
+        .retain_original_key_removal(&source.context, &removal, &mut budget())
+        .expect("retain original version decisions before pruning");
+    assert_eq!(
+        key_witness
+            .dispositions
+            .keys()
+            .copied()
+            .collect::<BTreeSet<_>>(),
+        targets
+    );
     native
         .prepare_original_removal_sources(&source.context, &removal, &targets, &mut budget())
         .expect("prepare all sources");
@@ -189,6 +200,31 @@ fn primary_pruning_preserves_replay_across_partial_restart_and_both_archive_gene
             &mut budget(),
         )
         .expect("prune output");
+    let pruned_witness = native
+        .retain_original_key_removal(&source.context, &removal, &mut budget())
+        .expect("retain decisions after native pruning");
+    assert!(
+        pruned_witness
+            .dispositions
+            .values()
+            .flatten()
+            .all(
+                |key| key.action == NativePrimaryKeyAction::AssessRetainedCopies
+                    && key.acknowledged_instances.is_empty()
+                    && !key.versions.is_empty()
+            )
+    );
+    assert_eq!(
+        native
+            .read_original_key_removal(
+                &source.context,
+                &removal,
+                &key_witness.receipt,
+                &mut budget()
+            )
+            .expect("old acknowledged copies remain historical evidence"),
+        key_witness
+    );
     let clean = native
         .create_backup(CreateBackupRequest {
             context: source.context.clone(),
@@ -277,6 +313,32 @@ fn primary_pruning_preserves_replay_across_partial_restart_and_both_archive_gene
             })
             .expect("restore exact archive");
         restored.verify_native(true).expect("restored closure");
+        for witness in [&key_witness, &pruned_witness] {
+            assert_eq!(
+                restored
+                    .read_original_key_removal(
+                        &source.context,
+                        &removal,
+                        &witness.receipt,
+                        &mut budget()
+                    )
+                    .expect("saved decisions survive both archive generations"),
+                *witness
+            );
+        }
+        let current_keys = restored
+            .retain_original_key_removal(&source.context, &removal, &mut budget())
+            .expect("fresh decisions include restored old copies");
+        assert!(
+            current_keys
+                .dispositions
+                .values()
+                .flatten()
+                .all(
+                    |key| key.action == NativePrimaryKeyAction::RemoveAcknowledgedCopies
+                        && key.acknowledged_instances.len() == 1
+                )
+        );
         assert_eq!(
             restored
                 .read_original(ReadOriginalRequest {

@@ -329,6 +329,22 @@ Version 3 reports return `native_use: null`; older serialized reports also lack
 this evidence. Shared batches can still contain
 independently needed versions; a source-bound report is not a retirement witness.
 
+Admin `retain_original_key_removal` independently persists primary-version
+decisions after complete custody replay. The custody publication guard keeps both
+frontiers unchanged through witness Sync. Exact retries recover the same receipt;
+new frontiers append new witnesses. Each selected key records its exact known
+ciphertexts, acknowledged instances and unresolved preparations. The next task is
+to resolve pending use, remove acknowledged copies, or assess retained copies.
+Unused allocations and logically removed versions still require that last task.
+
+`read_original_key_removal` verifies the retained request and current Admin access,
+then projects complete current custody history to the witness's authenticated
+frontiers. Later outcomes, pruning and old-ciphertext restores cannot rewrite the
+saved evidence. The removal journal retains one inventory blob, at most 5 MiB;
+decisions are derived from it, without another stored copy. This v4 API covers
+exclusively owned primary rows. Shared versions, archives, physical key destruction,
+current key disablement and deletion completion remain separate gates.
+
 `key_catalog_page` enumerates at most 256 accepted descriptors with a shared
 work/byte/time budget and an authenticated continuation. Pages bind the authority,
 allocation revision and exact batch chain; new allocations invalidate a pending
