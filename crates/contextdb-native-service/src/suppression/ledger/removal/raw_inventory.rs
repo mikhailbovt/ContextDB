@@ -154,22 +154,35 @@ impl NativeSuppressionLedger {
         workspace: &str,
         request: &NativeRemovalRequestReceipt,
         budget: &mut QueryBudget,
-        mut visit: impl FnMut(NativeRawIndexInventoryWitness, &mut QueryBudget) -> ServiceResult<()>,
+        visit: impl FnMut(NativeRawIndexInventoryWitness, &mut QueryBudget) -> ServiceResult<()>,
     ) -> ServiceResult<(NativeRawIndexSnapshot, u32)> {
         self.require_removal_authority()?;
         let snapshot = self
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
+        self.walk_raw_index_inventory_at(&snapshot, receipt, workspace, request, budget, visit)
+    }
+
+    pub(crate) fn walk_raw_index_inventory_at<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        receipt: &NativeRawIndexInventoryReceipt,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        budget: &mut QueryBudget,
+        mut visit: impl FnMut(NativeRawIndexInventoryWitness, &mut QueryBudget) -> ServiceResult<()>,
+    ) -> ServiceResult<(NativeRawIndexSnapshot, u32)> {
+        self.require_removal_authority()?;
         let (checkpoint, declaration, terminal) =
-            self.raw_index_inventory_at(&snapshot, receipt, workspace, budget)?;
+            self.raw_index_inventory_at(snapshot, receipt, workspace, budget)?;
         if !terminal.finished || terminal.request != *request {
             return Err(invalid(
                 "raw key selection requires the terminal page of this removal request",
             ));
         }
         let found = self.find_retained_control(
-            &snapshot,
+            snapshot,
             workspace,
             &declaration.request,
             &declaration.key(),
@@ -185,7 +198,7 @@ impl NativeSuppressionLedger {
         {
             return Err(integrity("raw key selection lost its terminal acceptance"));
         }
-        let controls = self.verify_raw_index_request(&snapshot, &terminal, budget)?;
+        let controls = self.verify_raw_index_request(snapshot, &terminal, budget)?;
         let anchor = terminal.snapshot.clone();
         let mut next = Some(receipt.clone());
         let mut count = 0;
@@ -197,7 +210,7 @@ impl NativeSuppressionLedger {
                 ));
             }
             let (checkpoint, declaration, witness) =
-                self.raw_index_inventory_at(&snapshot, &current, workspace, budget)?;
+                self.raw_index_inventory_at(snapshot, &current, workspace, budget)?;
             if witness.request != *request
                 || witness.snapshot != anchor
                 || snapshot
@@ -210,7 +223,7 @@ impl NativeSuppressionLedger {
                 ));
             }
             verify_selected_sources(&witness, &controls, budget)?;
-            self.verify_raw_index_predecessor(&snapshot, &witness, checkpoint.sequence, budget)?;
+            self.verify_raw_index_predecessor(snapshot, &witness, checkpoint.sequence, budget)?;
             for row in &witness.rows {
                 budget
                     .charge(1, row.address_digest.len() as u64)

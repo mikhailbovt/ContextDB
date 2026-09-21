@@ -455,6 +455,17 @@ scanned; the separate native-use attachment verifies tracked versions at its
 selected addresses. Neither establishes expected projection coverage, absence of
 unobserved copies, key disablement or erasure.
 
+`retain_reclaimed_raw_key_removal` freezes the explicit `observation_frontier()`
+from a GC key report. Later journal appends, including the decision itself, do not
+change its coverage or exact retry. `retain_raw_index_key_removal` instead requires
+the terminal receipt of a complete inspection. Both reuse the owned-key decision
+engine, custody fence and 5 MiB inventory limit. The removal journal independently
+reconstructs selected source/address coverage and observed versions from retained
+pages. Corresponding read methods verify current Admin/request authorization and
+the historical custody frontiers after pruning, authority reopen or older restore.
+Shared/unknown rows, foreign authorities and untracked prefixes remain explicit
+obligations in the referenced pages; empty selected families do not prove absence.
+
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never
 derive that master key from the rotatable token key. Encrypted backups use

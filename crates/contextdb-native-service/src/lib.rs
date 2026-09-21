@@ -78,7 +78,8 @@ pub use raw_index::{
     NativeRawIndexSnapshot,
 };
 pub use raw_index::{
-    NativeRawKeyFamily, NativeRawKeyInventory, NativeRawRemovalCopy, NativeRawRemovalCopyPage,
+    NativeRawKeyFamily, NativeRawKeyInventory, NativeRawObservationFrontier, NativeRawRemovalCopy,
+    NativeRawRemovalCopyPage,
 };
 pub use retention::{
     NativeOwnedKeyAction, NativeOwnedKeyDisposition, NativeOwnedKeyInventory, NativeOwnedKeyOwner,

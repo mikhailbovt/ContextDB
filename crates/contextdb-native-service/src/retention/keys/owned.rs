@@ -1,14 +1,20 @@
-//! Durable decisions for selected payload chunks and generic revision bodies.
+//! Durable decisions for selected payload, revision and raw-index key families.
 
 use super::*;
-use crate::{NativeRecordBodyKind, NativeRecordRemovalWitnessReceipt};
+use crate::{
+    NativeRawCopyReceipt, NativeRawIndexInventoryReceipt, NativeRawIndexSnapshot,
+    NativeRawKeyFamily, NativeRawObservationFrontier, NativeRecordBodyKind,
+    NativeRecordRemovalWitnessReceipt,
+};
 use contextdb_core::{ContentBlockId, OriginalPayloadRef};
 
+mod raw;
 #[cfg(test)]
 pub(crate) mod tests;
 
 /// Exact retained owner and all of its selected value-key allocations.
-/// Shared blocks are excluded. Mixed assertions and raw indexes have other contracts.
+/// Shared blocks and raw metadata stay outside selected source-owned addresses.
+/// Mixed assertion values have a separate preservation contract.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum NativeOwnedKeyOwner {
@@ -25,6 +31,26 @@ pub enum NativeOwnedKeyOwner {
         witness: NativeRecordRemovalWitnessReceipt,
         /// Every expected body family, including empty allocation lists.
         bodies: BTreeMap<NativeRecordBodyKind, Vec<NativeKeyAllocation>>,
+    },
+    /// Source-owned addresses in an exact retained GC-observation prefix.
+    ReclaimedRaw {
+        /// Fixed coverage, independent of later journal appends or native restore.
+        frontier: NativeRawObservationFrontier,
+        /// Every selected source and its observed address/key families.
+        sources: BTreeMap<ObservationId, BTreeMap<String, NativeRawKeyFamily>>,
+        /// Exact relevant pages, including shared/unknown and untracked obligations.
+        witnesses: Vec<NativeRawCopyReceipt>,
+    },
+    /// Source-owned addresses in one complete retained native inspection.
+    InspectedRaw {
+        /// Observed native state, which may differ from the current restored one.
+        snapshot: NativeRawIndexSnapshot,
+        /// Terminal receipt committing all inspected pages and unresolved rows.
+        inventory: NativeRawIndexInventoryReceipt,
+        /// Number of validated pages in that exact chain.
+        inspected_pages: u32,
+        /// Every selected source and its observed address/key families.
+        sources: BTreeMap<ObservationId, BTreeMap<String, NativeRawKeyFamily>>,
     },
 }
 
@@ -82,18 +108,28 @@ impl NativeOwnedKeyOwner {
         match self {
             Self::Payload { payload, .. } => canonical_digest(&("payload", payload)),
             Self::Record { witness, .. } => canonical_digest(&("record", witness)),
+            Self::ReclaimedRaw { frontier, .. } => canonical_digest(&("reclaimed-raw", frontier)),
+            Self::InspectedRaw { inventory, .. } => canonical_digest(&("inspected-raw", inventory)),
         }
     }
 
     pub(crate) fn allocations(&self) -> impl Iterator<Item = &NativeKeyAllocation> {
-        let (chunks, bodies) = match self {
-            Self::Payload { chunks, .. } => (Some(chunks), None),
-            Self::Record { bodies, .. } => (None, Some(bodies)),
+        let (chunks, bodies, raw) = match self {
+            Self::Payload { chunks, .. } => (Some(chunks), None, None),
+            Self::Record { bodies, .. } => (None, Some(bodies), None),
+            Self::ReclaimedRaw { sources, .. } | Self::InspectedRaw { sources, .. } => {
+                (None, None, Some(sources))
+            }
         };
         chunks
             .into_iter()
             .flat_map(|m| m.values().flatten())
             .chain(bodies.into_iter().flat_map(|m| m.values().flatten()))
+            .chain(raw.into_iter().flat_map(|sources| {
+                sources
+                    .values()
+                    .flat_map(|rows| rows.values().flat_map(|family| &family.allocations))
+            }))
     }
 }
 

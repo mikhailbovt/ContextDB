@@ -290,11 +290,17 @@ remain separate gates; a finished inspection does not authorize key retirement.
 Encrypted projection now accepts the full 16,384-term document limit and splits
 larger batches between originals, reserving capacity for native control rows.
 Coverage advances only past complete documents and resumes after restart.
-Primary, payload-chunk and generic-revision key decisions survive both authority restarts and older native
-restore. Independent Sync is fenced against custody publication; readback verifies
+Primary, payload-chunk and generic-revision key decisions survive both authority
+restarts and older native restore. Independent Sync is fenced against custody
+publication; readback verifies
 exact historical allocation/use frontiers and distinguishes pending, acknowledged
 and retained-copy work. These witnesses do not disable keys or complete deletion.
 Partial chunk cleanup and closed revisions retain exact earlier decisions; shared
 blocks and independent records remain outside the selected body families.
+Raw/index decisions use the same engine with an explicit frozen GC-observation
+prefix or complete inspection receipt. Retained pages independently establish
+source/address/version coverage. Exact retries, later observations, pruning and
+older encrypted restore preserve historical decisions; incomplete or damaged
+coverage rejects the report. Shared/unknown and untracked obligations remain open.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
 verified deletion completion/admission remain open.

@@ -206,6 +206,17 @@ fn present_raw_inventory_preserves_snapshot_copies_and_retry_across_reopen_pruni
         "partial page chain cannot become full key coverage"
     );
     drop(snapshot);
+    let decisions = native
+        .retain_raw_index_key_removal(&context, &removal, &terminal, &mut budget())
+        .expect("retain complete inspection decisions");
+    assert!(!decisions.dispositions.is_empty());
+    assert_eq!(
+        native
+            .retain_raw_index_key_removal(&context, &removal, &terminal, &mut budget())
+            .expect("exact retry"),
+        decisions
+    );
+    assert_eq!(native.engine.head_sequence().expect("head"), before);
     native
         .verify_native(true)
         .expect("independent inventory preserves native closure");
@@ -256,6 +267,18 @@ fn present_raw_inventory_preserves_snapshot_copies_and_retry_across_reopen_pruni
             .sources,
         keys.sources
     );
+    assert_eq!(
+        native
+            .read_raw_index_key_removal(
+                &context,
+                &removal,
+                &terminal,
+                &decisions.receipt,
+                &mut budget()
+            )
+            .expect("exact inspection decisions after pruning"),
+        decisions
+    );
     for (name, archive) in [("empty", f.empty), ("old", old)] {
         let target = NativeService::open_encrypted(
             f.root.path().join(name),
@@ -287,6 +310,18 @@ fn present_raw_inventory_preserves_snapshot_copies_and_retry_across_reopen_pruni
                 .expect("historical live keys after restore")
                 .sources,
             keys.sources
+        );
+        assert_eq!(
+            target
+                .read_raw_index_key_removal(
+                    &context,
+                    &removal,
+                    &terminal,
+                    &decisions.receipt,
+                    &mut budget()
+                )
+                .expect("exact inspection decisions after encrypted restore"),
+            decisions
         );
         let inspected = gather(&target, &context, &removal);
         if name == "empty" {

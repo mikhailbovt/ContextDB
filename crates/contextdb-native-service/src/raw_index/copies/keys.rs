@@ -3,6 +3,32 @@
 use super::*;
 use crate::{NativeKeyAllocation, NativeRemovalRequestReceipt};
 
+mod ownership;
+
+/// Exact accepted removal-journal prefix selected for raw-copy decisions.
+/// Later observations require a new frontier; retries can reuse this immutable one.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeRawObservationFrontier {
+    /// Independent authority whose journal was inspected.
+    pub authority_id: Uuid,
+    /// Complete journal prefix, including unrelated accepted operations.
+    pub sequence: u64,
+    /// Commitment at this prefix.
+    pub digest: String,
+}
+
+impl NativeRawKeyInventory {
+    /// Freeze this report's observation coverage for reproducible retained decisions.
+    pub fn observation_frontier(&self) -> NativeRawObservationFrontier {
+        NativeRawObservationFrontier {
+            authority_id: self.request.authority_id,
+            sequence: self.observation_sequence,
+            digest: self.observation_digest.clone(),
+        }
+    }
+}
+
 /// Allocations and exact observed ciphertexts at one source-owned raw address.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,6 +87,16 @@ impl NativeService {
         request: &NativeRemovalRequestReceipt,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeRawKeyInventory> {
+        self.read_reclaimed_raw_keys_at(context, request, None, budget)
+    }
+
+    pub(crate) fn read_reclaimed_raw_keys_at(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        frozen: Option<&NativeRawObservationFrontier>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeRawKeyInventory> {
         let lineage = self.read_original_removal_inventory(context, request, budget)?;
         let controls = discovery::source_controls(&lineage, budget)?;
         let ledger = self
@@ -68,28 +104,28 @@ impl NativeService {
             .as_ref()
             .ok_or_else(|| integrity("raw copy authority absent"))?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
-        let mut scan = None;
         let mut families = RawKeyFamilies::new(controls.keys().copied());
         let mut witnesses = Vec::new();
-        let frontier = loop {
-            let page = ledger.scan_raw_copy_witnesses(&workspace, scan.as_ref(), 64, budget)?;
-            for copy in discovery::select_copies(page.witnesses, &controls, budget)? {
-                budget
-                    .charge(1, encode(&copy)?.len() as u64)
-                    .map_err(budget_error)?;
-                witnesses.push(copy.witness);
-                if witnesses.len() > 65_536 {
-                    return Err(exhausted("raw key inventory exceeds 65536 witness pages"));
+        let frontier = ledger.walk_raw_copy_prefix(
+            &workspace,
+            frozen,
+            budget,
+            |receipt, witness, budget| {
+                for copy in discovery::select_copies(vec![(receipt, witness)], &controls, budget)? {
+                    budget
+                        .charge(1, encode(&copy)?.len() as u64)
+                        .map_err(budget_error)?;
+                    witnesses.push(copy.witness);
+                    if witnesses.len() > 65_536 {
+                        return Err(exhausted("raw key inventory exceeds 65536 witness pages"));
+                    }
+                    for row in copy.rows {
+                        families.observe(row)?;
+                    }
                 }
-                for row in copy.rows {
-                    families.observe(row)?;
-                }
-            }
-            if page.state.through == page.state.frontier {
-                break page.state.frontier;
-            }
-            scan = Some(page.state);
-        };
+                Ok(())
+            },
+        )?;
         let selected = families.select(self, budget)?;
         let report = NativeRawKeyInventory {
             database_id: self.database_id.clone(),
@@ -105,7 +141,15 @@ impl NativeService {
             witnesses,
         };
         crate::retention::keys::charge_report(&report, budget)?;
-        ledger.require_raw_copy_frontier(&frontier, budget)?;
+        if frozen.is_none() {
+            ledger.require_raw_copy_frontier(
+                &crate::suppression::RemovalCheckpoint {
+                    sequence: frontier.sequence,
+                    digest: frontier.digest,
+                },
+                budget,
+            )?;
+        }
         Ok(report)
     }
 }
@@ -114,7 +158,7 @@ impl NativeService {
 type RawKeyOwner = (ObservationId, String);
 type ObservedVersions = BTreeMap<(Uuid, Uuid, String), (NativeRawValueVersion, String)>;
 
-pub(in crate::raw_index) struct RawKeyFamilies {
+pub(crate) struct RawKeyFamilies {
     addresses: BTreeMap<String, RawKeyOwner>,
     observed: BTreeMap<RawKeyOwner, ObservedVersions>,
     sources: BTreeMap<ObservationId, BTreeMap<String, NativeRawKeyFamily>>,
@@ -130,7 +174,7 @@ pub(in crate::raw_index) struct RawFamilySelection {
 }
 
 impl RawKeyFamilies {
-    pub(in crate::raw_index) fn new(sources: impl Iterator<Item = ObservationId>) -> Self {
+    pub(crate) fn new(sources: impl Iterator<Item = ObservationId>) -> Self {
         Self {
             addresses: BTreeMap::new(),
             observed: BTreeMap::new(),
@@ -139,10 +183,7 @@ impl RawKeyFamilies {
         }
     }
 
-    pub(in crate::raw_index) fn observe(
-        &mut self,
-        row: NativeRawCopyObservation,
-    ) -> ServiceResult<()> {
+    pub(crate) fn observe(&mut self, row: NativeRawCopyObservation) -> ServiceResult<()> {
         let Some(source) = row.source else {
             return Ok(());
         };
@@ -209,33 +250,7 @@ impl RawKeyFamilies {
                     .addresses
                     .get(&address)
                     .ok_or_else(|| integrity("observed raw address lost its native-use history"))?;
-                let mut committed = BTreeSet::new();
-                for change in &history.transitions {
-                    budget.charge(1, 0).map_err(budget_error)?;
-                    if change.transaction.outcome == crate::NativeKeyUseOutcome::Committed
-                        && let Some(after) = &change.after
-                    {
-                        committed.insert((
-                            after.key_id,
-                            after.ciphertext_digest.as_str(),
-                            after.value_digest.as_str(),
-                        ));
-                    }
-                }
-                for (version, value_digest) in versions.values() {
-                    budget.charge(1, 0).map_err(budget_error)?;
-                    if version.authority_id == selected.authority_id
-                        && !committed.contains(&(
-                            version.key_id,
-                            version.ciphertext_digest.as_str(),
-                            value_digest.as_str(),
-                        ))
-                    {
-                        return Err(integrity(
-                            "observed raw ciphertext differs from committed native use",
-                        ));
-                    }
-                }
+                ownership::verify_observations(&versions, selected.authority_id, history, budget)?;
             }
             let observed_versions: Vec<NativeRawValueVersion> =
                 versions.into_values().map(|(version, _)| version).collect();

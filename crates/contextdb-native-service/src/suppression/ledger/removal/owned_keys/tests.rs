@@ -112,47 +112,7 @@ fn rehashed_owned_version_cannot_override_independent_custody_history() {
             }
             _ => unreachable!(),
         }
-        let bytes = encode(&inventory).expect("inventory");
-        let mut tx = f.ledger.engine.begin_write().expect("tx");
-        let mut event = f
-            .ledger
-            .read_removal_event(&tx, f.witness.receipt.witness_sequence)
-            .expect("event");
-        let Operation::OwnedKeys {
-            witness: declaration,
-        } = &mut event.operation
-        else {
-            panic!("owned witness");
-        };
-        let old_key = declaration.key();
-        *declaration =
-            OwnedKeyDeclaration::from_inventory(&inventory, &bytes).expect("declaration");
-        let new_key = declaration.key();
-        event.digest.clear();
-        event.digest = canonical_digest(&(DOMAIN, &f.ledger.identity, &event)).expect("rehash");
-        let receipt = owned_receipt(&f.ledger, &event.checkpoint(), f.removal.sequence);
-        tx.delete(&f.ledger.rows, old_key).expect("old locator");
-        tx.put(
-            &f.ledger.rows,
-            new_key,
-            encode(&event.checkpoint()).expect("locator"),
-        )
-        .expect("locator");
-        tx.put(
-            &f.ledger.rows,
-            event_key(event.sequence),
-            encode(&event).expect("event"),
-        )
-        .expect("event");
-        tx.put(
-            &f.ledger.rows,
-            HEAD.to_vec(),
-            encode(&event.checkpoint()).expect("head"),
-        )
-        .expect("head");
-        tx.put(&f.ledger.rows, blob_key(event.sequence), bytes)
-            .expect("blob");
-        tx.commit(Durability::Sync).expect("coherent false ledger");
+        let receipt = replace_inventory(&f.ledger, &f.witness.receipt, &inventory);
         if fault == "owner" {
             assert!(f.ledger.verify().is_err());
         } else {
@@ -174,4 +134,56 @@ fn rehashed_owned_version_cannot_override_independent_custody_history() {
             ErrorCode::IntegrityFailure
         );
     }
+}
+
+pub(super) fn replace_inventory(
+    ledger: &NativeSuppressionLedger,
+    receipt: &NativeOwnedKeyRemovalReceipt,
+    inventory: &NativeOwnedKeyInventory,
+) -> NativeOwnedKeyRemovalReceipt {
+    let bytes = encode(inventory).expect("inventory");
+    let mut tx = ledger.engine.begin_write().expect("tx");
+    let mut event = ledger
+        .read_removal_event(&tx, receipt.witness_sequence)
+        .expect("event");
+    assert_eq!(
+        event.checkpoint(),
+        ledger.removal_global_head(&tx).expect("head"),
+        "fixture replaces the last event"
+    );
+    let Operation::OwnedKeys {
+        witness: declaration,
+    } = &mut event.operation
+    else {
+        panic!("owned witness");
+    };
+    let old_key = declaration.key();
+    *declaration = OwnedKeyDeclaration::from_inventory(inventory, &bytes).expect("declaration");
+    let new_key = declaration.key();
+    event.digest.clear();
+    event.digest = canonical_digest(&(DOMAIN, &ledger.identity, &event)).expect("rehash");
+    let receipt = owned_receipt(ledger, &event.checkpoint(), receipt.removal_sequence);
+    tx.delete(&ledger.rows, old_key).expect("old locator");
+    tx.put(
+        &ledger.rows,
+        new_key,
+        encode(&event.checkpoint()).expect("locator"),
+    )
+    .expect("locator");
+    tx.put(
+        &ledger.rows,
+        event_key(event.sequence),
+        encode(&event).expect("event"),
+    )
+    .expect("event");
+    tx.put(
+        &ledger.rows,
+        HEAD.to_vec(),
+        encode(&event.checkpoint()).expect("head"),
+    )
+    .expect("head");
+    tx.put(&ledger.rows, blob_key(event.sequence), bytes)
+        .expect("blob");
+    tx.commit(Durability::Sync).expect("coherent false ledger");
+    receipt
 }

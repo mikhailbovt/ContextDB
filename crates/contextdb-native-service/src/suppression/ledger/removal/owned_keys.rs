@@ -1,12 +1,15 @@
 //! Owned-version decisions retained independently of native pruning and restore.
 
 use super::*;
+use crate::raw_index::copies::{discovery, keys::RawKeyFamilies};
 use crate::retention::keys::witness::MAX_WITNESS_BYTES;
 use crate::{
     NativeOwnedKeyInventory, NativeOwnedKeyOwner, NativeOwnedKeyRemovalReceipt,
     NativeRemovalRequestReceipt,
 };
 
+#[cfg(test)]
+mod raw_tests;
 #[cfg(test)]
 mod tests;
 
@@ -196,11 +199,15 @@ impl NativeSuppressionLedger {
                 "owned key witness frontier or owner binding differs",
             ));
         }
-        if let NativeOwnedKeyOwner::Record { witness, .. } = &inventory.owner
-            && witness.witness_sequence >= checkpoint.sequence
-        {
+        let owner_sequence = match &inventory.owner {
+            NativeOwnedKeyOwner::Payload { .. } => None,
+            NativeOwnedKeyOwner::Record { witness, .. } => Some(witness.witness_sequence),
+            NativeOwnedKeyOwner::ReclaimedRaw { frontier, .. } => Some(frontier.sequence),
+            NativeOwnedKeyOwner::InspectedRaw { inventory, .. } => Some(inventory.sequence),
+        };
+        if owner_sequence.is_some_and(|sequence| sequence >= checkpoint.sequence) {
             return Err(integrity(
-                "owned key witness precedes retained record ownership",
+                "owned key witness precedes retained owner evidence",
             ));
         }
         self.validate_owned_key_ownership(snapshot, &inventory, budget)?;
@@ -262,6 +269,75 @@ impl NativeSuppressionLedger {
                     return Err(integrity("owned key record workspace differs"));
                 }
                 select_groups(retained.key_addresses()?, bodies)?
+            }
+            NativeOwnedKeyOwner::ReclaimedRaw {
+                frontier,
+                sources: reported,
+                witnesses,
+            } => {
+                let controls = discovery::source_controls(&sources, budget)?;
+                let mut families = RawKeyFamilies::new(controls.keys().copied());
+                let mut expected = Vec::new();
+                self.walk_raw_copy_prefix_at(
+                    snapshot,
+                    &intent.workspace,
+                    frontier,
+                    budget,
+                    |receipt, witness, budget| {
+                        for copy in
+                            discovery::select_copies(vec![(receipt, witness)], &controls, budget)?
+                        {
+                            expected.push(copy.witness);
+                            if expected.len() > 65_536 {
+                                return Err(exhausted(
+                                    "raw key witness exceeds 65536 observation pages",
+                                ));
+                            }
+                            for row in copy.rows {
+                                families.observe(row)?;
+                            }
+                        }
+                        Ok(())
+                    },
+                )?;
+                if *witnesses != expected {
+                    return Err(integrity(
+                        "raw key witness observation-page coverage differs",
+                    ));
+                }
+                families.verify_owned_inventory(reported, usage, budget)?
+            }
+            NativeOwnedKeyOwner::InspectedRaw {
+                snapshot: observed,
+                inventory,
+                inspected_pages,
+                sources: reported,
+            } => {
+                let selected: BTreeSet<_> =
+                    sources.sources.iter().map(|s| s.receipt.event_id).collect();
+                let mut families = RawKeyFamilies::new(selected.iter().copied());
+                let (actual, pages) = self.walk_raw_index_inventory_at(
+                    snapshot,
+                    inventory,
+                    &intent.workspace,
+                    &report.request,
+                    budget,
+                    |page, budget| {
+                        budget
+                            .charge(page.rows.len() as u64, 0)
+                            .map_err(budget_error)?;
+                        for row in page.rows {
+                            if row.source.is_some_and(|source| selected.contains(&source)) {
+                                families.observe(row)?;
+                            }
+                        }
+                        Ok(())
+                    },
+                )?;
+                if actual != *observed || pages != *inspected_pages {
+                    return Err(integrity("raw key witness inspection coverage differs"));
+                }
+                families.verify_owned_inventory(reported, usage, budget)?
             }
         };
         if groups.keys().ne(usage.addresses.keys()) {

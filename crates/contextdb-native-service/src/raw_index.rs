@@ -11,7 +11,8 @@ pub use copies::{
     NativeRawSourceControl, NativeRawValueVersion,
 };
 pub use copies::{
-    NativeRawKeyFamily, NativeRawKeyInventory, NativeRawRemovalCopy, NativeRawRemovalCopyPage,
+    NativeRawKeyFamily, NativeRawKeyInventory, NativeRawObservationFrontier, NativeRawRemovalCopy,
+    NativeRawRemovalCopyPage,
 };
 pub use gc::RawReclaimProgress;
 pub(super) use gc::retained_generations;

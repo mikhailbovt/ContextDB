@@ -177,7 +177,7 @@ impl NativeService {
     }
 }
 
-pub(super) fn select_copies(
+pub(crate) fn select_copies(
     witnesses: Vec<(NativeRawCopyReceipt, NativeRawCopyWitness)>,
     sources: &BTreeMap<ObservationId, NativeRawSourceControl>,
     budget: &mut QueryBudget,
@@ -220,7 +220,7 @@ pub(super) fn select_copies(
     Ok(result)
 }
 
-pub(super) fn source_controls(
+pub(crate) fn source_controls(
     lineage: &NativeDeletionLineage,
     budget: &mut QueryBudget,
 ) -> ServiceResult<BTreeMap<ObservationId, NativeRawSourceControl>> {

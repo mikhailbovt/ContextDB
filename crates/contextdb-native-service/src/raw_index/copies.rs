@@ -8,8 +8,8 @@ pub(crate) mod discovery;
 mod observe;
 mod verify;
 pub use discovery::{NativeRawRemovalCopy, NativeRawRemovalCopyPage};
-pub(super) mod keys;
-pub use keys::{NativeRawKeyFamily, NativeRawKeyInventory};
+pub(crate) mod keys;
+pub use keys::{NativeRawKeyFamily, NativeRawKeyInventory, NativeRawObservationFrontier};
 
 #[cfg(test)]
 pub(crate) mod tests;

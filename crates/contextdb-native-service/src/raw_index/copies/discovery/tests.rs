@@ -115,6 +115,12 @@ fn raw_copy_discovery_selects_descendants_and_keeps_key_families_after_pruning_a
             }
         }
     }
+    let frontier = inventory.observation_frontier();
+    let decisions = f
+        .native
+        .retain_reclaimed_raw_key_removal(&context, &removal, &frontier, &mut budget())
+        .expect("retain decisions before pruning");
+    assert!(!decisions.dispositions.is_empty());
     let first_page = f
         .native
         .read_raw_removal_copies(&context, &removal, None, 1, &mut budget())
@@ -163,6 +169,18 @@ fn raw_copy_discovery_selects_descendants_and_keeps_key_families_after_pruning_a
     let complete = native
         .read_reclaimed_raw_key_inventory(&context, &removal, &mut budget())
         .expect("key families after pruning");
+    assert_eq!(
+        native
+            .read_reclaimed_raw_key_removal(
+                &context,
+                &removal,
+                &frontier,
+                &decisions.receipt,
+                &mut budget()
+            )
+            .expect("exact decisions after later observations and pruning"),
+        decisions
+    );
     for (owner, addresses) in &inventory.sources {
         for (address, family) in addresses {
             assert_eq!(&complete.sources[owner][address], family);
@@ -217,6 +235,18 @@ fn raw_copy_discovery_selects_descendants_and_keeps_key_families_after_pruning_a
         assert_eq!(restored.sources, complete.sources);
         assert_eq!(restored.witnesses, complete.witnesses);
         assert_eq!(restored.observation_digest, complete.observation_digest);
+        assert_eq!(
+            target
+                .read_reclaimed_raw_key_removal(
+                    &context,
+                    &removal,
+                    &frontier,
+                    &decisions.receipt,
+                    &mut budget()
+                )
+                .expect("exact decisions after encrypted restore"),
+            decisions
+        );
     }
 }
 
