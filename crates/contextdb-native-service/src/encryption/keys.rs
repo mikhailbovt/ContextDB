@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use super::*;
 
+mod attestations;
 mod backups;
 pub(super) mod uses;
 mod versions;

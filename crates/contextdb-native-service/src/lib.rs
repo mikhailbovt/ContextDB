@@ -17,6 +17,8 @@ mod assertions;
 pub use assertions::{
     NativeAssertionBatchKind, NativeAssertionCopyKind, NativeAssertionKeyInventory,
     NativeAssertionPruningReceipt, NativeAssertionRemovalWitnessReceipt,
+    NativeAssertionValueDisposition, NativeAssertionValueInventory,
+    NativeAssertionValueWitnessReceipt, NativeAssertionVersionOwnership,
 };
 mod backup;
 mod capture;

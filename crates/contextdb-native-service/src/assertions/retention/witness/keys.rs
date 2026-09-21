@@ -26,8 +26,9 @@ pub enum NativeAssertionCopyKind {
 }
 
 /// Historical allocation families selected by independent assertion ownership.
-/// Shared batches and current cleaned labels can still be required. No allocation
-/// here is declared safe to retire, physically absent, or proven used by native.
+/// Shared batches and current cleaned labels can still be required. Tracked use
+/// and authenticated composition are attached separately; allocation alone never
+/// establishes native publication, physical absence or safe key retirement.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeAssertionKeyInventory {
@@ -47,6 +48,10 @@ pub struct NativeAssertionKeyInventory {
     /// (legacy profile or older serialized report). This does not retire keys.
     #[serde(default)]
     pub native_use: Option<crate::NativeKeyUseInventory>,
+    /// Custody-authenticated classifications of exact known values. Unclassified
+    /// versions remain explicit; this does not authorize key disablement.
+    #[serde(default)]
+    pub value_ownership: Option<NativeAssertionValueInventory>,
     /// All allocated keys of original and rewritten shared batch addresses.
     pub batches: BTreeMap<NativeAssertionBatchKind, Vec<NativeKeyAllocation>>,
     /// Selected source mutation ordinals, their body/label families and all keys.
@@ -54,8 +59,14 @@ pub struct NativeAssertionKeyInventory {
     pub mutations: BTreeMap<usize, BTreeMap<NativeAssertionCopyKind, Vec<NativeKeyAllocation>>>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-enum Owner {
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub(super) enum Owner {
     Batch(NativeAssertionBatchKind),
     Mutation(usize, NativeAssertionCopyKind),
 }
@@ -81,8 +92,56 @@ impl NativeService {
         if !policy_allows(&context.request, &witness.control.access) {
             return Err(crate::permission_denied());
         }
-        let workspace = workspace(context);
-        let commit = witness.control.commit;
+        let copies = witness.copy_keys(&selected)?;
+        let mut addresses = BTreeMap::new();
+        for (key, owner) in copies {
+            budget
+                .charge(1, (key.len() + 80) as u64)
+                .map_err(budget_error)?;
+            let address = encryption::address(&self.keyspaces.continuous, &key);
+            if addresses.insert(address, owner).is_some() {
+                return Err(integrity("assertion copy key addresses are ambiguous"));
+            }
+        }
+        let allocations = self.select_key_allocations(addresses, budget)?;
+        let mut batches = BTreeMap::new();
+        let mut mutations: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
+        for (owner, keys) in allocations.owners {
+            match owner {
+                Owner::Batch(kind) => {
+                    batches.insert(kind, keys);
+                }
+                Owner::Mutation(ordinal, kind) => {
+                    mutations.entry(ordinal).or_default().insert(kind, keys);
+                }
+            }
+        }
+        let mut report = NativeAssertionKeyInventory {
+            database_id: self.database_id.clone(),
+            workspace_id: context.request.workspace_id.clone(),
+            witness: receipt.clone(),
+            custody_authority_id: allocations.authority_id,
+            allocation_revision: allocations.revision,
+            allocation_digest: allocations.digest,
+            native_use: allocations.native_use,
+            value_ownership: None,
+            batches,
+            mutations,
+        };
+        report.value_ownership =
+            self.assertion_value_inventory(&witness, &selected, &report, budget)?;
+        crate::retention::keys::charge_report(&report, budget)?;
+        Ok(report)
+    }
+}
+
+impl AssertionRemovalWitness {
+    pub(super) fn copy_keys(
+        &self,
+        selected: &BTreeSet<usize>,
+    ) -> ServiceResult<Vec<(Vec<u8>, Owner)>> {
+        let workspace = digest_bytes(self.workspace().as_bytes());
+        let commit = self.control.commit;
         let mut copies = vec![
             (
                 journal_key(&workspace, commit),
@@ -93,8 +152,8 @@ impl NativeService {
                 Owner::Batch(NativeAssertionBatchKind::Retained),
             ),
         ];
-        for ordinal in selected {
-            let mutation = witness
+        for &ordinal in selected {
+            let mutation = self
                 .mutations
                 .get(ordinal)
                 .and_then(Option::as_ref)
@@ -123,41 +182,6 @@ impl NativeService {
                 Owner::Mutation(ordinal, NativeAssertionCopyKind::SlotLabel),
             ));
         }
-        let mut addresses = BTreeMap::new();
-        for (key, owner) in copies {
-            budget
-                .charge(1, (key.len() + 80) as u64)
-                .map_err(budget_error)?;
-            let address = encryption::address(&self.keyspaces.continuous, &key);
-            if addresses.insert(address, owner).is_some() {
-                return Err(integrity("assertion copy key addresses are ambiguous"));
-            }
-        }
-        let allocations = self.select_key_allocations(addresses, budget)?;
-        let mut batches = BTreeMap::new();
-        let mut mutations: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
-        for (owner, keys) in allocations.owners {
-            match owner {
-                Owner::Batch(kind) => {
-                    batches.insert(kind, keys);
-                }
-                Owner::Mutation(ordinal, kind) => {
-                    mutations.entry(ordinal).or_default().insert(kind, keys);
-                }
-            }
-        }
-        let report = NativeAssertionKeyInventory {
-            database_id: self.database_id.clone(),
-            workspace_id: context.request.workspace_id.clone(),
-            witness: receipt.clone(),
-            custody_authority_id: allocations.authority_id,
-            allocation_revision: allocations.revision,
-            allocation_digest: allocations.digest,
-            native_use: allocations.native_use,
-            batches,
-            mutations,
-        };
-        crate::retention::keys::charge_report(&report, budget)?;
-        Ok(report)
+        Ok(copies)
     }
 }

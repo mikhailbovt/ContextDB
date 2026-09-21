@@ -103,6 +103,48 @@ pub(crate) fn retry(f: &Fixture) -> ServiceResult<NativeAssertionRemovalWitnessR
     )
 }
 
+fn assert_classified_versions(report: &NativeAssertionKeyInventory) {
+    let values = report
+        .value_ownership
+        .as_ref()
+        .expect("retained value composition");
+    assert_eq!(values.witnesses.len(), 1);
+    let original = &report.batches[&NativeAssertionBatchKind::Original][0];
+    let retained = &report.batches[&NativeAssertionBatchKind::Retained][0];
+    assert_eq!(
+        values.addresses[&original.address_digest][0].disposition,
+        NativeAssertionValueDisposition::RequiresRemoval {
+            selected_mutations: BTreeSet::from([1]),
+            independent_mutations: BTreeSet::from([0, 2, 3]),
+        }
+    );
+    assert_eq!(
+        values.addresses[&retained.address_digest][0].disposition,
+        NativeAssertionValueDisposition::PreserveIndependent {
+            mutations: BTreeSet::from([0, 2, 3])
+        }
+    );
+    for (kind, keys) in &report.mutations[&1] {
+        for (index, key) in keys.iter().enumerate() {
+            let version = values.addresses[&key.address_digest]
+                .iter()
+                .find(|version| version.version.key_id == key.key_id)
+                .expect("exact version");
+            assert_eq!(
+                version.disposition,
+                if *kind == NativeAssertionCopyKind::Body || index == 0 {
+                    NativeAssertionValueDisposition::RequiresRemoval {
+                        selected_mutations: BTreeSet::from([1]),
+                        independent_mutations: BTreeSet::new(),
+                    }
+                } else {
+                    NativeAssertionValueDisposition::PreserveControl
+                }
+            );
+        }
+    }
+}
+
 #[test]
 fn assertion_witness_inventory_retains_mixed_copy_boundaries_through_cleanup_and_old_restore() {
     let f = fixture();
@@ -116,6 +158,16 @@ fn assertion_witness_inventory_retains_mixed_copy_boundaries_through_cleanup_and
     assert!(before.batches[&NativeAssertionBatchKind::Retained].is_empty());
     assert_eq!(before.mutations[&1].len(), 3);
     assert!(before.native_use.is_some());
+    assert!(
+        before
+            .value_ownership
+            .as_ref()
+            .expect("tracked but unclassified")
+            .addresses
+            .values()
+            .flatten()
+            .all(|version| version.disposition == NativeAssertionValueDisposition::Unclassified)
+    );
     assert!(before.mutations[&1].values().all(|keys| keys.len() == 1));
     let independent_address =
         crate::encryption::address(&f.native.keyspaces.continuous, &claim_key(f.independent));
@@ -166,6 +218,7 @@ fn assertion_witness_inventory_retains_mixed_copy_boundaries_through_cleanup_and
         before.batches[&NativeAssertionBatchKind::Original]
     );
     assert_eq!(after.batches[&NativeAssertionBatchKind::Retained].len(), 1);
+    assert_classified_versions(&after);
     assert_eq!(
         after.mutations[&1][&NativeAssertionCopyKind::Body],
         before.mutations[&1][&NativeAssertionCopyKind::Body]
@@ -219,27 +272,41 @@ fn assertion_witness_inventory_retains_mixed_copy_boundaries_through_cleanup_and
             context: f.first.context.clone(),
         })
         .expect("clean archive");
-    drop(f.native);
+    let key_path = f.keys.path.clone();
+    let key_id = f.keys.authority_id();
+    let ledger_path = f.ledger.path.clone();
+    let ledger_id = f.ledger.authority_id();
+    drop((f.native, f.keys, f.ledger));
+    let keys = NativeCustodyKeys::open(
+        key_path,
+        "assertion-witness",
+        key_id,
+        crate::CustodyMasterKey::from_zeroizing(zeroize::Zeroizing::new([79; 32])).expect("master"),
+    )
+    .expect("actual custody authority reopen");
+    let ledger = NativeSuppressionLedger::open(ledger_path, "assertion-witness", ledger_id)
+        .expect("actual suppression authority reopen");
     let reopened = NativeService::open_encrypted(
         f.root.path().join("native"),
         "assertion-witness",
         [8; 32],
-        f.ledger.clone(),
-        f.keys.clone(),
+        ledger.clone(),
+        keys.clone(),
     )
     .expect("actual native reopen");
-    let keys = reopened
+    let inventory = reopened
         .read_assertion_key_inventory(&f.first.context, &f.witness, &mut budget())
         .expect("reopened inventory");
-    assert_eq!(keys.batches, after.batches);
-    assert_eq!(keys.mutations, after.mutations);
+    assert_eq!(inventory.batches, after.batches);
+    assert_eq!(inventory.mutations, after.mutations);
+    assert_classified_versions(&inventory);
     for (name, archive) in [("empty", f.empty), ("old", f.old), ("clean", clean)] {
         let restored = NativeService::open_encrypted(
             f.root.path().join(name),
             "assertion-witness",
             [9; 32],
-            f.ledger.clone(),
-            f.keys.clone(),
+            ledger.clone(),
+            keys.clone(),
         )
         .expect("restore target");
         restored
@@ -255,6 +322,7 @@ fn assertion_witness_inventory_retains_mixed_copy_boundaries_through_cleanup_and
             .expect("keys independent of restored batch presence");
         assert_eq!(keys.batches, after.batches);
         assert_eq!(keys.mutations, after.mutations);
+        assert_classified_versions(&keys);
         if name != "empty" {
             assert_eq!(
                 row(&restored, &claim_key(f.independent)),

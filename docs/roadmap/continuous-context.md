@@ -260,6 +260,11 @@ reopen and encrypted restore, including archives predating the batch. Tests cove
 independent data, retractions, policy, lost acknowledgement, publication races,
 missing witnesses and rehashed false selection. Shared and cleaned replacement
 keys remain available; this does not establish safe key retirement.
+V4 pruning now retains custody-authenticated before/after value compositions.
+The key report classifies exact versions relative to each request, preserving
+independent mutations, host policies and cleaned replay controls. Sequential
+removal, interrupted publication and older restore retain these distinctions;
+unclassified historical versions still require evidence or explicit migration.
 Raw generation reclamation now retains source/address and observed ciphertext
 evidence before each page is deleted. Native verification binds that evidence to
 the accepted GC history; shared metadata stays distinct from source-owned rows.

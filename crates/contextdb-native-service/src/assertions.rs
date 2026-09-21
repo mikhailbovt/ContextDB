@@ -36,7 +36,9 @@ pub(super) use catalog::CATALOG_FEATURE;
 pub use retention::NativeAssertionPruningReceipt;
 pub use retention::witness::{
     NativeAssertionBatchKind, NativeAssertionCopyKind, NativeAssertionKeyInventory,
-    NativeAssertionRemovalWitnessReceipt,
+    NativeAssertionRemovalWitnessReceipt, NativeAssertionValueDisposition,
+    NativeAssertionValueInventory, NativeAssertionValueWitnessReceipt,
+    NativeAssertionVersionOwnership,
 };
 pub(crate) use retention::{AssertionPruningPublication, PRUNING_FEATURE};
 const DOMAIN: &str = "contextdb.native-assertions/v1";

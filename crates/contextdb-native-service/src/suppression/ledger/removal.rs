@@ -5,6 +5,7 @@ use contextdb_service::CaptureReceipt;
 
 use super::*;
 
+mod assertion_values;
 mod assertion_witness;
 mod controls;
 mod inventory;
@@ -53,6 +54,9 @@ enum Operation {
     },
     AssertionWitness {
         witness: assertion_witness::AssertionWitnessDeclaration,
+    },
+    AssertionValues {
+        witness: assertion_values::AssertionValuesDeclaration,
     },
     RecordValidation {
         validation: record_witness::validation::RecordWriteValidation,
@@ -449,6 +453,7 @@ impl NativeSuppressionLedger {
             Operation::Register { workspace } => valid_digest(workspace)?,
             Operation::RecordWitness { witness } => witness.validate(sequence)?,
             Operation::AssertionWitness { witness } => witness.validate(sequence)?,
+            Operation::AssertionValues { witness } => witness.validate(sequence)?,
             Operation::RecordValidation { validation } => validation.validate(sequence)?,
             Operation::RawCopies { observation } => observation.validate()?,
             Operation::RawIndexInventory { witness } => witness.validate(sequence)?,
@@ -547,6 +552,9 @@ impl NativeSuppressionLedger {
                 }
                 Operation::AssertionWitness { witness } => {
                     self.verify_assertion_witness_rows(snapshot, &event, witness, expected)?;
+                }
+                Operation::AssertionValues { witness } => {
+                    self.verify_assertion_value_rows(snapshot, &event, witness, expected)?;
                 }
                 Operation::RecordValidation { validation } => {
                     self.verify_record_validation_rows(snapshot, &event, validation, expected)?;

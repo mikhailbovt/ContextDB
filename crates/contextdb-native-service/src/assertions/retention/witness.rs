@@ -4,7 +4,12 @@ use super::*;
 use crate::{NativeRemovalRequestReceipt, policy_allows};
 
 mod keys;
+pub(crate) mod values;
 pub use keys::{NativeAssertionBatchKind, NativeAssertionCopyKind, NativeAssertionKeyInventory};
+pub use values::{
+    NativeAssertionValueDisposition, NativeAssertionValueInventory,
+    NativeAssertionValueWitnessReceipt, NativeAssertionVersionOwnership,
+};
 #[cfg(test)]
 pub(crate) mod tests;
 

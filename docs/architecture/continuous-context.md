@@ -381,6 +381,23 @@ keys can still be needed, so this allocation report grants no permission to disa
 them. Witnesses are limited to 5 MiB; preparation and readback use shared budgets
 and may scan accepted semantic history or the retained removal suffix.
 
+With custody v4 and removal authority v3, assertion pruning also retains exact
+before/after value compositions before native cleanup. A custody-authenticated
+witness binds source ownership, address/value digests and live mutation ordinals;
+it contains no values or envelopes. Shared batches include independent host policies.
+Each witness is at most 1 MiB and 512 values. Native pruning references its exact
+receipt; an interrupted attempt may retain classification without publishing data.
+
+`read_assertion_key_inventory` joins these witnesses to tracked ciphertext versions
+as `value_ownership`. Values require removal, preserve independent mutations,
+preserve replay controls, or remain explicitly unclassified. The same value can
+have a different disposition under a later removal request. Readback checks both
+the removal journal and custody attestation, including after both authorities
+restart or native restore. The budgeted scan admits at most 256 witnesses per batch;
+versions without matching evidence never imply independence or absence. Legacy
+publications remain readable without inventing classification or a migration.
+Composition evidence does not establish native use, archive preservation or erasure.
+
 With a current removal authority, `reclaim_raw_generations` independently retains
 each page's copy addresses and source controls before deleting it. Document and
 route rows are checked against their original; shared policy/scope rows have no

@@ -103,6 +103,7 @@ impl NativeService {
                 if retry.as_ref() != Some(publication) {
                     return Err(integrity("assertion pruning lost its exact retry receipt"));
                 }
+                self.verify_pruning_value_ownership(publication, control, budget)?;
                 let ledger = self
                     .suppression
                     .as_ref()

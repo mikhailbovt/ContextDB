@@ -34,6 +34,8 @@ pub(crate) struct AssertionPruningPublication {
     control_digest: String,
     selected_sources: BTreeSet<ObservationId>,
     removed: BTreeMap<usize, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    value_ownership: Option<NativeAssertionValueWitnessReceipt>,
 }
 
 /// Workspace access and authority policies originate in authenticated host
@@ -439,6 +441,14 @@ impl NativeService {
             bindings.get(&(workspace.clone(), assertion_commit)),
             budget,
         )?;
+        let original_batch = batch.clone();
+        let old_value = snapshot
+            .get(&self.keyspaces.continuous, &old_key)
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("assertion value before pruning is absent"))?;
+        budget
+            .charge(1, old_value.len() as u64)
+            .map_err(budget_error)?;
         let before = retained_rows(&batch)?;
         let next = world
             .watermarks
@@ -488,7 +498,7 @@ impl NativeService {
             ));
         }
         budget.charge(1, bytes.len() as u64).map_err(budget_error)?;
-        let publication = AssertionPruningPublication {
+        let mut publication = AssertionPruningPublication {
             request,
             workspace_commit: next,
             receipt: event
@@ -497,6 +507,7 @@ impl NativeService {
             control_digest: canonical_digest(&batch.control)?,
             selected_sources,
             removed,
+            value_ownership: None,
         };
         if encode(&publication)?.len() > 512 * 1024 {
             return Err(exhausted("assertion pruning publication exceeds 512 KiB"));
@@ -513,6 +524,21 @@ impl NativeService {
             return Err(stale("workspace changed during semantic pruning"));
         }
         let frame = self.begin_frame(&tx, &context.request.workspace_id, false)?;
+        publication.value_ownership = self.retain_pruning_value_ownership(
+            witness::values::PruningValues {
+                request: &publication.request,
+                receipt: &publication.receipt,
+                before: &original_batch,
+                after: &batch,
+                old_key: &old_key,
+                old_value: &old_value,
+                commit: next,
+            },
+            budget,
+        )?;
+        if encode(&publication)?.len() > 512 * 1024 {
+            return Err(exhausted("assertion pruning publication exceeds 512 KiB"));
+        }
         for key in before.keys().filter(|key| !after.contains_key(*key)) {
             tx.delete(&self.keyspaces.continuous, key.clone())
                 .map_err(storage_error)?;
