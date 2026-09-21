@@ -84,6 +84,7 @@ impl NativeService {
             request,
             budget,
         )?;
+        self.verify_backup_replacement_requests(context, request, &replacements, budget)?;
         inventory.value_ownership =
             self.assertion_value_inventory(&owner, &selected, &inventory, Some(&backups), budget)?;
         let values = inventory

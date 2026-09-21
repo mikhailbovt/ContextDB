@@ -190,6 +190,7 @@ impl NativeCustodyKeys {
             .writes
             .enter(|| Ok(()))
             .map_err(|_| failure("custody publication admission unavailable"))?;
+        self.retirement_frontier()?;
         Ok(UsePublication {
             keys: self,
             _guard: guard,

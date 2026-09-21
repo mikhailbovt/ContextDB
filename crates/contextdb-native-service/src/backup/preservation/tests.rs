@@ -139,7 +139,8 @@ fn archive_preservation_follows_partial_replacements_and_requires_complete_bytes
         if path.target_sequence == 3 && path.replacements == [clean.replacement.receipt.clone()])
     );
 
-    // Identical roots are not authority to splice another request's proof chain.
+    // Another real request can reuse separately authorized earlier cleanup. A
+    // fabricated request with matching roots cannot authorize an extra edge.
     let another = f
         .native
         .request_original_removal(
@@ -149,9 +150,35 @@ fn archive_preservation_follows_partial_replacements_and_requires_complete_bytes
             &mut budget(),
         )
         .expect("another retained request");
-    assert_eq!(
+    assert!(matches!(
         report(&f, &another).preservation[&1],
-        NativeBackupPreservation::ReplacementRequired
+        NativeBackupPreservation::Preserved { .. }
+    ));
+    let mut forged = middle.replacement.clone();
+    forged.request.sequence += 1000;
+    assert!(
+        f.native
+            .verify_backup_replacement_requests(
+                &f.input.context,
+                &another,
+                &[forged],
+                &mut budget()
+            )
+            .is_err()
+    );
+
+    let mut altered = middle.replacement.clone();
+    altered.request.digest = "ab".repeat(32);
+    assert!(
+        f.native
+            .verify_backup_replacement_requests(
+                &f.input.context,
+                &another,
+                &[middle.replacement.clone(), altered],
+                &mut budget()
+            )
+            .is_err(),
+        "a cached request sequence must still match the complete receipt"
     );
 
     // A narrower composition can make the middle archive clean. Its missing bytes

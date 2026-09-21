@@ -306,6 +306,7 @@ fn key_catalog_preserves_pre_chunking_v3_batches_and_appends_after_reopen() {
     let head = Head {
         sequence: 1,
         digest: Some(crate::digest_bytes(&bytes)),
+        retirements: None,
     };
     tx.put(
         &keys.rows,

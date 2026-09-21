@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 use contextdb_storage::{
@@ -16,6 +16,7 @@ use super::*;
 
 mod attestations;
 mod backups;
+mod retirement;
 pub(super) mod uses;
 mod versions;
 pub use backups::{
@@ -24,6 +25,9 @@ pub use backups::{
     NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
     NativeBackupPruningCounts, NativeBackupRegistration, NativeBackupReplacement,
     NativeBackupReplacementReceipt,
+};
+pub use retirement::{
+    NativeKeyRetirement, NativeKeyRetirementEvidence, NativeKeyRetirementReceipt,
 };
 pub use uses::{
     NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
@@ -91,6 +95,7 @@ pub struct NativeCustodyKeys {
     master: CustodyMasterKey,
     pub(crate) path: PathBuf,
     writes: crate::publication::PublicationQueue,
+    retirement: RwLock<retirement::RetirementState>,
 }
 
 impl fmt::Debug for NativeCustodyKeys {
@@ -226,8 +231,13 @@ impl NativeCustodyKeys {
                 .canonicalize()
                 .map_err(|_| crate::integrity("custody path is unavailable"))?,
             writes: Default::default(),
+            retirement: Default::default(),
         };
-        keys.verify().map_err(crate::storage_error)?;
+        let state = keys.verify().map_err(crate::storage_error)?;
+        *keys
+            .retirement
+            .write()
+            .map_err(|_| crate::integrity("key retirement state is poisoned"))? = state;
         Ok(Arc::new(keys))
     }
 
@@ -352,6 +362,7 @@ impl NativeCustodyKeys {
         let id = Uuid::from_slice(&value[VALUE_MAGIC.len()..header])
             .map_err(|_| failure("native custody key identity is invalid"))?;
         let address = address(space, key);
+        let _admission = self.admit_key(id)?;
         let aad = self.value_aad(&address, id)?;
         let plaintext = if let Some(entry) = pending.and_then(|keys| keys.get(&address)) {
             if entry.record.id != id {
@@ -410,7 +421,7 @@ impl NativeCustodyKeys {
         Ok(())
     }
 
-    fn verify(&self) -> contextdb_storage::Result<()> {
+    fn verify(&self) -> contextdb_storage::Result<retirement::RetirementState> {
         #[cfg(test)]
         CATALOG_VERIFICATIONS.with(|count| count.set(count.get() + 1));
         if self
@@ -459,6 +470,9 @@ impl NativeCustodyKeys {
                 if self.tracks_native_use() && row.key.starts_with(b"use/") {
                     continue; // The native-use journal closes its pages and instance states.
                 }
+                if self.tracks_native_use() && row.key.starts_with(b"key-retirement/") {
+                    continue; // Closed by the anchored retirement journal below.
+                }
                 let address = row
                     .key
                     .strip_prefix(b"key/")
@@ -479,7 +493,7 @@ impl NativeCustodyKeys {
             self.verify_native_use(&snapshot)?;
         }
         self.verify_backup_catalog(&snapshot)?;
-        Ok(())
+        self.verify_key_retirements(&snapshot)
     }
 }
 

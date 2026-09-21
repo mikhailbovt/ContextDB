@@ -516,14 +516,36 @@ value commitments, including versions without native-use observations. Independe
 mutations, replay controls, selected data and unknown compositions remain distinct.
 The final custody fence also checks the independent classification journal.
 
-Both reports include preservation for every issued archive. A path must follow
-verified replacement proofs for this exact workspace and removal request, ending
-at a target free of selected removal values. `Preserved` additionally requires
+Both reports include preservation for every issued archive. A path follows verified
+replacement proofs within this workspace and removal authority. Each edge's exact
+request is independently verified, allowing successive authorized removals to share
+a path. The target must be free of selected removal values. `Preserved` requires
 complete, verified artifact bytes. Unknown membership or composition, absent paths
 and incomplete artifacts remain separate obligations. Native ancestry determines
 path order; issuance order and a newer clean archive alone prove no preservation.
 These scope-specific reports neither change keys nor authorize deletion completion;
 key retirement must revalidate current coverage and all independently needed copies.
+
+`retire_removal_keys` accepts 1..256 exclusively owned primary, payload, revision or
+observed raw keys after deriving fresh removal, native-use and archive evidence.
+Prepared or acknowledged native copies, unknown membership and unresolved
+preservation block acceptance. Every key needed to read a selected clean target
+must remain available. The custody queue rechecks all frontiers through Sync.
+
+Current refusal is an independently sealed, append-only journal anchored in the
+allocation head. Exact retries recover the original receipt; new allocations and
+native restore cannot remove its anchor. Authority reopen verifies the complete
+chain, locators and allocation bindings. Old snapshots consult current refusal on
+every decrypt. Native transactions record the retirement frontier and must retry
+if it changes before publication, including staged ciphertext imports. A read
+already materialized before refusal cannot be recalled. An uncertain custody Sync
+closes ordinary key use until authority recovery establishes the durable outcome.
+
+Retirement receipts contain commitments and allocation identities, bounded to
+128 KiB. Wrapped descriptors remain for verification: this is current refusal,
+not physical destruction or protection against a holder of the master key and its
+copies. Mixed assertion keys require separate independent-version preservation;
+this API does not retire them or grant deletion completion/disclosure admission.
 
 `create_removal_backup` issues actual encrypted replacement bytes after existing
 request-authorized cleanup. Both archives undergo full native verification. The
@@ -564,7 +586,7 @@ target with completely retained bytes; it does not cover later writes or other
 archives. Unclassified records, unretained branch descendants and missing roots
 require explicit reconciliation. Discovery rescans remain budgeted administrative
 work. The inventory reports identify remaining replacement obligations; executing
-all of them, safe key retirement and physical/external-copy dispositions remain
+all of them, mixed-key retirement and physical/external-copy dispositions remain
 open. These operations do not complete deletion.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted

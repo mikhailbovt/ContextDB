@@ -41,6 +41,7 @@ pub(crate) struct NativeTransaction<'a> {
     keys: Option<Arc<NativeCustodyKeys>>,
     pending: PendingKeys,
     changes: std::collections::BTreeMap<String, NativeKeyUseChange>,
+    retirement: Option<NativeKeyRetirementReceipt>,
 }
 
 impl NativeTransaction<'_> {
@@ -210,6 +211,12 @@ impl StorageEngine for NativeStorage {
             keys: self.keys.clone(),
             pending: Default::default(),
             changes: Default::default(),
+            retirement: self
+                .keys
+                .as_ref()
+                .map(|keys| keys.retirement_frontier())
+                .transpose()?
+                .flatten(),
         })
     }
     fn checkpoint(&self, target: &Path) -> Result<CheckpointManifest> {

@@ -50,11 +50,15 @@ and release verifier—not the presence of an API name—determine completion.
   independently in bounded portions; complete availability requires their full
   digest. A bounded coordinator cleans exact archives in separate restored owners;
   inventories expose unknown membership, mixed-value composition and missing
-  preservation paths or artifacts for each selected family. A proven path is
-  request-specific and must end at completely retained clean bytes.
+  preservation paths or artifacts for each selected family. Each path verifies
+  every exact removal request and ends at completely retained clean bytes.
+  Owned-key retirement rejects unresolved native/archive obligations and denies
+  decryption through old snapshots or restored archives. Its independent journal
+  survives native restore; uncertain Sync closes key use until authority recovery.
+  Wrapped descriptors remain, so retirement does not certify physical destruction.
   Unknown origins, unretained descendants and missing-root reconciliation remain
   explicit requirements. Discovery rescans after restart. Hash-only migration,
-  complete copy coverage, key retirement and verified
+  complete copy coverage, mixed-key retirement and verified
   deletion completion that reopens disclosure remain unfinished.
   See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector

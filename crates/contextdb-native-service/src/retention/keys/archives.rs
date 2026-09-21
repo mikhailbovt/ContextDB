@@ -153,6 +153,7 @@ impl NativeService {
             request,
             budget,
         )?;
+        self.verify_backup_replacement_requests(context, request, &replacements, budget)?;
         let preservation = backup::preservation::inventory(
             &backups,
             &replacements,

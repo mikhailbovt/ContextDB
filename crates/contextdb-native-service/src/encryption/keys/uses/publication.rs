@@ -98,6 +98,9 @@ impl UsePublication<'_> {
                 return Err(failure("native key-use transition address differs"));
             }
             self.keys.validate_use_keys(&tx, change)?;
+            for version in change.before.iter().chain(change.after.iter()) {
+                drop(self.keys.admit_key(version.key_id)?);
+            }
         }
         let transaction = contextdb_core::ObservationId::new().as_uuid();
         let mut pages = 0_u32;

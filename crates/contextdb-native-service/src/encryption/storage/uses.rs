@@ -137,6 +137,7 @@ impl NativeTransaction<'_> {
             .ok_or_else(|| failure("native key-use authority absent"))?
             .clone();
         let publication = keys.use_publication()?;
+        keys.require_retirement_frontier(self.retirement.as_ref())?;
         let previous = publication.reconcile(&self.owner.inner)?;
         if self.inner.sequence() != previous.native_sequence {
             return Err(StorageError::WriteConflict {

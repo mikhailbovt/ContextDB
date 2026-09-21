@@ -71,6 +71,35 @@ impl Head {
 }
 
 impl NativeCustodyKeys {
+    // The caller holds custody publication authority and already verified the
+    // complete archive catalog/frontier. Check every target row, including keys
+    // outside the selected removal family: retained bytes alone are not readable
+    // preservation if another accepted retirement made their keys unavailable.
+    pub(crate) fn require_backup_available_keys<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        targets: &BTreeSet<String>,
+        retiring: &BTreeSet<Uuid>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        for target in targets {
+            let contents = self
+                .find_contents(snapshot, target, budget)?
+                .ok_or_else(|| integrity("preservation target membership is absent"))?;
+            for page in 0..contents.pages {
+                let copy_page = self.read_copy_page(snapshot, &contents, page, budget)?;
+                for copy in copy_page.copies {
+                    budget.charge(1, 0).map_err(budget_error)?;
+                    if retiring.contains(&copy.version.key_id) {
+                        return Err(invalid("preservation target still uses a selected key"));
+                    }
+                    drop(self.admit_key(copy.version.key_id).map_err(storage_error)?);
+                }
+            }
+        }
+        Ok(())
+    }
+
     // Selection comes only from the service's authorized, fully verified key
     // inventories. In particular, an address alone does not select other keys.
     #[cfg(test)]
@@ -188,7 +217,8 @@ impl NativeCustodyKeys {
         self.walk_backup_replacements(snapshot, &head, budget, |event, budget| {
             event.add_expected_keys(&mut expected);
             if request.is_some_and(|(workspace, request)| {
-                event.value.workspace_digest == workspace && event.value.request == *request
+                event.value.workspace_digest == workspace
+                    && event.value.request.authority_id == request.authority_id
             }) {
                 reserve(&mut report_bytes, &event.value, budget)?;
                 replacements.push(event.value.clone());

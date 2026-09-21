@@ -59,7 +59,7 @@ struct Cursor {
 impl NativeCustodyKeys {
     /// Enumerate 1..256 accepted descriptors without exposing wrapped or raw keys.
     /// Pass the returned continuation unchanged; allocation changes require a new
-    /// enumeration. Backup registration alone does not invalidate it. Cursors
+    /// enumeration. Backup registration or key retirement does not invalidate it. Cursors
     /// survive reopening the same retained authority with the same master key.
     ///
     /// Each page checks its exact descriptors and journal chain. A partial page
@@ -119,7 +119,7 @@ impl NativeCustodyKeys {
                     &open(&self.master.0, &self.catalog_aad()?, bytes).map_err(storage_error)?,
                 )
                 .map_err(storage_error)?;
-                if cursor.head != head {
+                if cursor.head.sequence != head.sequence || cursor.head.digest != head.digest {
                     return Err(ServiceError::new(
                         ErrorCode::IndexTooStale,
                         "key allocations changed; restart enumeration",

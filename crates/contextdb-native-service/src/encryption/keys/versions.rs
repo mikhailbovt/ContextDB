@@ -23,9 +23,11 @@ const MAX_LEGACY_BATCH_KEYS: usize = 16_384;
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Head {
-    sequence: u64,
-    digest: Option<String>,
+pub(super) struct Head {
+    pub(super) sequence: u64,
+    pub(super) digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) retirements: Option<NativeKeyRetirementReceipt>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -45,6 +47,74 @@ struct Batch {
 }
 
 impl NativeCustodyKeys {
+    pub(super) fn verify_retirement_allocations<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        allocations: &[NativeKeyAllocation],
+        revision: u64,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> contextdb_service::ServiceResult<()> {
+        let mut batches = BTreeMap::new();
+        for allocation in allocations {
+            if allocation.allocation_sequence == 0 || allocation.allocation_sequence > revision {
+                return Err(crate::integrity(
+                    "retired allocation is outside its accepted frontier",
+                ));
+            }
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                batches.entry(allocation.allocation_sequence)
+            {
+                let key = batch_key(allocation.allocation_sequence);
+                let bytes = snapshot
+                    .get(&self.rows, &key)
+                    .map_err(crate::storage_error)?
+                    .ok_or_else(|| crate::integrity("retired allocation batch is absent"))?;
+                budget
+                    .charge(1, bytes.len() as u64)
+                    .map_err(crate::raw_index::budget_error)?;
+                let batch: Batch = decode(
+                    &self
+                        .open_key_log(&key, &bytes)
+                        .map_err(crate::storage_error)?,
+                )
+                .map_err(crate::storage_error)?;
+                if batch.sequence != allocation.allocation_sequence
+                    || batch.keys.len() > MAX_LEGACY_BATCH_KEYS
+                {
+                    return Err(crate::integrity("retired allocation batch differs"));
+                }
+                entry.insert(batch);
+            }
+            let batch = &batches[&allocation.allocation_sequence];
+            budget
+                .charge(batch.keys.len() as u64, 0)
+                .map_err(crate::raw_index::budget_error)?;
+            if !batch.keys.iter().any(|key| {
+                key.id == allocation.key_id
+                    && key.address == allocation.address_digest
+                    && key.record_digest == allocation.descriptor_digest
+            }) {
+                return Err(crate::integrity(
+                    "retired key is outside its accepted allocation",
+                ));
+            }
+            let bytes = snapshot
+                .get(
+                    &self.rows,
+                    &version_key(&allocation.address_digest, allocation.key_id),
+                )
+                .map_err(crate::storage_error)?
+                .ok_or_else(|| crate::integrity("retired descriptor is absent"))?;
+            budget
+                .charge(1, bytes.len() as u64)
+                .map_err(crate::raw_index::budget_error)?;
+            if crate::digest_bytes(&bytes) != allocation.descriptor_digest {
+                return Err(crate::integrity("retired key descriptor changed"));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn version_record(
         &self,
         address: &str,
@@ -136,6 +206,7 @@ impl NativeCustodyKeys {
             head = Head {
                 sequence,
                 digest: Some(crate::digest_bytes(&bytes)),
+                retirements: head.retirements,
             };
             let key = batch_key(sequence);
             tx.put(&self.rows, key.clone(), self.seal_key_log(&key, &bytes)?)?;
@@ -186,7 +257,10 @@ impl NativeCustodyKeys {
         Ok(Some(crate::digest_bytes(&self.open_key_log(&key, &bytes)?).as_str()) == digest)
     }
 
-    fn key_version_head<S: ReadSnapshot>(&self, snapshot: &S) -> contextdb_storage::Result<Head> {
+    pub(super) fn key_version_head<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+    ) -> contextdb_storage::Result<Head> {
         let bytes = snapshot
             .get(&self.rows, HEAD)?
             .ok_or_else(|| failure("key version journal head is absent"))?;
@@ -198,6 +272,9 @@ impl NativeCustodyKeys {
                 .is_some_and(|value| blake3::Hash::from_hex(value).is_err())
         {
             return Err(failure("key version journal head is invalid"));
+        }
+        if let Some(receipt) = &head.retirements {
+            receipt.validate(self)?;
         }
         // Even a new allocation must not overwrite a missing/changed terminal.
         if let Some(digest) = &head.digest {
@@ -217,7 +294,10 @@ impl NativeCustodyKeys {
         snapshot: &S,
     ) -> contextdb_storage::Result<()> {
         let head = self.key_version_head(snapshot)?;
-        let mut reconstructed = Head::default();
+        let mut reconstructed = Head {
+            retirements: head.retirements.clone(),
+            ..Head::default()
+        };
         let mut expected = BTreeMap::new();
         let rows = snapshot.scan_prefix(&self.rows, BATCHES)?;
         for row in &rows {
@@ -259,6 +339,7 @@ impl NativeCustodyKeys {
             reconstructed = Head {
                 sequence: next,
                 digest: Some(crate::digest_bytes(&bytes)),
+                retirements: reconstructed.retirements,
             };
         }
         let actual = snapshot.scan_prefix(&self.rows, b"key/")?;
@@ -278,7 +359,11 @@ impl NativeCustodyKeys {
         Ok(())
     }
 
-    fn seal_key_log(&self, key: &[u8], bytes: &[u8]) -> contextdb_storage::Result<Vec<u8>> {
+    pub(super) fn seal_key_log(
+        &self,
+        key: &[u8],
+        bytes: &[u8],
+    ) -> contextdb_storage::Result<Vec<u8>> {
         seal(&self.master.0, &log_aad(&self.identity, key)?, bytes)
     }
 

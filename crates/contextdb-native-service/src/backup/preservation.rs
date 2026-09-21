@@ -21,7 +21,8 @@ mod tests;
 pub struct NativeBackupPreservationPath {
     /// Target issuance sequence in the enclosing verified archive inventory.
     pub target_sequence: u64,
-    /// Ordered source-to-target proofs, all authorized by this exact request.
+    /// Ordered source-to-target proofs, each separately authorized by a retained
+    /// request in this workspace and removal authority.
     pub replacements: Vec<NativeBackupReplacementReceipt>,
 }
 
@@ -71,8 +72,8 @@ struct Routes<'a> {
 }
 
 // Both inputs come from one fully verified custody snapshot. Replacement proofs
-// have already been filtered by exact retained request and workspace. Never join
-// unrelated requests merely because their source/target digests happen to connect.
+// have already been filtered by workspace/authority and each exact request was
+// independently verified. Matching roots alone never authorizes another edge.
 pub(crate) fn inventory(
     backups: &NativeBackupKeyInventory,
     replacements: &[NativeBackupReplacement],
@@ -225,4 +226,44 @@ fn reserve<T: Serialize>(
         return Err(exhausted("archive preservation exceeds 32 MiB"));
     }
     budget.charge(1, bytes as u64).map_err(budget_error)
+}
+
+impl crate::NativeService {
+    // Earlier authorized removals remain usable after their old keys are refused.
+    // This lets A -> B (request 1) -> C (request 2) preserve all permitted data
+    // without decrypting A again. The custody seal is not substitute authority
+    // for an independently retained request in the currently supplied ledger.
+    pub(crate) fn verify_backup_replacement_requests(
+        &self,
+        context: &contextdb_service::AuthenticatedRequestContext,
+        request: &crate::NativeRemovalRequestReceipt,
+        replacements: &[NativeBackupReplacement],
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        let workspace = crate::digest_bytes(context.request.workspace_id.as_bytes());
+        let mut verified = BTreeMap::new();
+        for proof in replacements {
+            budget.charge(1, 0).map_err(budget_error)?;
+            if proof.workspace_digest != workspace
+                || proof.request.authority_id != request.authority_id
+            {
+                return Err(integrity(
+                    "archive preservation crosses workspace or removal authority",
+                ));
+            }
+            if proof.request != *request {
+                if let Some(previous) = verified.get(&proof.request.sequence) {
+                    if *previous != &proof.request {
+                        return Err(integrity(
+                            "archive preservation repeats a request with different fields",
+                        ));
+                    }
+                } else {
+                    self.read_original_removal_inventory(context, &proof.request, budget)?;
+                    verified.insert(proof.request.sequence, &proof.request);
+                }
+            }
+        }
+        Ok(())
+    }
 }

@@ -5,6 +5,7 @@ use super::*;
 
 mod archives;
 mod decisions;
+mod retirement;
 pub use archives::{
     NativeRemovalBackupInventory, NativeRemovalKeyInventory, NativeRemovalKeySelection,
 };
