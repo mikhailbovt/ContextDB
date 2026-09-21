@@ -61,6 +61,9 @@ pub struct NativeRemovalBackupInventory {
     /// Every issued archive, including unknown membership and zero matches.
     /// Archive copies are separate observations, not invented native transitions.
     pub backups: NativeBackupKeyInventory,
+    /// Request-bound preservation for every issuance in `backups`, keyed by its
+    /// sequence. A preserved archive does not establish other copy dispositions.
+    pub preservation: BTreeMap<u64, NativeBackupPreservation>,
 }
 
 impl NativeService {
@@ -144,7 +147,18 @@ impl NativeService {
             .keys
             .as_ref()
             .ok_or_else(|| unsupported("archive key inventory requires independent custody"))?;
-        let backups = keys.selected_backup_keys(&selected, budget)?;
+        let (backups, replacements) = keys.selected_backup_keys_for_request(
+            &selected,
+            &digest_bytes(context.request.workspace_id.as_bytes()),
+            request,
+            budget,
+        )?;
+        let preservation = backup::preservation::inventory(
+            &backups,
+            &replacements,
+            |_| Ok(backup::preservation::CopyDisposition::Remove),
+            budget,
+        )?;
         #[cfg(test)]
         BEFORE_ARCHIVE_FENCE.with(|hook| {
             if let Some(hook) = hook.take() {
@@ -157,6 +171,7 @@ impl NativeService {
             key_inventory: inventory,
             dispositions,
             backups,
+            preservation,
         };
         charge_report(&report, budget)?;
         Ok(report)

@@ -24,8 +24,10 @@ use super::{
 mod artifacts;
 mod cleanup;
 mod contents;
+pub(crate) mod preservation;
 pub(crate) mod replacements;
 pub use cleanup::{NativeBackupCleanupProgress, NativeBackupCleanupStage};
+pub use preservation::{NativeBackupPreservation, NativeBackupPreservationPath};
 pub use replacements::NativeRemovalBackup;
 
 /// Exact format returned by the native administrative backup operation.

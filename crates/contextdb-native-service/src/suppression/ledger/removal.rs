@@ -102,6 +102,31 @@ pub(super) fn genesis(identity: &Identity) -> ServiceResult<RemovalCheckpoint> {
 }
 
 impl NativeSuppressionLedger {
+    // A caller holding custody publication authority can use this final check to
+    // establish one consistent archive/allocation/use/classification snapshot.
+    pub(crate) fn require_removal_frontier(
+        &self,
+        expected: &RemovalCheckpoint,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        budget.check().map_err(budget_error)?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        let current = self.removal_global_head(&snapshot)?;
+        budget
+            .charge(1, encode(&current)?.len() as u64)
+            .map_err(budget_error)?;
+        if current != *expected {
+            return Err(ServiceError::new(
+                ErrorCode::IndexTooStale,
+                "removal classifications changed; restart archive inventory",
+                true,
+            ));
+        }
+        Ok(())
+    }
     pub(crate) fn supports_removal(&self) -> bool {
         self.identity.version >= 2
     }

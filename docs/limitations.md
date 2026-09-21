@@ -49,7 +49,10 @@ and release verifier—not the presence of an API name—determine completion.
   data through interrupted cleanup and restore. Replacement bytes can be retained
   independently in bounded portions; complete availability requires their full
   digest. A bounded coordinator cleans exact archives in separate restored owners;
-  unknown origins, unretained descendants and missing-root reconciliation remain
+  inventories expose unknown membership, mixed-value composition and missing
+  preservation paths or artifacts for each selected family. A proven path is
+  request-specific and must end at completely retained clean bytes.
+  Unknown origins, unretained descendants and missing-root reconciliation remain
   explicit requirements. Discovery rescans after restart. Hash-only migration,
   complete copy coverage, key retirement and verified
   deletion completion that reopens disclosure remain unfinished.

@@ -15,10 +15,11 @@
 mod adapter_tests;
 mod assertions;
 pub use assertions::{
-    NativeAssertionBatchKind, NativeAssertionCopyKind, NativeAssertionKeyInventory,
-    NativeAssertionPruningReceipt, NativeAssertionRemovalWitnessReceipt,
-    NativeAssertionValueDisposition, NativeAssertionValueInventory,
-    NativeAssertionValueWitnessReceipt, NativeAssertionVersionOwnership,
+    NativeAssertionBackupInventory, NativeAssertionBatchKind, NativeAssertionCopyKind,
+    NativeAssertionKeyInventory, NativeAssertionPruningReceipt,
+    NativeAssertionRemovalWitnessReceipt, NativeAssertionValueDisposition,
+    NativeAssertionValueInventory, NativeAssertionValueWitnessReceipt,
+    NativeAssertionVersionOwnership,
 };
 mod backup;
 mod capture;
@@ -51,7 +52,8 @@ mod suppression;
 
 pub use backup::{
     NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NATIVE_ENCRYPTED_BACKUP_FORMAT,
-    NativeBackupCleanupProgress, NativeBackupCleanupStage, NativeRemovalBackup,
+    NativeBackupCleanupProgress, NativeBackupCleanupStage, NativeBackupPreservation,
+    NativeBackupPreservationPath, NativeRemovalBackup,
 };
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;

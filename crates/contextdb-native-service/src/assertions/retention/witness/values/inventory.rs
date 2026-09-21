@@ -31,8 +31,8 @@ pub enum NativeAssertionValueDisposition {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeAssertionVersionOwnership {
-    /// Native use, including potentially aborted or unresolved declared versions.
-    /// Consult the enclosing native-use inventory for outcome and instance evidence.
+    /// Exact native or archived version. This does not establish native acceptance;
+    /// consult native-use and archive inventories for their distinct observations.
     pub version: NativeKeyUseVersion,
     /// Authenticated composition or explicit missing evidence.
     pub disposition: NativeAssertionValueDisposition,
@@ -60,6 +60,7 @@ impl NativeService {
         owner: &AssertionRemovalWitness,
         selected: &BTreeSet<usize>,
         report: &NativeAssertionKeyInventory,
+        archives: Option<&crate::NativeBackupKeyInventory>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<Option<NativeAssertionValueInventory>> {
         let Some(usage) = &report.native_use else {
@@ -103,6 +104,21 @@ impl NativeService {
             }
             receipts.push(receipt);
         }
+        let mut archived = BTreeMap::<_, Vec<_>>::new();
+        for copy in archives
+            .into_iter()
+            .flat_map(|inventory| &inventory.archives)
+            .flat_map(|archive| &archive.copies)
+        {
+            budget.charge(1, 0).map_err(budget_error)?;
+            if !usage.addresses.contains_key(&copy.address_digest) {
+                return Err(integrity("archived assertion copy has no selected address"));
+            }
+            archived
+                .entry(&copy.address_digest)
+                .or_default()
+                .push(&copy.version);
+        }
         let mut addresses = BTreeMap::new();
         for (address, history) in &usage.addresses {
             let mut versions = BTreeMap::new();
@@ -111,6 +127,7 @@ impl NativeService {
                 .iter()
                 .flat_map(|change| change.before.iter().chain(change.after.iter()))
                 .chain(history.acknowledged.values())
+                .chain(archived.get(address).into_iter().flatten().copied())
             {
                 budget.charge(1, 0).map_err(budget_error)?;
                 let key = (version.key_id, version.ciphertext_digest.clone());

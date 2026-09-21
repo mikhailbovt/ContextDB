@@ -88,7 +88,7 @@ pub struct NativeBackupReplacement {
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ReplacementEvent {
-    value: NativeBackupReplacement,
+    pub(super) value: NativeBackupReplacement,
     previous: Option<String>,
 }
 

@@ -508,8 +508,22 @@ and returns exact matching copies alongside explicit unknown legacy archives.
 An empty match list means selected keys are absent only from verified contents.
 One custody guard rechecks allocation, native-use, issuance, membership,
 replacement and artifact frontiers together; concurrent publication requires a retry. The shared
-budget and 32 MiB result bound apply to the whole report. This inspection neither
-replaces archives nor changes keys; mixed assertion preservation remains separate.
+budget and 32 MiB result bound apply to the whole report.
+
+`read_assertion_backup_inventory` covers mixed batches and selected mutation keys
+under the same archive checks. It classifies exact archived versions using retained
+value commitments, including versions without native-use observations. Independent
+mutations, replay controls, selected data and unknown compositions remain distinct.
+The final custody fence also checks the independent classification journal.
+
+Both reports include preservation for every issued archive. A path must follow
+verified replacement proofs for this exact workspace and removal request, ending
+at a target free of selected removal values. `Preserved` additionally requires
+complete, verified artifact bytes. Unknown membership or composition, absent paths
+and incomplete artifacts remain separate obligations. Native ancestry determines
+path order; issuance order and a newer clean archive alone prove no preservation.
+These scope-specific reports neither change keys nor authorize deletion completion;
+key retirement must revalidate current coverage and all independently needed copies.
 
 `create_removal_backup` issues actual encrypted replacement bytes after existing
 request-authorized cleanup. Both archives undergo full native verification. The
@@ -549,8 +563,9 @@ storage sequence, including after restore. `Available` identifies one verified
 target with completely retained bytes; it does not cover later writes or other
 archives. Unclassified records, unretained branch descendants and missing roots
 require explicit reconciliation. Discovery rescans remain budgeted administrative
-work. Complete replacement coverage, safe key retirement and physical/external-copy
-dispositions remain open; these operations do not complete deletion.
+work. The inventory reports identify remaining replacement obligations; executing
+all of them, safe key retirement and physical/external-copy dispositions remain
+open. These operations do not complete deletion.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
 profile. Record addresses, sizes, lexical hashes and archive metadata remain

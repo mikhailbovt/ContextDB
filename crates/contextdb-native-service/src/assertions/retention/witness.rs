@@ -3,7 +3,9 @@
 use super::*;
 use crate::{NativeRemovalRequestReceipt, policy_allows};
 
+mod archives;
 mod keys;
+pub use archives::NativeAssertionBackupInventory;
 pub(crate) mod values;
 pub use keys::{NativeAssertionBatchKind, NativeAssertionCopyKind, NativeAssertionKeyInventory};
 pub use values::{

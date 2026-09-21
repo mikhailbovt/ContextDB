@@ -84,6 +84,24 @@ impl NativeService {
         receipt: &NativeAssertionRemovalWitnessReceipt,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeAssertionKeyInventory> {
+        let (mut report, witness, selected) =
+            self.assertion_key_inventory(context, receipt, budget)?;
+        report.value_ownership =
+            self.assertion_value_inventory(&witness, &selected, &report, None, budget)?;
+        crate::retention::keys::charge_report(&report, budget)?;
+        Ok(report)
+    }
+
+    pub(super) fn assertion_key_inventory(
+        &self,
+        context: &AuthenticatedRequestContext,
+        receipt: &NativeAssertionRemovalWitnessReceipt,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(
+        NativeAssertionKeyInventory,
+        AssertionRemovalWitness,
+        BTreeSet<usize>,
+    )> {
         require_scope(context, receipt.scope, Capability::Admin)?;
         let ledger = self.suppression.as_ref().ok_or_else(|| {
             crate::unsupported("assertion key inventory requires retained removal authority")
@@ -116,7 +134,7 @@ impl NativeService {
                 }
             }
         }
-        let mut report = NativeAssertionKeyInventory {
+        let report = NativeAssertionKeyInventory {
             database_id: self.database_id.clone(),
             workspace_id: context.request.workspace_id.clone(),
             witness: receipt.clone(),
@@ -128,10 +146,7 @@ impl NativeService {
             batches,
             mutations,
         };
-        report.value_ownership =
-            self.assertion_value_inventory(&witness, &selected, &report, budget)?;
-        crate::retention::keys::charge_report(&report, budget)?;
-        Ok(report)
+        Ok((report, witness, selected))
     }
 }
 

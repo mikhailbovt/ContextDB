@@ -73,6 +73,7 @@ impl Head {
 impl NativeCustodyKeys {
     // Selection comes only from the service's authorized, fully verified key
     // inventories. In particular, an address alone does not select other keys.
+    #[cfg(test)]
     pub(crate) fn selected_backup_keys(
         &self,
         selected: &BTreeMap<Uuid, String>,
@@ -87,12 +88,39 @@ impl NativeCustodyKeys {
         self.selected_backup_keys_at(&snapshot, selected, budget)
     }
 
+    pub(crate) fn selected_backup_keys_for_request(
+        &self,
+        selected: &BTreeMap<Uuid, String>,
+        workspace: &str,
+        request: &crate::NativeRemovalRequestReceipt,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(NativeBackupKeyInventory, Vec<NativeBackupReplacement>)> {
+        self.require_backup_contents()?;
+        budget.check().map_err(budget_error)?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        self.select_backup_keys_at(&snapshot, selected, Some((workspace, request)), budget)
+    }
+
     pub(in crate::encryption::keys::backups) fn selected_backup_keys_at<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         selected: &BTreeMap<Uuid, String>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupKeyInventory> {
+        self.select_backup_keys_at(snapshot, selected, None, budget)
+            .map(|(inventory, _)| inventory)
+    }
+
+    fn select_backup_keys_at<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        selected: &BTreeMap<Uuid, String>,
+        request: Option<(&str, &crate::NativeRemovalRequestReceipt)>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(NativeBackupKeyInventory, Vec<NativeBackupReplacement>)> {
         let head = self.backup_head(snapshot).map_err(storage_error)?;
         budget
             .charge(1, encode(&head).map_err(storage_error)?.len() as u64)
@@ -156,8 +184,15 @@ impl NativeCustodyKeys {
             }
             Ok(())
         })?;
-        self.walk_backup_replacements(snapshot, &head, budget, |event, _| {
+        let mut replacements = Vec::new();
+        self.walk_backup_replacements(snapshot, &head, budget, |event, budget| {
             event.add_expected_keys(&mut expected);
+            if request.is_some_and(|(workspace, request)| {
+                event.value.workspace_digest == workspace && event.value.request == *request
+            }) {
+                reserve(&mut report_bytes, &event.value, budget)?;
+                replacements.push(event.value.clone());
+            }
             Ok(())
         })?;
         for (_, state) in self.walk_backup_artifacts(snapshot, &head, &mut expected, budget)? {
@@ -206,7 +241,7 @@ impl NativeCustodyKeys {
             archives: archives.into_values().collect(),
         };
         crate::retention::keys::charge_report(&report, budget)?;
-        Ok(report)
+        Ok((report, replacements))
     }
 
     // Caller holds the same custody publication guard as native and archive

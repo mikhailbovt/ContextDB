@@ -310,6 +310,14 @@ acceptance. Request-owned primary, payload, revision and observed raw keys now j
 every issued archive under one budget and current custody frontiers. Complete
 membership distinguishes no matches from unknown older coverage; concurrent
 issuance, backfill or replacement acceptance rejects stale reports.
+Mixed assertion inventories also classify exact archived values, keeping independent
+mutations and replay controls separate from selected data and unknown compositions.
+Both archive reports now derive request-bound preservation paths to clean targets
+and distinguish verified complete bytes from partial or absent artifacts. Tests
+cover multi-step cleanup, legacy membership backfill, reversed issuance order,
+different requests, both-authority restart and older native restore. Reports are
+limited to their selected family and current frontiers; they grant no key retirement
+or deletion-completion authority.
 Request-bound replacements now preserve the original journal prefix, receipts,
 payload manifests and independent bodies under full native replay. Actual target
 bytes, membership and independent provenance are issued with one custody Sync.
@@ -327,7 +335,7 @@ recovers existing maintenance journals and rechecks the storage sequence before
 publishing a complete retained replacement. Independent branch history, originals,
 mixed assertions and generic revisions remain preserved. Unknown origins,
 unretained descendants and missing roots require explicit reconciliation;
-discovery still rescans within a shared budget. Complete replacement coverage,
+discovery still rescans within a shared budget. Resolving all replacement obligations,
 safe key retirement and physical/external-copy closure remain open; these receipts
 do not complete deletion.
 Version 1/2 key migration, current key disablement, complete copy dispositions and
