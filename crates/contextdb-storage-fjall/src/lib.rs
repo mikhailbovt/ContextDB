@@ -66,6 +66,13 @@ impl std::fmt::Debug for FjallStorage {
 }
 
 impl FjallStorage {
+    /// Synchronize the existing write journal without adding a transaction or
+    /// changing the logical sequence. Recovery can durably acknowledge an
+    /// already visible commit whose original Sync result was not observed.
+    pub fn synchronize(&self) -> Result<()> {
+        self.db.persist(PersistMode::SyncAll).map_err(backend)
+    }
+
     /// Opens or creates a Fjall database directory.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let db = SingleWriterTxDatabase::builder(path)

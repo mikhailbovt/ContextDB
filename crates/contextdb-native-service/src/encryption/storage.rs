@@ -9,6 +9,10 @@ use contextdb_storage_fjall::{FjallSnapshot, FjallStorage, FjallTransaction};
 
 use super::{keys::PendingKeys, *};
 
+mod uses;
+#[cfg(test)]
+pub(super) use uses::AFTER_NATIVE_COMMIT;
+
 pub(crate) struct NativeStorage {
     inner: FjallStorage,
     pub(crate) keys: Option<Arc<NativeCustodyKeys>>,
@@ -32,9 +36,11 @@ impl<S: std::fmt::Debug> std::fmt::Debug for DecodedSnapshot<S> {
 }
 
 pub(crate) struct NativeTransaction<'a> {
+    owner: &'a NativeStorage,
     inner: FjallTransaction<'a>,
     keys: Option<Arc<NativeCustodyKeys>>,
     pending: PendingKeys,
+    changes: std::collections::BTreeMap<String, NativeKeyUseChange>,
 }
 
 impl NativeTransaction<'_> {
@@ -53,6 +59,7 @@ impl NativeTransaction<'_> {
             .ok_or_else(|| failure("ciphertext import requires encrypted custody"))?;
         keys.open_value(space, &key, &value, None)?;
         self.pending.remove(&address(space, &key));
+        self.track_use_change(space, &key, Some(&value))?;
         self.inner.put(space, key, value)
     }
 }
@@ -63,10 +70,12 @@ impl NativeStorage {
         &self.inner
     }
     pub(crate) fn open(path: &Path, keys: Option<Arc<NativeCustodyKeys>>) -> Result<Self> {
-        Ok(Self {
+        let storage = Self {
             inner: FjallStorage::open(path)?,
             keys,
-        })
+        };
+        storage.initialize_native_use()?;
+        Ok(storage)
     }
 
     pub(crate) fn is_encrypted(&self) -> bool {
@@ -143,16 +152,25 @@ impl WriteTransaction for NativeTransaction<'_> {
             Some(keys) => keys.seal_value(space, &key, &value, &mut self.pending)?,
             None => value,
         };
+        self.track_use_change(space, &key, Some(&value))?;
         self.inner.put(space, key, value)
     }
 
     fn delete(&mut self, space: &Keyspace, key: Vec<u8>) -> Result<()> {
         // Row GC does not destroy keys while short physical views may exist.
         // Complete deletion requires a separately inventoried closure executor.
+        self.track_use_change(space, &key, None)?;
         self.inner.delete(space, key)
     }
 
     fn commit(self, durability: Durability) -> Result<CommitReceipt> {
+        if self
+            .keys
+            .as_ref()
+            .is_some_and(|keys| keys.tracks_native_use())
+        {
+            return self.commit_with_use(durability);
+        }
         if let Some(keys) = &self.keys {
             keys.publish(&self.pending)?;
         }
@@ -178,13 +196,20 @@ impl StorageEngine for NativeStorage {
         self.inner.head_sequence()
     }
     fn begin_read(&self, selector: SnapshotSelector) -> Result<Self::ReadSnapshot<'_>> {
-        Ok(self.decode_snapshot(self.inner.begin_read(selector)?))
+        let snapshot = self.inner.begin_read(selector)?;
+        if let Some(keys) = self.keys.as_ref().filter(|keys| keys.tracks_native_use()) {
+            keys.admit_use_snapshot(&self.inner, &snapshot)?;
+        }
+        Ok(self.decode_snapshot(snapshot))
     }
     fn begin_write(&self) -> Result<Self::WriteTransaction<'_>> {
+        self.reconcile_native_use()?;
         Ok(NativeTransaction {
+            owner: self,
             inner: self.inner.begin_write()?,
             keys: self.keys.clone(),
             pending: Default::default(),
+            changes: Default::default(),
         })
     }
     fn checkpoint(&self, target: &Path) -> Result<CheckpointManifest> {
@@ -194,6 +219,7 @@ impl StorageEngine for NativeStorage {
         self.inner.compact(request)
     }
     fn verify(&self, mode: VerifyMode) -> Result<VerifyReport> {
+        self.reconcile_native_use()?;
         self.inner.verify(mode)
     }
 }

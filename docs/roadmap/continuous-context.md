@@ -228,7 +228,7 @@ without changing their stored read policy. Encrypted archives from before
 classification/removal and after cleanup preserve independent data through
 actual reopen/restore. Hash-only migration remains open.
 
-New version 3 key authorities allocate immutable keys per changed value address
+Version 3 and 4 key authorities allocate immutable keys per changed value address
 and native transaction, with an authenticated complete allocation journal. Old
 snapshots and encrypted restore retain exact historical key IDs; an independent
 rewrite uses a new key. Tests cover actual key-authority reopen, multiple owners,
@@ -243,6 +243,14 @@ Record inventory identifies all historical primary, birth and closure keys from
 independent revision witnesses after pruning, reopen and encrypted restore, with
 stored access labels still enforced. Allocated keys do not prove native use or
 physical absence.
+New version 4 authorities also retain exact native-use transitions and outcomes.
+A sealed native marker is committed with the data; independent acknowledgement
+and restart recovery distinguish committed, aborted and still-pending attempts.
+Fresh restore instances preserve imported ciphertext IDs. Bounded journal and
+change pages expose this evidence; full open verification replays instance history.
+Actual process-crash and uncertain-Sync recovery preserve native sequences and
+data, while missing or replayed controls fail. Source ownership joins, legacy
+history, safe disablement and physical-copy closure remain open.
 Mixed assertion ownership is retained independently without source values or full
 envelopes. Its key inventory distinguishes shared batch versions from selected
 mutation bodies and labels through sequential cleanup, actual authority/native

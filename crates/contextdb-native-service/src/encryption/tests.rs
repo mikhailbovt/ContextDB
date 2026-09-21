@@ -192,9 +192,13 @@ fn capture_indexes_large_payload_backup_and_rotated_restore_keep_content_encrypt
 }
 
 #[test]
-fn ciphertext_relocation_and_forbidden_corruption_do_not_expose_source_bytes() {
+fn legacy_ciphertext_relocation_and_forbidden_corruption_do_not_expose_source_bytes() {
     let root = tempfile::tempdir().expect("root");
-    let (_key_directory, keys) = authority("cipher-policy");
+    // Version 3 has address authentication without the version 4 native-use
+    // commit fence. Preserve its policy-before-body behavior under row damage.
+    let keys =
+        NativeCustodyKeys::create_version(&root.path().join("keys"), "cipher-policy", master(), 3)
+            .expect("legacy keys");
     let (_ledger_directory, ledger) = crate::suppression::tests::authority("cipher-policy");
     let service = NativeService::open_encrypted(
         root.path().join("native"),

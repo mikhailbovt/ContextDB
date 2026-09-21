@@ -15,8 +15,13 @@ use uuid::Uuid;
 use super::*;
 
 mod backups;
+pub(super) mod uses;
 mod versions;
 pub use backups::{NativeBackupCatalogPage, NativeBackupRegistration};
+pub use uses::{
+    NativeKeyUseCatalogPage, NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseOutcome,
+    NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseVersion,
+};
 pub use versions::{NativeKeyAllocation, NativeKeyCatalogPage};
 
 const KEYSPACE: &str = "contextdb_native_custody_keys";
@@ -66,6 +71,7 @@ pub(super) type PendingKeys = BTreeMap<String, PendingKey>;
 
 /// Independently retained incremental custody-key inventory.
 ///
+/// Version 4 also retains native-use preparations and recoverable commit outcomes.
 /// Version 3 allocates a random key per value address per native transaction.
 /// Versions 1 and 2 retain their original reusable-address keys. The inventory contains
 /// wrapped keys, never source bytes. Hosts retain its current directory,
@@ -92,7 +98,7 @@ impl NativeCustodyKeys {
         database_id: &str,
         master: CustodyMasterKey,
     ) -> contextdb_service::ServiceResult<Arc<Self>> {
-        Self::create_version(path.as_ref(), database_id, master, 3)
+        Self::create_version(path.as_ref(), database_id, master, 4)
     }
 
     pub(super) fn create_version(
@@ -101,7 +107,7 @@ impl NativeCustodyKeys {
         master: CustodyMasterKey,
         version: u16,
     ) -> contextdb_service::ServiceResult<Arc<Self>> {
-        if !matches!(version, 1..=3) {
+        if !matches!(version, 1..=4) {
             return Err(crate::integrity("unsupported custody authority version"));
         }
         crate::validate_identifier(database_id, "custody database ID")?;
@@ -137,11 +143,19 @@ impl NativeCustodyKeys {
             )
             .map_err(crate::storage_error)?;
         }
-        if version == 3 {
+        if version >= 3 {
             tx.put(
                 &rows,
                 versions::HEAD.to_vec(),
                 versions::genesis(&identity, &master).map_err(crate::storage_error)?,
+            )
+            .map_err(crate::storage_error)?;
+        }
+        if version >= 4 {
+            tx.put(
+                &rows,
+                uses::HEAD.to_vec(),
+                uses::genesis(&identity, &master).map_err(crate::storage_error)?,
             )
             .map_err(crate::storage_error)?;
         }
@@ -178,7 +192,7 @@ impl NativeCustodyKeys {
                 .ok_or_else(|| crate::integrity("custody identity is missing"))?,
         )
         .map_err(crate::storage_error)?;
-        if !matches!(identity.version, 1..=3)
+        if !matches!(identity.version, 1..=4)
             || identity.authority != authority
             || identity.database != crate::digest_bytes(database_id.as_bytes())
         {
@@ -337,7 +351,7 @@ impl NativeCustodyKeys {
             }
             open(&entry.bytes, &aad, &value[header..])?
         } else {
-            let record = if self.identity.version == 3 {
+            let record = if self.identity.version >= 3 {
                 self.version_record(&address, id)?
             } else {
                 self.record(&address)?
@@ -363,7 +377,7 @@ impl NativeCustodyKeys {
             .enter(|| Ok(()))
             .map_err(|_| failure("custody publication admission unavailable"))?;
         let mut tx = self.engine.begin_write()?;
-        if self.identity.version == 3 {
+        if self.identity.version >= 3 {
             self.publish_key_versions(&mut tx, pending)?;
             let receipt = tx.commit(Durability::Sync)?;
             if receipt.durability != Durability::Sync {
@@ -415,10 +429,13 @@ impl NativeCustodyKeys {
             if row.key.starts_with(b"backup/") {
                 continue; // Verified as an exact ordered registry below.
             }
-            if self.identity.version == 3
+            if self.identity.version >= 3
                 && (row.key.starts_with(b"key/") || row.key.starts_with(b"key-log/"))
             {
                 continue; // The immutable allocation journal closes both families.
+            }
+            if self.tracks_native_use() && row.key.starts_with(b"use/") {
+                continue; // The native-use journal closes its pages and instance states.
             }
             let address = row
                 .key
@@ -430,8 +447,11 @@ impl NativeCustodyKeys {
             }
             self.unwrap(address, &decode(&row.value)?)?;
         }
-        if self.identity.version == 3 {
+        if self.identity.version >= 3 {
             self.verify_key_versions(&snapshot)?;
+        }
+        if self.tracks_native_use() {
+            self.verify_native_use(&snapshot)?;
         }
         self.verify_backup_catalog(&snapshot)?;
         Ok(())

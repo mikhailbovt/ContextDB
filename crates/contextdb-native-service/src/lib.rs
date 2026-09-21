@@ -55,7 +55,9 @@ pub use custody::CustodyProgress;
 pub use deletion::{NativeDeletionLineage, NativeDeletionSource};
 pub use encryption::{
     CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
-    NativeKeyAllocation, NativeKeyCatalogPage,
+    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyUseCatalogPage, NativeKeyUseChange,
+    NativeKeyUseChangesPage, NativeKeyUseOutcome, NativeKeyUseReceipt, NativeKeyUseTransaction,
+    NativeKeyUseVersion,
 };
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{
@@ -530,7 +532,7 @@ impl NativeService {
             self.verify_encryption_binding(&manifest)?;
             return Ok(());
         }
-        if snapshot.sequence() != 0 {
+        if snapshot.sequence() != 0 && !self.engine.is_protocol_genesis().map_err(storage_error)? {
             return Err(integrity(
                 "native manifest is absent from a non-empty physical store",
             ));

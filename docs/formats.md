@@ -61,6 +61,11 @@ the same ordered row framing carries authenticated ciphertext and an exact key
 authority ID. It requires the retained external key inventory, master key and
 current suppression ledger; none is imported from the backup. Logical closure
 is verified through a decoding view before restoring a pristine encrypted target.
+Version 4 key authorities separately retain native-use preparations and outcomes.
+Their sealed native commit marker belongs to local protocol metadata, outside the
+archive's application-row set and deep digest. A restored target keeps its own
+registered instance and records authenticated imports; the archive never replaces
+the independent use journal. Earlier key profiles need explicit tracking migration.
 Explicit source, assertion and payload pruning have separate manifest features
 and accepted journal records. Assertion pruning retains independent mutations in
 a distinct representation, bound to the original receipt and accepted control

@@ -264,6 +264,7 @@ impl NativeService {
             .map(|keyspace| keyspace.as_str().to_owned())
             .collect::<BTreeSet<_>>();
         allowed.insert(FJALL_INTERNAL_META_KEYSPACE.to_owned());
+        allowed.extend(self.engine.protocol_keyspaces().map_err(storage_error)?);
         let actual = self
             .engine
             .physical_keyspace_names()

@@ -270,7 +270,7 @@ fn log_aad(identity: &Identity, key: &[u8]) -> contextdb_storage::Result<Vec<u8>
     encode(&("contextdb/native-key-log/v1", identity, key))
 }
 
-fn version_key(address: &str, id: Uuid) -> Vec<u8> {
+pub(super) fn version_key(address: &str, id: Uuid) -> Vec<u8> {
     format!("key/{address}/{id}").into_bytes()
 }
 

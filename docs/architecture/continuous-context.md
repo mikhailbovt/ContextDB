@@ -270,21 +270,52 @@ claim completed hard deletion or expose a model-facing deletion tool.
 
 `NativeService::open_with_suppression` retains plaintext native values.
 `NativeService::open_encrypted` additionally requires `NativeCustodyKeys` and seals
-every native value, including original bodies, chunks, index documents, accepted
-semantic batches and captured checkpoints. New version 3 key authorities allocate
+every application value, including original bodies, chunks, index documents,
+accepted semantic batches and captured checkpoints. Version 3 and 4 authorities allocate
 a random data key per changed value address per native transaction. Historical
 ciphertext retains its exact key identity; rewriting a mixed-content row uses a
 different key. Version 1 and 2 authorities retain their original address-key reuse
-and require explicit migration to this profile. XChaCha20-Poly1305 binds ciphertext
+and require explicit migration. XChaCha20-Poly1305 binds ciphertext
 to the database, authority, keyspace, record address and key identity.
 
 New keys and an authenticated allocation journal synchronize in one bounded batch
-before native publication, with at most 32,768 changed addresses. An interrupted
+before native publication, with at most 32,768 new key addresses. An interrupted
 publication may leave unused keys, never an acknowledged original without its
-durable key. Ordinary reads fetch one exact key descriptor. Opening the authority
+durable key. Decrypting a value fetches one exact key descriptor. Opening the authority
 verifies the complete allocation journal and key inventory, rejecting missing,
 changed or orphaned versions. Historical keys remain available; allocation does
 not disable keys or establish deletion completion.
+
+New authorities use version 4 and retain native-use history. Before native Sync,
+the same key-store transaction records the final address transitions, including
+authenticated ciphertext/key IDs and value commitments before and after each
+change. The native transaction writes a sealed commit marker with the data; a
+second independent Sync acknowledges its outcome. The custody publication queue
+covers this entire sequence. Recovery synchronizes the existing native journal
+and compares the marker with the prepared or unchanged base before recording
+Committed or Aborted. It does not rewrite data or invent an acknowledgement.
+Prepared means the outcome is unknown; data may already have committed.
+Acknowledged snapshots read without waiting for the custody writer. A visible
+unacknowledged commit requires recovery; a busy publisher causes an immediate
+retryable refusal. An older retained view stays readable only while the current
+physical store satisfies the independently retained acceptance frontier.
+
+Each native directory has a registered instance. Its sealed marker is local
+protocol metadata, excluded from logical archives and their application-row digest.
+Restore retains the target instance and records imports with the original
+ciphertext/key identities. Missing markers, untracked physical writes and stale
+instance state close native admission. Versions 1–3 remain readable under their
+existing contracts; adding this tracking requires explicit migration.
+
+Host `native_use_catalog_page` scans at most 64 mandatory journal events and 8 MiB
+per page, with an authenticated frontier and one budget. Empty pages can continue;
+native-use growth invalidates the cursor, while allocation-only changes do not.
+`native_use_changes_page` reads at most 256 transitions from an exact preparation
+and distinguishes its pending, committed or aborted outcome. These reads check
+their own pages and bindings; full authority-open verification also replays each
+instance's before/after history and closes its state and outcome indexes. This
+history identifies native use; it does not assign source ownership, cover legacy
+unobserved copies, count external copies or authorize key disablement.
 
 `key_catalog_page` enumerates at most 256 accepted descriptors with a shared
 work/byte/time budget and an authenticated continuation. Pages bind the authority,

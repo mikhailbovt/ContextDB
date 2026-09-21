@@ -74,7 +74,7 @@ impl NativeCustodyKeys {
         limit: u32,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeKeyCatalogPage> {
-        if self.identity.version != 3 {
+        if self.identity.version < 3 {
             return Err(ServiceError::new(
                 ErrorCode::FormatIncompatible,
                 "key allocation enumeration requires explicit version 3 custody migration",

@@ -127,7 +127,14 @@ fn authenticated_ciphertext_import_keeps_key_identity_without_an_allocation_batc
         .get(&space, b"saved")
         .expect("ciphertext")
         .expect("row");
-    let key_sequence = keys.engine.head_sequence().expect("key head");
+    let key_head = keys
+        .key_version_head(
+            &keys
+                .engine
+                .begin_read(SnapshotSelector::Latest)
+                .expect("key view"),
+        )
+        .expect("allocation head");
     let mut tx = target.begin_write().expect("transaction");
     assert!(
         tx.put_ciphertext(&space, b"wrong-address".to_vec(), cipher.clone())
@@ -143,8 +150,14 @@ fn authenticated_ciphertext_import_keeps_key_identity_without_an_allocation_batc
         .expect("authenticated import");
     tx.commit(Durability::Sync).expect("commit");
     assert_eq!(
-        keys.engine.head_sequence().expect("same key inventory"),
-        key_sequence
+        keys.key_version_head(
+            &keys
+                .engine
+                .begin_read(SnapshotSelector::Latest)
+                .expect("key view"),
+        )
+        .expect("same allocation inventory"),
+        key_head
     );
     let restored = target.begin_read(SnapshotSelector::Latest).expect("view");
     assert_eq!(
