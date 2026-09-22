@@ -18,7 +18,7 @@ native or model acceptance.
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Merged in #9; all eight CI jobs passed; reader/cache acceptance remains open |
 | 08 | Atomic lease admission, invalidation and action fences | Merged in #10; all eight CI jobs passed; strict transport handoff remains open |
 | 09 | Cache/cost controller and paired runtime evaluation | Merged in #11; all eight CI jobs passed; R0 quality and total monetary benefit remain open |
-| 10 | Restore/revocation, retention, custody and bounded publication | Custody/FIFO, generation GC and current suppression merged in #12–14; local encrypted values and backups implemented; deletion closure remains open |
+| 10 | Restore/revocation, retention, custody and bounded publication | Custody, suppression, encrypted backups and lineage implemented; local source/assertion/generic/chunk cleanup verified on Windows; complete copy/key/external closure and completion admission remain open |
 | 11 | Migration, integrations, demo and release evidence | Planned |
 | 12 | Router replay corpus, contracts and training lineage | Planned |
 | 13 | Measured R1 scorer and optional bounded R2 cascade | Planned |
@@ -163,63 +163,228 @@ summary-generation/embedding overhead and an illustrative losing token-price
 case. Real monetary/energy cost, adaptive-controller benefit, multimodal/streaming
 quality and multi-step task acceptance are not established by this text replay.
 
-The first phase 10 slice propagates access restrictions through model responses,
-tool results and checkpoints. Native fixtures cover a 520-edge conversation,
-restricted scopes, historical index reads, restart and restore during revocation,
-legacy custody migration, concurrent capture/revocation and bounded cancellation.
-FIFO queue fixtures cover ordering, capacity, cancellation and publisher failure.
-The capability manifest identifies available Rust executors and unresolved
-physical deletion.
-The 181 affected runtime/native/service/server tests, workspace Clippy and
-governance validation passed locally; #12 subsequently passed all eight CI jobs.
+Phase 10 propagates access restrictions through model responses, tool results
+and checkpoints, with bounded publication admission and obsolete-index cleanup.
+Current native restore consults an independently retained suppression authority.
+The encrypted profile seals values and v3 archives under separate key custody;
+a durable issued-backup registry survives native restore and lost responses.
+These foundations passed cross-platform CI before their respective merges.
 
-Bounded raw-generation reclamation removes the three-generation lifetime limit.
-Three native scenarios cover ten successive generations, active/build protection,
-obsolete-build abandonment, interrupted cleanup and restore, pinned physical
-views, byte/work limits and invalid cleanup metadata. Originals remain readable;
-the receipts describe logical row reclamation, without claiming physical erasure.
-Scoped routing also tolerates inherited labels with no scope constraint. The 91
-native tests and all eight CI jobs passed before #13 merged.
+Removal requests retain complete captured-source lineage, including shared owners
+and independently owned novel blocks that must survive. Cleanup prepares source
+controls, rebuilds and reclaims raw indexes, removes source-supported assertions
+from mixed batches and affected generic revisions, then prunes primary bodies
+and staged chunks. Independent
+semantic mutations remain byte-exact. Control metadata preserves replay and
+negative relationships without retaining removed values or envelopes. Old full,
+partially pruned and cleaned archives verify their actual remaining logical rows
+and restore behind current suppression.
 
-Bound native restore now consults a separately retained current suppression
-authority. Native regressions cover an older backup with newer denials, inherited
-restrictions, absent-source ID reuse, pinned views, partial reconciliation,
-real process exit after external Sync, concurrent authority advancement and
-competing native owners. Missing/wrong authority and lost progress fail closed.
-All 97 native tests, workspace Clippy and governance validation passed locally;
-#14 subsequently passed all eight CI jobs. Unbound archives containing captures
-require explicit migration. The local authority is not a remote anti-rollback
-service or a physical-erasure executor.
+Native tests pass on Windows. Fixtures
+cover actual partial restart, overlapping removal requests, shared blocks, mixed
+semantic batches, supersession/retraction targets, original receipt retries,
+missing controls, resurrected content and concurrent publication. This is local
+logical-copy cleanup, not physical or key erasure. Complete copy inventory,
+legacy migration, old-replica reconciliation, verified local completion,
+key disablement and external-copy dispositions remain open. Disclosure stays
+closed after a removal request until a verified completion executor exists.
 
-The optional encrypted native profile seals every value and preserves ciphertext
-in v3 backups. Local tests cover actual file/archive bytes, large payload spans,
-semantic state, checkpoint restart, token-key rotation, current suppression after
-restore, wrong authorities, ciphertext relocation, competing key allocation and
-process exit between key Sync and native publication. Selected reads perform one
-key lookup at inventories of 1, 128 and 4,096 entries. This is bounded logical work,
-not a latency SLO. Host provisioning, plaintext migration, key/copy reclamation
-and full deletion closure remain separate gates.
+Retained record origins now prevent an old native archive from losing later
+source-policy bindings. Tests include encrypted old/partial/current restore,
+records absent from an early archive, denial before decoding damaged bodies,
+independent recall, actual process exit after external Sync, interrupted catch-up,
+registry loss and genuine version 2 compatibility. Empty record workspaces can
+activate retained origin requirements before their first record, with exact retry,
+old-archive catch-up and a publication fence against concurrent legacy writes.
+Source-aware explicit publication, quarantined proposal/supersession, correction
+and retraction atomically accept complete mutation groups and their origin intents. Copied
+revisions retain predecessor origins; an interrupted transfer keeps the whole group
+closed. Tests cover actual process exit after partial transfer, concurrent retries,
+encrypted pending restore, hidden edges and exact copied-origin closure. Correction
+retains each rewired edge's sources separately from the fully supplied successor;
+tests reject swapped copy witnesses and oversized unions without partial acceptance.
+Bounded discovery and repair now follow accepted workspace commits. Cursors bind
+authority and history; missing completion locators cannot mint duplicate
+completions. The owned runtime repairs on start, resume and before interaction,
+retaining completed page progress in a bounded process-local cache. Tests cover
+changing frontiers, interleaved workspaces, older encrypted restore, corrupt or
+missing controls, budget interruption, and actual runtime start/reopen/resume.
+Host classification remains trusted. Durable recovery progress, measured backlog
+limits, larger origin ancestry and migration remain open.
 
-An independent issued-backup registry synchronizes a content-free registration
-before returning encrypted archives. It survives native restore and response loss,
-rejects registry corruption/loss, and supports bounded revision-bound pages.
-Existing v1 key authorities retain read support; backup issuance requires explicit
-registry migration. Issued archives remain potential external copies until their
-disposition is independently verified; this registry is not a deletion receipt.
+Generic births and closures bind compact controls; older full mutation groups
+prepare them through separate acceptance. Classified revisions retain removal
+witnesses in the independent authority before their primary and journal bodies
+are erased atomically. Complete source-aware groups are verified before their
+first removal and bound to independent validation commitments. Graph, provenance
+and history remain verifiable through partial cleanup and restore; original
+receipts and independent records survive. Primary source cleanup now requires
+every affected generic revision to be pruned and rejects unknown origins.
+Tests cover copied correction edges, candidate graphs, historical revisions,
+full/partial/cleaned archives, actual reopen, lost acknowledgement, CAS and
+missing, forged or resurrected data. Unpruned bodies remain mandatory.
+Non-retrievable legacy revisions can be classified and prepared administratively
+without changing their stored read policy. Encrypted archives from before
+classification/removal and after cleanup preserve independent data through
+actual reopen/restore. Hash-only migration remains open.
 
-Capture recovery metadata binds content-free control state and exact input handles
-to accepted journal entries. Checkpoint reconstruction uses those transitions while
-original validation remains mandatory. The 112 native tests include encrypted
-reopen/restore, shared payload inputs, legacy activation, metadata loss/tampering
-and checkpoint owner/state corruption. Workspace Clippy and governance validation
-pass. Source removal, mixed semantic-batch pruning and deletion-aware archive
-recovery remain open; this change does not establish deletion closure.
-
-Source-deletion inspection now computes the full captured dependency graph from
-accepted journal frames, including older shared owners and independent novel
-blocks that must survive. The 115 native tests cover encrypted reopen/restore,
-model/tool/checkpoint lineage, revoked sources, legacy refusal, a 261-frame paged
-history, missing authority, altered journal acceptance, bounded cancellation and
-concurrent revision. The inspector returns no partial closure or source text.
-Workspace Clippy and governance checks pass. This is an administrative source
-inventory; the remaining copy classes and the removal executor remain open.
+Version 3 and 4 key authorities allocate immutable keys per changed value address
+and native transaction, with an authenticated complete allocation journal. Old
+snapshots and encrypted restore retain exact historical key IDs; an independent
+rewrite uses a new key. Tests cover actual key-authority reopen, multiple owners,
+authenticated ciphertext import and missing/replayed/changed allocation metadata.
+Budgeted catalog pages bind the complete allocation chain and retain authenticated
+continuations across reopen. Administrative primary-key inventory joins retained
+source lineage to historical allocations after pruning or older restore, including
+descendants absent from that archive, and excludes independent source addresses.
+Selected block keys remain identifiable from retained metadata after chunk cleanup
+or restore of an archive predating staging; independent shared blocks are excluded.
+Record inventory identifies all historical primary, birth and closure keys from
+independent revision witnesses after pruning, reopen and encrypted restore, with
+stored access labels still enforced. Allocated keys do not prove native use or
+physical absence.
+New version 4 authorities also retain exact native-use transitions and outcomes.
+A sealed native marker is committed with the data; independent acknowledgement
+and restart recovery distinguish committed, aborted and still-pending attempts.
+Fresh restore instances preserve imported ciphertext IDs. Bounded journal and
+change pages expose this evidence; full open verification replays instance history.
+Actual process-crash and uncertain-Sync recovery preserve native sequences and
+data, while missing or replayed controls fail. Source-selected key reports join
+their ownership addresses to fully verified native-use transitions and per-instance
+acknowledged values, including raw ciphertext/value checks. Shared-version
+dispositions, legacy history, safe disablement and physical-copy closure remain open.
+Mixed assertion ownership is retained independently without source values or full
+envelopes. Its key inventory distinguishes shared batch versions from selected
+mutation bodies and labels through sequential cleanup, actual authority/native
+reopen and encrypted restore, including archives predating the batch. Tests cover
+independent data, retractions, policy, lost acknowledgement, publication races,
+missing witnesses and rehashed false selection. Shared and cleaned replacement
+keys remain available after pruning; retirement requires the separate checks below.
+V4 pruning now retains custody-authenticated before/after value compositions.
+The key report classifies exact versions relative to each request, preserving
+independent mutations, host policies and cleaned replay controls. Sequential
+removal, interrupted publication and older restore retain these distinctions;
+unclassified historical versions still require evidence or explicit migration.
+Raw generation reclamation now retains source/address and observed ciphertext
+evidence before each page is deleted. Native verification binds that evidence to
+the accepted GC history; shared metadata stays distinct from source-owned rows.
+Tests cover pruning, actual authority/native reopen, empty/full/partial encrypted
+archives, lost acknowledgement, concurrent publication and damaged page chains.
+Older untracked prefixes and unobserved historical versions remain open;
+observation does not establish erasure or key retirement.
+Request-bound discovery now walks the retained observation journal with
+authenticated continuations, preserving source/control identity across older
+native restore. Historical raw-key inventory separates allocated keys from
+observed ciphertexts and retains unresolved shared/unknown obligations. Tests
+cover descendant selection, independent originals, cursor replay and rotation,
+authority growth, pruning/restore and forged source or key claims. It covers
+observed reclamation history; older gaps remain open.
+Request-bound inspection now independently retains present rows across active,
+building, retained and partly reclaimed generations. Encrypted continuations bind
+the native snapshot; exact retries recover accepted pages without native writes.
+The selected key report verifies the entire page chain after pruning or older
+restore. Tests cover exact physical observations, restart, token rotation, native
+races, lost acknowledgement, unknown rows and damaged or rehashed page chains.
+Expected projection coverage, complete native-use history and unobserved copies
+remain separate gates; a finished inspection does not authorize key retirement.
+Encrypted projection now accepts the full 16,384-term document limit and splits
+larger batches between originals, reserving capacity for native control rows.
+Coverage advances only past complete documents and resumes after restart.
+Primary, payload-chunk and generic-revision key decisions survive both authority
+restarts and older native restore. Independent Sync is fenced against custody
+publication; readback verifies
+exact historical allocation/use frontiers and distinguishes pending, acknowledged
+and retained-copy work. These witnesses do not disable keys or complete deletion.
+Partial chunk cleanup and closed revisions retain exact earlier decisions; shared
+blocks and independent records remain outside the selected body families.
+Raw/index decisions use the same engine with an explicit frozen GC-observation
+prefix or complete inspection receipt. Retained pages independently establish
+source/address/version coverage. Exact retries, later observations, pruning and
+older encrypted restore preserve historical decisions; incomplete or damaged
+coverage rejects the report. Shared/unknown and untracked obligations remain open.
+V4 backup issuance now retains complete ciphertext membership in the same Sync,
+with immutable paged receipts surviving older restore and custody reopen. Admin
+backfill verifies supplied archive bytes against their original issuance; missing
+older coverage stays unknown. Interrupted registration/page writes leave no partial
+acceptance. Request-owned primary, payload, revision and observed raw keys now join
+every issued archive under one budget and current custody frontiers. Complete
+membership distinguishes no matches from unknown older coverage; concurrent
+issuance, backfill or replacement acceptance rejects stale reports.
+Mixed assertion inventories also classify exact archived values, keeping independent
+mutations and replay controls separate from selected data and unknown compositions.
+Both archive reports now derive authorized preservation paths to clean targets
+and distinguish verified complete bytes from partial or absent artifacts. Tests
+cover multi-step cleanup, legacy membership backfill, reversed issuance order,
+different requests, both-authority restart and older native restore. Reports are
+limited to their selected family and current frontiers; they grant no key retirement
+or deletion-completion authority.
+Successive requests can share a path only after each exact request is independently
+verified within the same workspace and removal authority.
+Routing now skips complete targets with retired keys and can follow later readable
+replacements. Reports bind the current refusal frontier, so retirement alone also
+invalidates an in-flight archive inventory.
+Request-bound replacements now preserve the original journal prefix, receipts,
+payload manifests and independent bodies under full native replay. Actual target
+bytes, membership and independent provenance are issued with one custody Sync.
+Tests cover mixed assertions, generic revisions, partial chunks, both-authority
+reopen, full/cleaned restore, divergent histories, other removal requests, missing
+or rehashed metadata and actual process exits before/after Sync. Replacement bytes
+can now be retained independently in resumable portions of at most 4 MiB. Immutable
+prefix receipts, exact retries and full-digest verification distinguish partial
+from complete availability. Tests cover interleaved archives, old native restore,
+cold authority reopen, false rehashed prefixes, missing/extra chunks, request-first
+access and actual process exits before/after artifact Sync. Archive frontiers also
+fence byte publication. A native coordinator now advances cleanup in separate
+owners restored from exact issued archives. It verifies ancestry before work,
+recovers existing maintenance journals and rechecks the storage sequence before
+publishing a complete retained replacement. Independent branch history, originals,
+mixed assertions and generic revisions remain preserved. Fresh local inventory
+also covers archives before a selected root: earlier retained co-owners and staged
+blocks are cleaned, globally shared novel bytes remain, and verified empty
+histories require no pruning. Orphan rows cannot count as absence. Unknown origins
+and unretained descendants require explicit reconciliation; discovery still
+rescans within a shared budget.
+Cleanup can continue through exact accepted replacement paths after original or
+intermediate keys have been refused. Every earlier request is verified separately;
+only complete readable terminal bytes become the next coordinator baseline.
+Restart tests preserve the separate edges, independent data and exact retries;
+invalid paths, divergent owners and incomplete artifacts cannot start cleanup.
+Issued originals now use the same bounded artifact retention as replacements.
+Recovery automatically finds readable inputs for every issued archive, preserving
+unknown membership, unavailable keys and incomplete bytes as distinct outcomes.
+Shared DAG routing keeps recovery-input availability separate from clean-copy
+preservation. Actual input reads verify replay and the current custody frontier.
+Durable jobs now bind an exact request, input and registered pristine worker before
+import. Cold restart and uncertain responses resume that same worker; subsequent
+requests continue its prior result. Only actual terminal cleanup enters the sealed
+job journal. Unfinished jobs prevent refusal of required input keys. Checks cover
+partial-cleanup inputs, empty archives, successive requests, lost finish responses,
+wrong owners and missing or rehashed controls. An owned controller now selects and
+advances archive jobs automatically, reopens deterministic workers and defers their
+successor aliases to the same owner across requests. Cold tests cover two archives,
+successive removals, registration-only interruption, missing storage before job
+admission and swapped worker directories. Missing inputs stay explicit and create
+no worker. Embedded hosts can now start a background maintenance service with fresh
+workspace-bound host authentication, verified request discovery and bounded steps.
+It resumes after restart, discovers later requests and reports revoked access or
+missing inputs while capture continues. Shutdown cancels work and joins the thread.
+Completed archive workers can be permanently sealed; later requests reserve a
+fresh instance from the exact seal and prior clean input. Bootstrap and import
+uncertainty recover that same generation while preserving old jobs and copy
+obligations. Worker disposal, cross-workspace reassignment and CLI/MCP encrypted
+profile provisioning remain open.
+Owned and mixed assertion keys can now be retired after fresh native-use and
+complete archive-preservation verification. Mixed selections require classified
+replacement batches in every affected native instance, preserving controls,
+host policies and independently needed mutations. Other authorized removals are
+verified against exact retained ownership; pending replacement publications block
+acceptance. The independent classification frontier is fenced through Sync.
+Current refusal applies to old snapshots and
+staged imports, survives cold custody reopen and native restore, and fences native
+transactions through Sync. Tests cover competing imports, sequential removals,
+partial archive bytes, lost responses, ambiguous Sync, journal corruption and real
+process exits around publication. Mixed-key tests also cover two native instances,
+independent deletions in both orders, missing preservation, unknown composition
+and classification races. Wrapped keys remain; this is not destruction.
+Remaining replacement execution, version 1/2 key migration,
+physical/external-copy closure and verified deletion completion/admission remain open.

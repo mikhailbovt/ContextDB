@@ -18,7 +18,7 @@ fn budget() -> QueryBudget {
         Default::default(),
     )
 }
-fn capture(sequence: u64, text: &str) -> CaptureRequest {
+pub(super) fn capture(sequence: u64, text: &str) -> CaptureRequest {
     let mut request = crate::capture::tests::request(sequence, text);
     request.context.request.subject_id = MemorySubjectId::from_uuid(uuid::Uuid::from_u128(10))
         .expect("native assertion fixture")
@@ -27,7 +27,7 @@ fn capture(sequence: u64, text: &str) -> CaptureRequest {
         BTreeSet::from([request.context.request.subject_id.clone()]);
     request
 }
-fn key(input: &CaptureRequest) -> StateKey {
+pub(super) fn key(input: &CaptureRequest) -> StateKey {
     StateKey {
         subject: NodeId::from_uuid(uuid::Uuid::from_u128(20)).expect("native assertion fixture"),
         predicate: PredicateId::from_uuid(uuid::Uuid::from_u128(21))
@@ -46,7 +46,7 @@ fn authority(input: &CaptureRequest) -> SourceAuthority {
         role: input.event.role,
     }
 }
-fn policy(input: &CaptureRequest) -> AuthorityPolicy {
+pub(super) fn policy(input: &CaptureRequest) -> AuthorityPolicy {
     AuthorityPolicy {
         key: key(input),
         version: RevisionNumber::FIRST,
@@ -63,7 +63,7 @@ fn pipeline() -> PipelineIdentity {
         schema_version: "1".into(),
     }
 }
-fn assertion(
+pub(super) fn assertion(
     input: &CaptureRequest,
     value: &str,
     start: i64,
@@ -183,12 +183,12 @@ fn assertion(
         original_evidence: vec![span],
     }
 }
-fn change(assertion: SourceAssertion) -> AssertionMutation {
+pub(super) fn change(assertion: SourceAssertion) -> AssertionMutation {
     AssertionMutation::Assert {
         assertion: Box::new(assertion),
     }
 }
-fn publication(
+pub(super) fn publication(
     service: &NativeService,
     input: &CaptureRequest,
     retry: &str,
@@ -228,7 +228,7 @@ fn publication(
         after_receipt: None,
     }
 }
-fn publish(
+pub(super) fn publish(
     service: &NativeService,
     input: &CaptureRequest,
     retry: &str,

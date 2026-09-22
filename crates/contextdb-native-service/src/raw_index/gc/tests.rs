@@ -310,6 +310,7 @@ fn reclamation_budget_and_forged_active_job_fail_before_deleting_rows() {
     state.reclaiming = Some(Reclaiming {
         generation: state.active.expect("active"),
         removed_rows: 0,
+        copies: None,
     });
     tx.put(
         &service.keyspaces.continuous,

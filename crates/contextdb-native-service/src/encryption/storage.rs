@@ -9,6 +9,12 @@ use contextdb_storage_fjall::{FjallSnapshot, FjallStorage, FjallTransaction};
 
 use super::{keys::PendingKeys, *};
 
+mod uses;
+#[cfg(test)]
+pub(crate) use uses::AFTER_MANAGED_REGISTRATION;
+#[cfg(test)]
+pub(super) use uses::AFTER_NATIVE_COMMIT;
+
 pub(crate) struct NativeStorage {
     inner: FjallStorage,
     pub(crate) keys: Option<Arc<NativeCustodyKeys>>,
@@ -32,9 +38,33 @@ impl<S: std::fmt::Debug> std::fmt::Debug for DecodedSnapshot<S> {
 }
 
 pub(crate) struct NativeTransaction<'a> {
+    owner: &'a NativeStorage,
     inner: FjallTransaction<'a>,
     keys: Option<Arc<NativeCustodyKeys>>,
     pending: PendingKeys,
+    changes: std::collections::BTreeMap<String, NativeKeyUseChange>,
+    retirement: Option<NativeKeyRetirementReceipt>,
+}
+
+impl NativeTransaction<'_> {
+    /// Import a ciphertext row only after authenticating its exact address and
+    /// retained key. Backup restore preserves old version IDs rather than issuing
+    /// a fresh key for every row of an already verified archive.
+    pub(crate) fn put_ciphertext(
+        &mut self,
+        space: &Keyspace,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    ) -> Result<()> {
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| failure("ciphertext import requires encrypted custody"))?;
+        keys.open_value(space, &key, &value, None)?;
+        self.pending.remove(&address(space, &key));
+        self.track_use_change(space, &key, Some(&value))?;
+        self.inner.put(space, key, value)
+    }
 }
 
 impl NativeStorage {
@@ -43,10 +73,12 @@ impl NativeStorage {
         &self.inner
     }
     pub(crate) fn open(path: &Path, keys: Option<Arc<NativeCustodyKeys>>) -> Result<Self> {
-        Ok(Self {
+        let storage = Self {
             inner: FjallStorage::open(path)?,
             keys,
-        })
+        };
+        storage.initialize_native_use()?;
+        Ok(storage)
     }
 
     pub(crate) fn is_encrypted(&self) -> bool {
@@ -123,25 +155,30 @@ impl WriteTransaction for NativeTransaction<'_> {
             Some(keys) => keys.seal_value(space, &key, &value, &mut self.pending)?,
             None => value,
         };
+        self.track_use_change(space, &key, Some(&value))?;
         self.inner.put(space, key, value)
     }
 
     fn delete(&mut self, space: &Keyspace, key: Vec<u8>) -> Result<()> {
         // Row GC does not destroy keys while short physical views may exist.
         // Complete deletion requires a separately inventoried closure executor.
+        self.track_use_change(space, &key, None)?;
         self.inner.delete(space, key)
     }
 
     fn commit(self, durability: Durability) -> Result<CommitReceipt> {
+        if self
+            .keys
+            .as_ref()
+            .is_some_and(|keys| keys.tracks_native_use())
+        {
+            return self.commit_with_use(durability);
+        }
         if let Some(keys) = &self.keys {
             keys.publish(&self.pending)?;
         }
         #[cfg(test)]
-        BEFORE_NATIVE_COMMIT.with(|hook| {
-            if let Some(hook) = hook.take() {
-                hook();
-            }
-        });
+        BEFORE_NATIVE_COMMIT.with(|hook| hook.take().map_or(Ok(()), |hook| hook()))?;
         self.inner.commit(durability)
     }
 
@@ -158,13 +195,26 @@ impl StorageEngine for NativeStorage {
         self.inner.head_sequence()
     }
     fn begin_read(&self, selector: SnapshotSelector) -> Result<Self::ReadSnapshot<'_>> {
-        Ok(self.decode_snapshot(self.inner.begin_read(selector)?))
+        let snapshot = self.inner.begin_read(selector)?;
+        if let Some(keys) = self.keys.as_ref().filter(|keys| keys.tracks_native_use()) {
+            keys.admit_use_snapshot(&self.inner, &snapshot)?;
+        }
+        Ok(self.decode_snapshot(snapshot))
     }
     fn begin_write(&self) -> Result<Self::WriteTransaction<'_>> {
+        self.reconcile_native_use()?;
         Ok(NativeTransaction {
+            owner: self,
             inner: self.inner.begin_write()?,
             keys: self.keys.clone(),
             pending: Default::default(),
+            changes: Default::default(),
+            retirement: self
+                .keys
+                .as_ref()
+                .map(|keys| keys.retirement_frontier())
+                .transpose()?
+                .flatten(),
         })
     }
     fn checkpoint(&self, target: &Path) -> Result<CheckpointManifest> {
@@ -174,6 +224,7 @@ impl StorageEngine for NativeStorage {
         self.inner.compact(request)
     }
     fn verify(&self, mode: VerifyMode) -> Result<VerifyReport> {
+        self.reconcile_native_use()?;
         self.inner.verify(mode)
     }
 }
@@ -206,6 +257,9 @@ fn decode_page(
 }
 
 #[cfg(test)]
+type BeforeCommitHook = Box<dyn FnOnce() -> Result<()>>;
+
+#[cfg(test)]
 thread_local! {
-    pub(super) static BEFORE_NATIVE_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(super) static BEFORE_NATIVE_COMMIT: std::cell::RefCell<Option<BeforeCommitHook>> = const { std::cell::RefCell::new(None) };
 }

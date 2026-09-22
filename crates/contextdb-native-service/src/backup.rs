@@ -21,6 +21,36 @@ use super::{
     validate_workspace_state, workspace_map_key,
 };
 
+mod artifacts;
+mod cleanup;
+mod contents;
+mod executor;
+pub(crate) mod jobs;
+mod maintenance;
+pub(crate) mod preservation;
+mod recovery;
+pub(crate) mod replacements;
+mod routing;
+pub(crate) mod sealing;
+pub use cleanup::{NativeBackupCleanupProgress, NativeBackupCleanupStage};
+pub use executor::{
+    NativeArchiveCleanup, NativeArchiveCleanupAction, NativeArchiveCleanupAdvance,
+    NativeArchiveCleanupEntry, NativeArchiveCleanupInventory, NativeArchiveCleanupState,
+};
+pub use jobs::NativeBackupCleanupJobProgress;
+pub use maintenance::{
+    NativeArchiveMaintenance, NativeArchiveMaintenanceAuthority, NativeArchiveMaintenanceBacklog,
+    NativeArchiveMaintenanceObservation, NativeArchiveMaintenanceOperation,
+    NativeArchiveMaintenanceOptions, NativeArchiveMaintenanceOutcome,
+    NativeArchiveMaintenanceStatus,
+};
+pub use preservation::{NativeBackupPreservation, NativeBackupPreservationPath};
+pub use recovery::{
+    NativeBackupRecovery, NativeBackupRecoveryInput, NativeBackupRecoveryInventory,
+    NativeBackupRecoveryState,
+};
+pub use replacements::NativeRemovalBackup;
+
 /// Exact format returned by the native administrative backup operation.
 pub const NATIVE_BACKUP_FORMAT: &str = "contextdb.native-fjall.logical-backup.v1";
 /// Backup format including the continuous capture authority.
@@ -30,9 +60,9 @@ pub const NATIVE_ENCRYPTED_BACKUP_FORMAT: &str = "contextdb.native-fjall.encrypt
 
 const BACKUP_MAGIC: &[u8] = b"contextdb/native-backup/v1\0";
 const BACKUP_FOOTER_BYTES: usize = 32;
-const MAX_BACKUP_BYTES: usize = 256 * 1024 * 1024;
+pub(crate) const MAX_BACKUP_BYTES: usize = 256 * 1024 * 1024;
 const MAX_BACKUP_RAW_BYTES: usize = 128 * 1024 * 1024;
-const MAX_BACKUP_ENTRIES: usize = 2_000_000;
+pub(crate) const MAX_BACKUP_ENTRIES: usize = 2_000_000;
 const MAX_BACKUP_KEY_BYTES: usize = 64 * 1024;
 const MAX_BACKUP_VALUE_BYTES: usize = 16 * 1024 * 1024 + 64;
 const BACKUP_SCAN_PAGE_ENTRIES: usize = 4_096;
@@ -64,6 +94,36 @@ impl NativeService {
             keys.require_backup_registry()?;
         }
         let _guard = self.lock_writes()?;
+        let (archive, response) = self.build_native_backup()?;
+        if let Some(keys) = &self.engine.keys {
+            if keys.supports_backup_contents() {
+                self.retain_verified_backup_contents(
+                    &archive,
+                    &response,
+                    true,
+                    &mut contents::issuance_budget(),
+                )?;
+            } else {
+                keys.register_backup(
+                    &response.digest,
+                    response.commit_seq,
+                    &archive.deep_digest,
+                    response.bytes.len() as u64,
+                )
+                .map_err(storage_error)?;
+            }
+            #[cfg(test)]
+            AFTER_REGISTRATION.with(|hook| {
+                if let Some(hook) = hook.take() {
+                    hook();
+                }
+            });
+        }
+        Ok(response)
+    }
+
+    // Caller holds native publication until the verified bytes are issued.
+    fn build_native_backup(&self) -> ServiceResult<(NativeBackup, BackupResponse)> {
         self.verify_physical_backup_layout()?;
         let backend = self
             .engine
@@ -109,27 +169,13 @@ impl NativeService {
         archive.deep_digest = deep_digest;
         let bytes = encode_backup(&archive)?;
         let digest = digest_bytes(&bytes);
-        if let Some(keys) = &self.engine.keys {
-            keys.register_backup(
-                &digest,
-                commit_seq,
-                &archive.deep_digest,
-                bytes.len() as u64,
-            )
-            .map_err(storage_error)?;
-            #[cfg(test)]
-            AFTER_REGISTRATION.with(|hook| {
-                if let Some(hook) = hook.take() {
-                    hook();
-                }
-            });
-        }
-        Ok(BackupResponse {
-            format: archive.format,
+        let response = BackupResponse {
+            format: archive.format.clone(),
             digest,
             bytes,
             commit_seq,
-        })
+        };
+        Ok((archive, response))
     }
 
     pub(super) fn restore_native_backup(
@@ -220,6 +266,12 @@ impl NativeService {
                 .find(|candidate| candidate.as_str() == keyspace.name)
                 .ok_or_else(|| integrity("native backup keyspace is not admitted"))?;
             for entry in &keyspace.entries {
+                if self.engine.is_encrypted() {
+                    transaction
+                        .put_ciphertext(target, entry.key.clone(), entry.value.clone())
+                        .map_err(storage_error)?;
+                    continue;
+                }
                 let logical_value = archive_snapshot
                     .get(target, &entry.key)
                     .map_err(storage_error)?
@@ -258,6 +310,7 @@ impl NativeService {
             .map(|keyspace| keyspace.as_str().to_owned())
             .collect::<BTreeSet<_>>();
         allowed.insert(FJALL_INTERNAL_META_KEYSPACE.to_owned());
+        allowed.extend(self.engine.protocol_keyspaces().map_err(storage_error)?);
         let actual = self
             .engine
             .physical_keyspace_names()

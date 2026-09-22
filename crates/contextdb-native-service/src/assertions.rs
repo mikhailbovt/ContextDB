@@ -2,6 +2,7 @@
 
 mod catalog;
 mod query;
+pub(crate) mod retention;
 #[cfg(test)]
 mod tests;
 mod verify;
@@ -32,6 +33,14 @@ use super::{
 
 pub(super) const STATE_FEATURE: &str = "continuous-assertions-v1";
 pub(super) use catalog::CATALOG_FEATURE;
+pub use retention::NativeAssertionPruningReceipt;
+pub use retention::witness::{
+    NativeAssertionBackupInventory, NativeAssertionBatchKind, NativeAssertionCopyKind,
+    NativeAssertionKeyInventory, NativeAssertionRemovalWitnessReceipt,
+    NativeAssertionValueDisposition, NativeAssertionValueInventory,
+    NativeAssertionValueWitnessReceipt, NativeAssertionVersionOwnership,
+};
+pub(crate) use retention::{AssertionPruningPublication, PRUNING_FEATURE};
 const DOMAIN: &str = "contextdb.native-assertions/v1";
 const MAX_WINDOW: usize = 128;
 const MAX_SLOT_ROWS: usize = 512;
@@ -93,6 +102,8 @@ struct MutationLabel {
     body_key: Vec<u8>,
     body_digest: String,
     envelope: Option<contextdb_core::SemanticEnvelope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pruned_at: Option<u64>,
 }
 
 impl AssertionPort for NativeService {
@@ -344,7 +355,7 @@ impl AssertionPort for NativeService {
                         return Err(super::permission_denied());
                     }
                     if self
-                        .raw_value::<AssertionMutation, _>(&tx, &claim_key(assertion.claim.id))?
+                        .raw_value::<MutationLabel, _>(&tx, &claim_label_key(assertion.claim.id))?
                         .is_some()
                         || new_claims.contains_key(&assertion.claim.id)
                     {
@@ -790,6 +801,13 @@ impl NativeService {
         label: &MutationLabel,
         budget: &mut QueryBudget,
     ) -> ServiceResult<AssertionMutation> {
+        if label.pruned_at.is_some() {
+            return Err(ServiceError::new(
+                ErrorCode::EvidenceRequired,
+                "assertion support was explicitly removed",
+                false,
+            ));
+        }
         let bytes = snapshot
             .get(&self.keyspaces.continuous, &label.body_key)
             .map_err(storage_error)?
@@ -823,93 +841,7 @@ impl NativeService {
 }
 
 fn accepted_rows(accepted: &AcceptedAssertions) -> ServiceResult<BTreeMap<Vec<u8>, Vec<u8>>> {
-    let workspace = digest_bytes(accepted.workspace_id.as_bytes());
-    let mut rows = BTreeMap::new();
-    rows.insert(
-        coverage_head(&workspace, accepted.scope),
-        encode(&accepted.coverage)?,
-    );
-    rows.insert(
-        format!(
-            "{}{commit:020}",
-            coverage_prefix(&workspace, accepted.scope),
-            commit = accepted.commit
-        )
-        .into_bytes(),
-        encode(&accepted.coverage)?,
-    );
-    for (ordinal, mutation) in accepted.mutations.iter().enumerate() {
-        let slot = canonical_digest(mutation.key())?;
-        if let AssertionMutation::Policy { policy } = mutation {
-            rows.insert(
-                format!(
-                    "state/policy/{workspace}/{slot}/{:010}",
-                    policy.version.get()
-                )
-                .into_bytes(),
-                encode(&StoredAuthority {
-                    commit: accepted.commit,
-                    access: accepted.access.clone(),
-                    policy: policy.clone(),
-                })?,
-            );
-            continue;
-        }
-        let body = encode(mutation)?;
-        let (body_key, evidence) = match mutation {
-            AssertionMutation::Assert { assertion } => {
-                (claim_key(assertion.claim.id), &assertion.original_evidence)
-            }
-            AssertionMutation::Retract { retraction } => (
-                format!(
-                    "state/retraction/{workspace}/{:020}/{ordinal:03}",
-                    accepted.commit
-                )
-                .into_bytes(),
-                &retraction.original_evidence,
-            ),
-            AssertionMutation::Policy { .. } => unreachable!(),
-        };
-        let label = MutationLabel {
-            commit: accepted.commit,
-            sources: evidence.iter().map(|span| span.event_id).collect(),
-            body_key: body_key.clone(),
-            body_digest: digest_bytes(&body),
-            envelope: match mutation {
-                AssertionMutation::Assert { assertion } => {
-                    Some(assertion.revision.envelope.clone())
-                }
-                _ => None,
-            },
-        };
-        rows.insert(body_key, body);
-        rows.insert(
-            format!(
-                "{}{commit:020}/{ordinal:03}",
-                slot_prefix(&workspace, &slot),
-                commit = accepted.commit
-            )
-            .into_bytes(),
-            encode(&label)?,
-        );
-        if let AssertionMutation::Assert { assertion } = mutation {
-            rows.insert(claim_label_key(assertion.claim.id), encode(&label)?);
-            for (id, span) in assertion
-                .revision
-                .evidence
-                .iter()
-                .zip(&assertion.original_evidence)
-            {
-                let value = encode(span)?;
-                if let Some(previous) = rows.insert(evidence_key(*id), value.clone())
-                    && previous != value
-                {
-                    return Err(invalid("evidence identity conflicts within the batch"));
-                }
-            }
-        }
-    }
-    Ok(rows)
+    retention::accepted_projection(accepted)
 }
 
 fn check_interpreted(

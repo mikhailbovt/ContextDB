@@ -39,9 +39,9 @@ struct PayloadMetadata {
 /// adapter/source/gap strings and checkpoint content are deliberately not copied.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CaptureRecovery {
+pub(in super::super) struct CaptureRecovery {
     version: u16,
-    pub(super) scope_ids: BTreeSet<ScopeId>,
+    pub(in super::super) scope_ids: BTreeSet<ScopeId>,
     producer_id: StreamId,
     kind: EventKind,
     role: EventRole,
@@ -55,17 +55,46 @@ pub(super) struct CaptureRecovery {
     task_id: Option<TaskId>,
     parent_event_ids: BTreeSet<ObservationId>,
     supersedes_event_id: Option<ObservationId>,
-    coverage: EventCoverage,
-    upstream_truncated: bool,
+    pub(in super::super) coverage: EventCoverage,
+    pub(in super::super) upstream_truncated: bool,
     gap_reason_digest: Option<ContentDigest>,
     pub(super) response_stream: Option<ResponseStream>,
     provenance: Option<EventProvenance>,
     payload: PayloadMetadata,
-    inputs: crate::custody::Inputs,
+    pub(in super::super) inputs: crate::custody::Inputs,
     pub(super) checkpoint: Option<crate::owned::CheckpointControl>,
 }
 
 impl CaptureRecovery {
+    pub(super) fn verify_features(&self, manifest: &Manifest) -> ServiceResult<()> {
+        if (matches!(self.provenance, Some(EventProvenance::ModelOutput { .. }))
+            && !manifest
+                .features
+                .contains(crate::payload::MODEL_PROTOCOL_FEATURE))
+            || (self.checkpoint.is_some()
+                && !manifest.features.contains(crate::owned::OWNED_FEATURE))
+            || ((self.provenance.is_some()
+                || matches!(
+                    self.payload.shape,
+                    PayloadShape::Staged | PayloadShape::Assembly
+                ))
+                && !manifest.features.contains(crate::payload::SOURCE_FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery requires missing source format features",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn owned_payload(&self) -> Option<contextdb_core::ContentBlockId> {
+        if self.payload.shape == PayloadShape::Staged {
+            self.inputs.payloads.first().map(|value| value.block_id)
+        } else {
+            None
+        }
+    }
+
     pub(super) fn from_event(event: &EventEnvelope) -> ServiceResult<Self> {
         let (shape, bytes, media_type, renderer, model_call) = match &event.payload {
             EventPayload::InlineUtf8 { text, .. } => (
@@ -154,6 +183,147 @@ impl CaptureRecovery {
 }
 
 impl NativeService {
+    /// Administrative metadata for either a complete original or an explicitly
+    /// pruned original with independently retained control authority. Never used
+    /// to manufacture an EventEnvelope or a successful original read.
+    pub(in super::super) fn verified_capture_control<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<VerifiedCaptureControl> {
+        let record: CaptureRecord = read_required(snapshot, self, &record_key(id))?;
+        budget
+            .charge(1, encode(&record)?.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        if let Some(control_digest) = self.verify_pruned_source(snapshot, id, budget)? {
+            return Ok(VerifiedCaptureControl {
+                receipt: record.receipt,
+                recovery: record
+                    .recovery
+                    .ok_or_else(|| integrity("pruned recovery is absent"))?,
+                control_digest,
+                original: None,
+            });
+        }
+        let original = self.load_captured_original(snapshot, id)?;
+        budget
+            .charge(1, encode(&original.event)?.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        Ok(VerifiedCaptureControl {
+            control_digest: self.capture_control_digest(snapshot, &original)?,
+            recovery: record
+                .recovery
+                .unwrap_or(CaptureRecovery::from_event(&original.event)?),
+            receipt: original.receipt,
+            original: Some(original.event),
+        })
+    }
+
+    // The retained authority has already proved membership of this exact source.
+    // Only immutable control bytes are read here; this is not disclosure authority.
+    pub(in super::super) fn verify_retained_capture_control<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        source: &crate::NativeDeletionSource,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<()> {
+        let bytes = snapshot
+            .get(
+                &self.keyspaces.continuous,
+                &record_key(source.receipt.event_id),
+            )
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("retained capture control is missing"))?;
+        budget
+            .charge(1, bytes.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        let record: CaptureRecord = decode(&bytes, "retained capture control")?;
+        if record.receipt != source.receipt
+            || control_digest(&bytes) != source.control_digest
+            || record.work()?.recovery_digest != Some(source.recovery_digest)
+        {
+            return Err(integrity(
+                "capture control differs from the retained removal source",
+            ));
+        }
+        let (global, _) = self.select_snapshot(
+            snapshot,
+            &source.receipt.workspace_id.to_string(),
+            Some(source.receipt.workspace_commit),
+        )?;
+        let bytes = snapshot
+            .get(&self.keyspaces.events, &global.to_be_bytes())
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("retained capture journal is missing"))?;
+        budget
+            .charge(1, bytes.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        let journal: crate::StoredEvent = decode(&bytes, "retained capture journal")?;
+        if journal.operation != "capture"
+            || journal.accepted_original.as_ref() != Some(&record.work()?)
+            || journal.workspace_digest
+                != digest_bytes(source.receipt.workspace_id.to_string().as_bytes())
+            || journal.workspace_commit != source.receipt.workspace_commit
+            || journal.event_digest != crate::event_digest(&journal)?
+        {
+            return Err(integrity(
+                "retained control has no matching accepted capture",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn capture_control_digest<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        original: &CapturedOriginal,
+    ) -> ServiceResult<ContentDigest> {
+        let bytes = snapshot
+            .get(
+                &self.keyspaces.continuous,
+                &record_key(original.event.event_id),
+            )
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("capture control record is missing"))?;
+        let record: CaptureRecord = decode(&bytes, "capture control record")?;
+        if record.receipt != original.receipt
+            || record.producer_sequence != original.event.producer_sequence
+            || blake3::Hash::from_hex(&record.producer_key).is_err()
+            || blake3::Hash::from_hex(&record.idempotency_digest).is_err()
+            || encode(&record)? != bytes
+        {
+            return Err(integrity(
+                "capture control differs from its accepted original",
+            ));
+        }
+        let positioned: ObservationId = read_required(
+            snapshot,
+            self,
+            &position_key(&record.producer_key, record.producer_sequence),
+        )?;
+        let retry: crate::StoredIdempotency = decode(
+            &snapshot
+                .get(
+                    &self.keyspaces.idempotency,
+                    record.idempotency_digest.as_bytes(),
+                )
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("capture control retry receipt is missing"))?,
+            "capture control retry receipt",
+        )?;
+        if positioned != original.event.event_id
+            || retry.operation != "capture"
+            || retry.response_bytes != encode(&record.receipt)?
+            || retry.response_digest != digest_bytes(&retry.response_bytes)
+        {
+            return Err(integrity(
+                "capture control position or retry binding differs",
+            ));
+        }
+        Ok(control_digest(&bytes))
+    }
+
     pub(in super::super) fn capture_work_for_receipt<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -271,6 +441,20 @@ impl NativeService {
         }
         Ok(Some(first))
     }
+}
+
+pub(in super::super) struct VerifiedCaptureControl {
+    pub(in super::super) receipt: CaptureReceipt,
+    pub(in super::super) recovery: CaptureRecovery,
+    pub(in super::super) control_digest: ContentDigest,
+    pub(in super::super) original: Option<EventEnvelope>,
+}
+
+pub(super) fn control_digest(bytes: &[u8]) -> ContentDigest {
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"contextdb/native-capture-control/v1\0");
+    hash.update(bytes);
+    ContentDigest::from_bytes(*hash.finalize().as_bytes())
 }
 
 fn digest(bytes: &[u8]) -> ContentDigest {

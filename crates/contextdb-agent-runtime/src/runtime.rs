@@ -183,6 +183,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         budget: &mut QueryBudget,
     ) -> ServiceResult<Self> {
         settings.validate(&start.model_profile)?;
+        owner.recover_record_writes(&context, budget)?;
         let run_uuid = start.identity.run_id.as_uuid();
         let checkpoint = OwnedRunCheckpoint {
             version: 1,
@@ -236,6 +237,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         now: TimestampMicros,
         budget: &mut QueryBudget,
     ) -> ServiceResult<Self> {
+        owner.recover_record_writes(&context, budget)?;
         let saved = owner
             .load_run_checkpoint(&context, run, budget)?
             .ok_or_else(|| {
@@ -535,6 +537,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
     ) -> ServiceResult<CompletedTurn> {
         self.ensure_active()?;
         validate_reader(reader)?;
+        self.owner.recover_record_writes(&self.context, budget)?;
         self.validate_reader_protocol(&reader.profile())?;
         if reader.profile() != self.state.model_profile {
             return Err(invalid("reader switch requires an explicit checkpoint"));

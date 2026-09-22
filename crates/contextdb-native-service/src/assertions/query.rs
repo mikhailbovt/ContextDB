@@ -103,6 +103,12 @@ impl NativeService {
             if label.commit > known {
                 break;
             }
+            if label.pruned_at.is_some() {
+                if !gaps.contains(&StateCoverageGap::SupportUnavailable) {
+                    gaps.push(StateCoverageGap::SupportUnavailable);
+                }
+                continue;
+            }
             match self.authorize_state_label(&snapshot, &request.context, &label, budget) {
                 Ok(()) => {}
                 Err(error) if unavailable(&error) => {

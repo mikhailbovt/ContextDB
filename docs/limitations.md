@@ -31,7 +31,53 @@ and release verifier—not the presence of an API name—determine completion.
   retained key inventory and master key. It does not hide record addresses or
   detect rollback of all authorities. CLI/MCP key provisioning, plaintext
   migration, key reclamation, remote authority custody and physical deletion
-  remain open. See [the native profile](architecture/continuous-context.md).
+  remain open. Explicit source/assertion/chunk pruning supports interrupted
+  cleanup and restore, retaining independent assertions and shared blocks.
+  Version 3 authorities retain administrator-declared generic-record origins
+  across restore, enforcing current source policies before body reads. Empty record
+  workspaces can activate origin requirements before their first record. Explicit
+  publication, candidate supersession, correction and retraction support atomic
+  source-aware groups and resumable origin transfer. Rewired hierarchy edges
+  retain their copied sources. The owned runtime automatically discovers and
+  repairs accepted groups under a shared budget. Recovery progress is process-local;
+  restart rescans history, and a missing-completion check may rescan its suffix.
+  Durable progress, measured backlog limits and origin aggregation beyond the
+  current 64-source profile remain unfinished.
+  Unclassified records remain unavailable. New mutations bind compact body-free
+  controls; older full mutation groups support explicit verified preparation.
+  Generic revision cleanup and verified replacement archives preserve independent
+  data through interrupted cleanup and restore. Replacement bytes can be retained
+  independently in bounded portions; complete availability requires their full
+  digest. A bounded coordinator cleans exact archives in separate restored owners;
+  inventories expose unknown membership, mixed-value composition and missing
+  preservation paths or artifacts for each selected family. Each path verifies
+  every exact removal request and ends at completely retained clean bytes with
+  currently usable keys. These reports require retry after concurrent key retirement.
+  Original archives can also be retained, and recovery automatically selects a
+  readable original or separately authorized successor. Readable input bytes may
+  still need cleanup. Durable jobs bind inputs to registered isolated workers and
+  survive restart or lost responses; hosts must retain those worker directories.
+  Successive requests continue the prior result. Unfinished jobs keep input keys
+  usable until finish acceptance. An owned controller now schedules archives and
+  reopens stable workers, preserving successor aliases across requests. Missing
+  accepted history requires recovery of the original worker. Embedded hosts can
+  enable bounded background maintenance with fresh host authentication and verified
+  request discovery. CLI/MCP encrypted profile provisioning, worker replacement/
+  disposal and cross-workspace reassignment remain unfinished. Scheduling results
+  describe one request's inventory before each action, not global deletion completion.
+  Owned and mixed-key retirement reject unresolved native/archive obligations and
+  deny decryption through old snapshots or restored archives. Mixed keys require
+  classified replacement batches preserving independent data and controls in every
+  affected native instance. Acknowledged use does not prove physical copy integrity.
+  The independent retirement journal
+  survives native restore; uncertain Sync closes key use until authority recovery.
+  Wrapped descriptors remain, so retirement does not certify physical destruction.
+  Older archives may lack selected roots; verified local history determines which
+  retained sources and blocks are present. Unknown origins and unretained branch
+  descendants still require reconciliation. Discovery rescans after restart.
+  Hash-only migration, complete copy coverage and verified
+  deletion completion that reopens disclosure remain unfinished.
+  See [the native profile](architecture/continuous-context.md).
 - M17's 10M run measured storage records, not the RFC semantic graph/vector
   certification shape; E01/E02/E03 remain open.
 - Native Linux x86_64 and Windows x86_64 local-MCP developer previews have distinct

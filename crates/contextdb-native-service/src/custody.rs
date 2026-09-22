@@ -74,7 +74,7 @@ pub struct CustodyProgress {
     pub processed: u32,
     /// Current workspace revocation epoch.
     pub authorization_epoch: u64,
-    /// Disclosure can resume; a stale raw generation still needs rebuilding.
+    /// Custody is current; retention and index gates may still close disclosure.
     pub caught_up: bool,
 }
 
@@ -116,21 +116,18 @@ impl NativeService {
                 .charge(1, entry.value.len() as u64)
                 .map_err(budget_error)?;
             let work: super::capture::CaptureWork = decode(&entry.value, "custody work")?;
-            let original = self.load_captured_original(&snapshot, work.event_id)?;
-            budget
-                .charge(0, encode(&original.event)?.len() as u64)
-                .map_err(budget_error)?;
+            let control = self.verified_capture_control(&snapshot, work.event_id, budget)?;
             if work.workspace_commit <= state.through
-                || work.workspace_commit != original.receipt.workspace_commit
-                || work.event_digest != original.receipt.event_digest
-                || original.event.workspace_id.to_string() != context.request.workspace_id
+                || self.capture_work_for_receipt(&snapshot, &control.receipt)? != work
+                || entry.key != super::capture::work_key(&workspace, work.workspace_commit)
+                || control.receipt.workspace_id.to_string() != context.request.workspace_id
             {
                 return Err(integrity("custody outbox differs from its original"));
             }
-            let record = self.build_custody_record(
+            let record = self.build_control_custody_record(
                 &snapshot,
-                &original.event,
-                work.workspace_commit,
+                &control.receipt,
+                control.recovery.inputs,
                 &records,
                 Some(budget),
             )?;
@@ -262,6 +259,16 @@ impl NativeService {
         workspace: &str,
     ) -> ServiceResult<()> {
         self.require_suppression_current(snapshot, workspace)?;
+        self.require_custody_rebuilt(snapshot, workspace)
+    }
+
+    // Maintenance can rebuild while retention intentionally closes disclosure.
+    pub(super) fn require_custody_rebuilt<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+    ) -> ServiceResult<()> {
+        self.require_suppression_prefix_current(snapshot, workspace)?;
         match self.custody_state(snapshot, workspace)? {
             Some(state) if !state.pending => Ok(()),
             None if self
@@ -295,16 +302,6 @@ impl NativeService {
         Ok(())
     }
 
-    pub(super) fn derived_custody_policies<S: ReadSnapshot>(
-        &self,
-        snapshot: &S,
-        id: ObservationId,
-    ) -> ServiceResult<Vec<AccessPolicy>> {
-        let record = self.custody_record(snapshot, id)?;
-        self.require_custody_ready(snapshot, &record.workspace)?;
-        Ok(record.policies)
-    }
-
     // Administrative reconstruction of an archived prefix is independent of
     // current disclosure admission. verify_custody_records checks these rows.
     pub(super) fn stored_custody_policies<S: ReadSnapshot>(
@@ -321,23 +318,70 @@ impl NativeService {
         event: &EventEnvelope,
         commit: u64,
         overlay: &BTreeMap<ObservationId, CustodyRecord>,
+        budget: Option<&mut QueryBudget>,
+    ) -> ServiceResult<CustodyRecord> {
+        self.build_custody_inputs(
+            snapshot,
+            CustodyRecord {
+                version: CUSTODY_VERSION,
+                event_id: event.event_id,
+                workspace: digest_bytes(event.workspace_id.to_string().as_bytes()),
+                commit,
+                event_digest: super::capture::content_digest_of(event)?,
+                inputs: inputs(event)?,
+                policies: Vec::new(),
+            },
+            overlay,
+            budget,
+        )
+    }
+
+    fn build_control_custody_record<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        receipt: &contextdb_service::CaptureReceipt,
+        inputs: Inputs,
+        overlay: &BTreeMap<ObservationId, CustodyRecord>,
+        budget: Option<&mut QueryBudget>,
+    ) -> ServiceResult<CustodyRecord> {
+        self.build_custody_inputs(
+            snapshot,
+            CustodyRecord {
+                version: CUSTODY_VERSION,
+                event_id: receipt.event_id,
+                workspace: digest_bytes(receipt.workspace_id.to_string().as_bytes()),
+                commit: receipt.workspace_commit,
+                event_digest: receipt.event_digest,
+                inputs,
+                policies: Vec::new(),
+            },
+            overlay,
+            budget,
+        )
+    }
+
+    fn build_custody_inputs<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        mut record: CustodyRecord,
+        overlay: &BTreeMap<ObservationId, CustodyRecord>,
         mut budget: Option<&mut QueryBudget>,
     ) -> ServiceResult<CustodyRecord> {
         let policy: StoredObservationPolicy = decode(
             &snapshot
                 .get(
                     &self.keyspaces.observations_policy,
-                    digest_bytes(event.event_id.to_string().as_bytes()).as_bytes(),
+                    digest_bytes(record.event_id.to_string().as_bytes()).as_bytes(),
                 )
                 .map_err(storage_error)?
                 .ok_or_else(|| integrity("custody source policy absent"))?,
             "custody source policy",
         )?;
-        let workspace = digest_bytes(event.workspace_id.to_string().as_bytes());
-        let inputs = inputs(event)?;
+        let workspace = &record.workspace;
+        let inputs = &record.inputs;
         let mut labels = BTreeMap::new();
         charge(&mut budget, 1, encode(&policy)?.len() as u64)?;
-        insert_label(&mut labels, policy.access, &workspace)?;
+        insert_label(&mut labels, policy.access, workspace)?;
         for source in &inputs.sources {
             charge(&mut budget, 1, 0)?;
             let parent = if let Some(parent) = overlay.get(source) {
@@ -346,31 +390,23 @@ impl NativeService {
                 self.custody_record(snapshot, *source)?
             };
             charge(&mut budget, 1, encode(&parent)?.len() as u64)?;
-            if parent.workspace != workspace || parent.commit >= commit {
+            if parent.workspace != *workspace || parent.commit >= record.commit {
                 return Err(integrity(
                     "custody dependency crosses workspace or capture order",
                 ));
             }
             for policy in parent.policies {
                 charge(&mut budget, 1, 0)?;
-                insert_label(&mut labels, policy, &workspace)?;
+                insert_label(&mut labels, policy, workspace)?;
             }
         }
         for payload in &inputs.payloads {
             charge(&mut budget, 1, 0)?;
             let policy = self.payload_index_policy(snapshot, payload)?;
             charge(&mut budget, 0, encode(&policy)?.len() as u64)?;
-            insert_label(&mut labels, policy, &workspace)?;
+            insert_label(&mut labels, policy, workspace)?;
         }
-        let record = CustodyRecord {
-            version: CUSTODY_VERSION,
-            event_id: event.event_id,
-            workspace,
-            commit,
-            event_digest: super::capture::content_digest_of(event)?,
-            inputs,
-            policies: labels.into_values().collect(),
-        };
+        record.policies = labels.into_values().collect();
         if encode(&record)?.len() > MAX_RECORD_BYTES {
             return Err(exhausted("capture custody metadata exceeds 1 MiB"));
         }

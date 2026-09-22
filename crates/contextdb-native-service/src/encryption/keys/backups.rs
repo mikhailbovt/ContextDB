@@ -5,6 +5,22 @@ use contextdb_storage::ScanPageRequest;
 
 use super::*;
 
+mod artifacts;
+mod contents;
+mod jobs;
+mod replacements;
+pub use artifacts::{NativeBackupArtifactProgress, NativeBackupArtifactReceipt};
+pub use contents::{
+    NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
+    NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
+};
+pub use jobs::{
+    NativeBackupCleanupJob, NativeBackupCleanupJobBinding, NativeBackupCleanupJobReceipt,
+};
+pub use replacements::{
+    NativeBackupPruningCounts, NativeBackupReplacement, NativeBackupReplacementReceipt,
+};
+
 #[cfg(test)]
 mod tests;
 
@@ -47,11 +63,19 @@ pub struct NativeBackupCatalogPage {
 struct Head {
     sequence: u64,
     digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    contents: Option<NativeBackupContentsReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    replacements: Option<NativeBackupReplacementReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    artifacts: Option<NativeBackupArtifactReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    jobs: Option<NativeBackupCleanupJobReceipt>,
 }
 
 impl NativeCustodyKeys {
     pub(crate) fn require_backup_registry(&self) -> contextdb_service::ServiceResult<()> {
-        if self.identity.version != 2 {
+        if self.identity.version < 2 {
             return Err(contextdb_service::ServiceError::new(
                 contextdb_service::ErrorCode::FormatIncompatible,
                 "version 1 custody authority requires explicit backup-registry migration",
@@ -150,9 +174,9 @@ impl NativeCustodyKeys {
         logical_digest: &str,
         encoded_bytes: u64,
     ) -> contextdb_storage::Result<()> {
-        if self.identity.version != 2 {
+        if self.identity.version < 2 {
             return Err(failure(
-                "issued backups require a version 2 custody authority",
+                "issued backups require a version 2 or later custody authority",
             ));
         }
         valid_digest(digest)?;
@@ -162,16 +186,36 @@ impl NativeCustodyKeys {
             .enter(|| Ok(()))
             .map_err(|_| failure("backup custody admission unavailable"))?;
         let mut tx = self.engine.begin_write()?;
-        if let Some(previous) = self.find_backup(&tx, digest)? {
+        if !self
+            .stage_backup_registration(&mut tx, digest, commit, logical_digest, encoded_bytes)?
+            .1
+        {
+            return Ok(());
+        }
+        if tx.commit(Durability::Sync)?.durability != Durability::Sync {
+            return Err(failure("issued archive registration was not synchronized"));
+        }
+        Ok(())
+    }
+
+    fn stage_backup_registration<T: WriteTransaction>(
+        &self,
+        tx: &mut T,
+        digest: &str,
+        commit: u64,
+        logical_digest: &str,
+        encoded_bytes: u64,
+    ) -> contextdb_storage::Result<(NativeBackupRegistration, bool)> {
+        if let Some(previous) = self.find_backup(tx, digest)? {
             if previous.native_commit != commit
                 || previous.logical_digest != logical_digest
                 || previous.encoded_bytes != encoded_bytes
             {
                 return Err(failure("issued archive metadata changed"));
             }
-            return Ok(());
+            return Ok((previous, false));
         }
-        let head = self.backup_head(&tx)?;
+        let head = self.backup_head(tx)?;
         let sequence = head
             .sequence
             .checked_add(1)
@@ -205,13 +249,14 @@ impl NativeCustodyKeys {
                 &Head {
                     sequence,
                     digest: Some(digest.into()),
+                    contents: head.contents,
+                    replacements: head.replacements,
+                    artifacts: head.artifacts,
+                    jobs: head.jobs,
                 },
             )?,
         )?;
-        if tx.commit(Durability::Sync)?.durability != Durability::Sync {
-            return Err(failure("issued archive registration was not synchronized"));
-        }
-        Ok(())
+        Ok((entry, true))
     }
 
     fn backup_aad(&self, key: &[u8]) -> contextdb_storage::Result<Vec<u8>> {
@@ -246,6 +291,18 @@ impl NativeCustodyKeys {
         }
         if let Some(digest) = &head.digest {
             valid_digest(digest)?;
+        }
+        if let Some(contents) = &head.contents {
+            contents.validate(self)?;
+        }
+        if let Some(replacement) = &head.replacements {
+            replacement.validate(self)?;
+        }
+        if let Some(artifact) = &head.artifacts {
+            artifact.validate(self)?;
+        }
+        if let Some(job) = &head.jobs {
+            job.validate(self)?;
         }
         Ok(head)
     }
@@ -298,39 +355,65 @@ impl NativeCustodyKeys {
         &self,
         snapshot: &S,
     ) -> contextdb_storage::Result<()> {
-        let rows = snapshot.scan_prefix(&self.rows, b"backup/")?;
-        if self.identity.version == 1 {
-            return if rows.is_empty() {
-                Ok(())
-            } else {
-                Err(failure(
-                    "legacy custody authority contains undeclared backup data",
-                ))
-            };
-        }
-        let head = self.backup_head(snapshot)?;
-        let mut reconstructed = Head::default();
-        let mut expected = std::collections::BTreeSet::from([HEAD.to_vec()]);
-        for row in rows.iter().filter(|row| row.key.starts_with(ISSUED)) {
-            let entry = self.decode_registration(&row.key, &row.value)?;
-            if entry.sequence != reconstructed.sequence + 1
-                || entry.previous_archive_digest != reconstructed.digest
-                || self.find_backup(snapshot, &entry.archive_digest)?.as_ref() != Some(&entry)
-            {
-                return Err(failure("issued backup registry chain differs"));
+        let mut expected = std::collections::BTreeSet::new();
+        if self.identity.version >= 2 {
+            let head = self.backup_head(snapshot)?;
+            expected.insert(HEAD.to_vec());
+            let mut previous = None;
+            for sequence in 1..=head.sequence {
+                let key = issued_key(sequence);
+                let entry = self.decode_registration(
+                    &key,
+                    &snapshot
+                        .get(&self.rows, &key)?
+                        .ok_or_else(|| failure("issued backup registration is missing"))?,
+                )?;
+                if entry.previous_archive_digest != previous
+                    || self.find_backup(snapshot, &entry.archive_digest)?.as_ref() != Some(&entry)
+                {
+                    return Err(failure("issued backup registry chain differs"));
+                }
+                expected.insert(key);
+                expected.insert(index_key(&entry.archive_digest));
+                previous = Some(entry.archive_digest);
             }
-            expected.insert(row.key.clone());
-            expected.insert(index_key(&entry.archive_digest));
-            reconstructed = Head {
-                sequence: entry.sequence,
-                digest: Some(entry.archive_digest),
-            };
+            if previous != head.digest {
+                return Err(failure("issued backup registry terminal differs"));
+            }
+            self.verify_backup_contents(snapshot, &head, &mut expected)?;
+            self.verify_backup_replacements(snapshot, &head, &mut expected)?;
+            let mut budget = contextdb_recall::QueryBudget::new(
+                u64::MAX,
+                u64::MAX,
+                std::time::Duration::from_secs(300),
+                Default::default(),
+            );
+            self.walk_backup_artifacts(snapshot, &head, &mut expected, &mut budget)
+                .map_err(|_| failure("retained archive bytes verification failed"))?;
+            self.walk_backup_jobs(snapshot, &head, &mut expected, &mut budget)
+                .map_err(|_| failure("archive cleanup job verification failed"))?;
         }
-        if reconstructed != head
-            || rows.len() != expected.len()
-            || rows.iter().any(|row| !expected.contains(&row.key))
-        {
-            return Err(failure("issued backup registry closure differs"));
+        let mut after = None;
+        loop {
+            let page = snapshot.scan_prefix_page(
+                &self.rows,
+                ScanPageRequest {
+                    prefix: b"backup/",
+                    start_after: after.as_deref(),
+                    max_entries: 256,
+                    max_bytes: 1024 * 1024,
+                },
+            )?;
+            for row in page.entries {
+                if !expected.remove(&row.key) {
+                    return Err(failure("issued backup registry has undeclared rows"));
+                }
+            }
+            let Some(next) = page.continuation else { break };
+            after = Some(next);
+        }
+        if !expected.is_empty() {
+            return Err(failure("issued backup registry lost accepted rows"));
         }
         Ok(())
     }

@@ -8,9 +8,24 @@ mod storage;
 #[cfg(test)]
 pub(crate) mod tests;
 
+pub(crate) use keys::uses::ManagedInstanceState;
+#[cfg(test)]
+pub(crate) use keys::uses::{AFTER_SEAL_SYNC, BEFORE_SEAL_SYNC};
 pub use keys::{
-    CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
+    CustodyMasterKey, NativeBackupArtifactProgress, NativeBackupArtifactReceipt,
+    NativeBackupCatalogPage, NativeBackupCleanupJob, NativeBackupCleanupJobBinding,
+    NativeBackupCleanupJobReceipt, NativeBackupContentsInventory, NativeBackupContentsPage,
+    NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
+    NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
+    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeBackupWorkerSeal,
+    NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyRetirement,
+    NativeKeyRetirementClassification, NativeKeyRetirementEvidence, NativeKeyRetirementReceipt,
+    NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
+    NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
+    NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
 };
+#[cfg(test)]
+pub(crate) use storage::AFTER_MANAGED_REGISTRATION;
 pub(super) use storage::{NativeSnapshot, NativeStorage};
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
@@ -19,6 +34,9 @@ use contextdb_storage::{Keyspace, StorageError};
 use zeroize::Zeroizing;
 
 const MAX_VALUE_BYTES: usize = 16 * 1024 * 1024;
+// A full raw lexical document has 16,384 term routes plus source/policy and
+// native commit metadata. Projection batches leave room for those control rows.
+pub(super) const MAX_PENDING_KEYS: usize = 32_768;
 const VALUE_MAGIC: &[u8] = b"CTXENC1\0";
 const NONCE_BYTES: usize = 24;
 const TAG_BYTES: usize = 16;
@@ -71,7 +89,7 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> contextdb_storage::Re
     serde_json::from_slice(bytes).map_err(|_| failure("custody record is invalid"))
 }
 
-fn address(space: &Keyspace, key: &[u8]) -> String {
+pub(super) fn address(space: &Keyspace, key: &[u8]) -> String {
     let mut hash = blake3::Hasher::new();
     hash.update(b"contextdb/native-value-address/v1\0");
     hash.update(&(space.as_str().len() as u64).to_be_bytes());
@@ -80,13 +98,44 @@ fn address(space: &Keyspace, key: &[u8]) -> String {
     hash.finalize().to_hex().to_string()
 }
 
+pub(crate) fn observe_value_version(
+    keys: &NativeCustodyKeys,
+    space: &Keyspace,
+    key: &[u8],
+    ciphertext: &[u8],
+    plaintext: &[u8],
+) -> contextdb_service::ServiceResult<crate::NativeRawValueVersion> {
+    if keys
+        .open_value(space, key, ciphertext, None)
+        .map_err(crate::storage_error)?
+        != plaintext
+    {
+        return Err(crate::integrity(
+            "raw copy ciphertext differs from its decoded snapshot",
+        ));
+    }
+    // open_value authenticated the complete envelope and its address before its
+    // identity is retained. Merely parsing a UUID is not observation evidence.
+    let key_id = uuid::Uuid::from_slice(&ciphertext[VALUE_MAGIC.len()..VALUE_MAGIC.len() + 16])
+        .map_err(|_| crate::integrity("raw copy key identity invalid"))?;
+    Ok(crate::NativeRawValueVersion {
+        authority_id: keys.authority_id(),
+        key_id,
+        ciphertext_digest: crate::digest_bytes(ciphertext),
+    })
+}
+
 fn random_key() -> contextdb_storage::Result<Zeroizing<[u8; 32]>> {
     let mut key = Zeroizing::new([0; 32]);
     getrandom::fill(key.as_mut()).map_err(|_| failure("custody entropy source unavailable"))?;
     Ok(key)
 }
 
-fn seal(key: &[u8; 32], aad: &[u8], plaintext: &[u8]) -> contextdb_storage::Result<Vec<u8>> {
+pub(crate) fn seal(
+    key: &[u8; 32],
+    aad: &[u8],
+    plaintext: &[u8],
+) -> contextdb_storage::Result<Vec<u8>> {
     if plaintext.len() > MAX_VALUE_BYTES {
         return Err(failure("custody value exceeds 16 MiB"));
     }
@@ -105,7 +154,7 @@ fn seal(key: &[u8; 32], aad: &[u8], plaintext: &[u8]) -> contextdb_storage::Resu
     Ok([nonce.as_slice(), ciphertext.as_slice()].concat())
 }
 
-fn open(
+pub(crate) fn open(
     key: &[u8; 32],
     aad: &[u8],
     ciphertext: &[u8],
