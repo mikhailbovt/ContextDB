@@ -37,15 +37,16 @@ impl VerifiedBackupJob {
 
 impl NativeService {
     /// Reserve an archive cleanup job on a pristine, separately opened encrypted
-    /// worker. Retain the worker directory: retries and later requests must use
-    /// this same registered instance. The fixed input is imported on first advance.
+    /// worker. Retain its directory: retries must use this registered instance.
+    /// The fixed input is imported on first advance.
     /// No host path or caller checkpoint supplies authority.
     ///
     /// A lost start response is recovered by repeating this call. An unfinished
     /// request cannot be replaced. After completion, a new request starts from the
-    /// previous result on that same worker, preserving prior authorized removals.
-    /// Multi-workspace reassignment and replacement of lost workers require a
-    /// separate verified lifecycle protocol; this API rejects them.
+    /// previous result, preserving prior authorized removals. A fresh replacement
+    /// requires the exact retained seal of the latest completed worker. It imports
+    /// that job's clean input once; an unsealed lost worker or a different workspace
+    /// cannot be reassigned through this API.
     pub fn start_removal_backup_job(
         &self,
         context: &AuthenticatedRequestContext,
@@ -79,8 +80,8 @@ impl NativeService {
             .iter()
             .rev()
             .find(|job| job.binding.original.archive_digest == original.archive_digest);
+        let mut worker_seal = None;
         let (source, source_path, source_artifact) = if let Some(prior) = prior {
-            require_worker(prior, instance)?;
             if prior.binding.workspace_digest != workspace
                 || prior.binding.original != *original
                 || prior.binding.request.authority_id != request.authority_id
@@ -90,6 +91,19 @@ impl NativeService {
                 ));
             }
             let (source, path, artifact) = prior.next_source()?;
+            if prior.binding.worker_instance != instance {
+                let seal = keys
+                    .backup_worker_seal(prior.binding.worker_instance, budget)?
+                    .ok_or_else(|| {
+                        integrity("archive replacement requires its prior worker seal")
+                    })?;
+                if seal.job != prior.receipt {
+                    return Err(integrity(
+                        "archive replacement seal differs from its latest job",
+                    ));
+                }
+                worker_seal = Some(seal);
+            }
             self.read_fixed_job_input(context, request, &path, &artifact, budget)?;
             (source, path, artifact)
         } else {
@@ -97,7 +111,7 @@ impl NativeService {
             (input.target, input.replacements, input.artifact)
         };
         let _native_guard = self.lock_index_publication(budget)?;
-        let restore_at = if prior.is_none() {
+        let restore_at = if prior.is_none() || worker_seal.is_some() {
             let snapshot = self
                 .engine
                 .begin_read(SnapshotSelector::Latest)
@@ -130,9 +144,10 @@ impl NativeService {
                 source_path,
                 source_artifact,
                 worker_instance: instance,
+                worker_seal,
                 restore_at,
             },
-            initialized: prior.is_some(),
+            initialized: restore_at.is_none(),
             terminal: None,
             terminal_archive_digest: None,
         };

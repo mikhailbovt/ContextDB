@@ -61,8 +61,12 @@ pub struct NativeBackupCleanupJobBinding {
     pub source_artifact: NativeBackupArtifactReceipt,
     /// Registered native instance that owns this work, preserved across reopen.
     pub worker_instance: Uuid,
-    /// Pristine physical sequence at first admission. Import occurs only at this
-    /// sequence; later requests reuse the existing worker and have no import step.
+    /// Exact fence of the preceding worker, present only in a replacement's first
+    /// job. Old jobs and native-copy obligations remain independently retained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_seal: Option<NativeBackupWorkerSeal>,
+    /// Pristine physical sequence at initial or replacement admission. Import
+    /// occurs only at this sequence; continuing the same worker needs no import.
     pub restore_at: Option<u64>,
 }
 

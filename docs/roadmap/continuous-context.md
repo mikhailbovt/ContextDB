@@ -368,7 +368,10 @@ no worker. Embedded hosts can now start a background maintenance service with fr
 workspace-bound host authentication, verified request discovery and bounded steps.
 It resumes after restart, discovers later requests and reports revoked access or
 missing inputs while capture continues. Shutdown cancels work and joins the thread.
-Worker replacement/disposal, cross-workspace reassignment and CLI/MCP encrypted
+Completed archive workers can be permanently sealed; later requests reserve a
+fresh instance from the exact seal and prior clean input. Bootstrap and import
+uncertainty recover that same generation while preserving old jobs and copy
+obligations. Worker disposal, cross-workspace reassignment and CLI/MCP encrypted
 profile provisioning remain open.
 Owned and mixed assertion keys can now be retired after fresh native-use and
 complete archive-preservation verification. Mixed selections require classified

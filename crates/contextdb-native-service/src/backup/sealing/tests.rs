@@ -130,14 +130,18 @@ fn archive_worker_seal_survives_lost_ack_and_cold_reopen_without_erasing_copy_hi
         .expect("later request");
     let root = f.root.path().join("managed");
     let mut executor = NativeArchiveCleanup::new(&f.native, &root).expect("controller");
-    assert!(
-        matches!(executor.advance(&f.input.context, &next, &mut budget()).expect("explicit sealed obligation").action,
-        Some(NativeArchiveCleanupAction::WorkerSealed { seal: current, .. }) if current == seal)
-    );
-    assert!(
-        !root.exists(),
-        "sealed history cannot bootstrap another worker"
-    );
+    let Some(NativeArchiveCleanupAction::Started { job }) = executor
+        .advance(&f.input.context, &next, &mut budget())
+        .expect("verified replacement")
+        .action
+    else {
+        panic!("expected a replacement job")
+    };
+    assert_eq!(job.binding.worker_seal, Some(seal.clone()));
+    assert_ne!(job.binding.worker_instance, seal.worker_instance);
+    assert!(!job.initialized);
+    assert!(root.is_dir());
+    assert!(f.root.path().join("worker").is_dir());
 }
 
 #[test]

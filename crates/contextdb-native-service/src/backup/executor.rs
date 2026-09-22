@@ -135,7 +135,7 @@ pub struct NativeArchiveCleanupAdvance {
     pub action: Option<NativeArchiveCleanupAction>,
 }
 
-/// Host-owned archive executor with a stable directory per authority and original.
+/// Host-owned archive executor with stable directories per original and generation.
 /// Keeps one worker open, advances round-robin and never disposes an instance.
 /// Recreate the controller with the same root after restart. Paths are locators;
 /// independently retained jobs and native-use records remain authoritative.
@@ -249,11 +249,28 @@ impl<'a> NativeArchiveCleanup<'a> {
             .iter()
             .rev()
             .find(|job| job.binding.original == selected.original);
-        let instance = previous.map_or_else(
+        let mut instance = previous.map_or_else(
             || managed_instance(keys.authority_id(), &selected.original.archive_digest),
             |job| job.binding.worker_instance,
         );
-        let state = keys.managed_instance_state(instance, budget)?;
+        let mut state = keys.managed_instance_state(instance, budget)?;
+        let mut replacement = false;
+        if let Some(previous) = previous
+            && state == crate::encryption::ManagedInstanceState::Sealed
+            && matches!(selected.state, NativeArchiveCleanupState::Ready { .. })
+        {
+            let seal = keys
+                .backup_worker_seal(instance, budget)?
+                .ok_or_else(|| integrity("sealed archive worker lost its receipt"))?;
+            if seal.job != previous.receipt {
+                return Err(integrity(
+                    "archive replacement requires the latest sealed job",
+                ));
+            }
+            instance = managed_replacement_instance(&seal);
+            state = keys.managed_instance_state(instance, budget)?;
+            replacement = true;
+        }
         if state == crate::encryption::ManagedInstanceState::Sealed {
             return advance_response(
                 before,
@@ -266,10 +283,17 @@ impl<'a> NativeArchiveCleanup<'a> {
                 budget,
             );
         }
-        let path = self.worker_path(&selected.original, budget)?;
-        if !path.is_dir()
-            && (previous.is_some() || state == crate::encryption::ManagedInstanceState::Active)
-        {
+        let bound = catalog
+            .jobs
+            .iter()
+            .any(|job| job.binding.worker_instance == instance);
+        let generation = (replacement
+            || catalog.jobs.iter().any(|job| {
+                job.binding.worker_instance == instance && job.binding.worker_seal.is_some()
+            }))
+        .then_some(instance);
+        let path = self.worker_path(&selected.original, generation, budget)?;
+        if !path.is_dir() && (bound || state == crate::encryption::ManagedInstanceState::Active) {
             return advance_response(
                 before,
                 Some(NativeArchiveCleanupAction::AwaitingWorker {
@@ -352,6 +376,18 @@ fn managed_instance(authority: uuid::Uuid, archive: &str) -> uuid::Uuid {
     hash.update(b"contextdb/managed-archive-worker/v1\0");
     hash.update(authority.as_bytes());
     hash.update(archive.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&hash.finalize().as_bytes()[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes)
+}
+
+fn managed_replacement_instance(seal: &crate::NativeBackupWorkerSeal) -> uuid::Uuid {
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"contextdb/managed-archive-replacement/v1\0");
+    hash.update(seal.authority_id.as_bytes());
+    hash.update(seal.digest.as_bytes());
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&hash.finalize().as_bytes()[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x80;

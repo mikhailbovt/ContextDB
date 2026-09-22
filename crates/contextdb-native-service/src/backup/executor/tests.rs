@@ -6,6 +6,8 @@ use contextdb_service::{CapturePort, CognitiveMemoryService};
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
+mod replacement;
+
 fn issued(f: &Fixture, retain: bool) -> NativeBackupRegistration {
     let backup = f
         .native

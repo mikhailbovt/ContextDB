@@ -2,6 +2,8 @@ use super::*;
 use crate::backup::jobs::tests::{cold, finish, prepared};
 use crate::retention::keys::witness::tests::budget;
 
+mod replacement;
+
 #[test]
 fn archive_job_start_and_finish_sync_uncertainty_reuses_exact_acceptance() {
     let (f, worker, _, original) = prepared();

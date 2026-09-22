@@ -4,6 +4,7 @@ impl NativeArchiveCleanup<'_> {
     pub(super) fn worker_path(
         &self,
         original: &NativeBackupRegistration,
+        generation: Option<uuid::Uuid>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<PathBuf> {
         budget.check().map_err(crate::raw_index::budget_error)?;
@@ -20,7 +21,13 @@ impl NativeArchiveCleanup<'_> {
         std::fs::create_dir_all(&authority)
             .map_err(|_| integrity("archive worker namespace cannot be created"))?;
         budget.check().map_err(crate::raw_index::budget_error)?;
-        let path = authority.join(&original.archive_digest);
+        // Generations are siblings: later disposal of a sealed directory must not
+        // contain its successor. The identity comes from retained job authority.
+        let name = generation.map_or_else(
+            || original.archive_digest.clone(),
+            |instance| format!("{}.{instance}", original.archive_digest),
+        );
+        let path = authority.join(name);
         self.require_worker_path(&path)?;
         Ok(path)
     }

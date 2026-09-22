@@ -116,6 +116,17 @@ impl NativeCustodyKeys {
             job.receipt.sequence,
         )
         .map_err(storage_error)?;
+        if let Some(seal) = &binding.worker_seal {
+            budget.charge(1, 0).map_err(budget_error)?;
+            if self
+                .worker_seal_at(snapshot, seal.worker_instance)
+                .map_err(storage_error)?
+                .as_ref()
+                != Some(seal)
+            {
+                return Err(integrity("archive replacement worker seal differs"));
+            }
+        }
         let mut source = self
             .find_contents(snapshot, &binding.original.archive_digest, budget)?
             .ok_or_else(|| integrity("archive job original contents are absent"))?
@@ -252,14 +263,28 @@ pub(super) fn require_transition(
             ));
         }
     } else {
-        if job.terminal.is_some() || job.initialized != original.is_some() {
+        if job.terminal.is_some()
+            || job.initialized != (original.is_some() && binding.worker_seal.is_none())
+        {
             return Err(integrity("archive job lacks its accepted start"));
         }
         if let Some(original) = original {
             let (source, path, artifact) = original.next_source()?;
-            if binding.restore_at.is_some()
+            let valid_worker = match &binding.worker_seal {
+                Some(seal) => {
+                    seal.job == original.receipt
+                        && seal.worker_instance == original.binding.worker_instance
+                        && binding.worker_instance != seal.worker_instance
+                        && !workers.contains_key(&binding.worker_instance)
+                        && binding.restore_at.is_some()
+                }
+                None => {
+                    binding.worker_instance == original.binding.worker_instance
+                        && binding.restore_at.is_none()
+                }
+            };
+            if !valid_worker
                 || binding.original != original.binding.original
-                || binding.worker_instance != original.binding.worker_instance
                 || binding.workspace_digest != original.binding.workspace_digest
                 || binding.request.authority_id != original.binding.request.authority_id
                 || binding.source != source
@@ -267,10 +292,10 @@ pub(super) fn require_transition(
                 || binding.source_artifact != artifact
             {
                 return Err(integrity(
-                    "archive job does not continue its prior worker and result",
+                    "archive job does not continue its prior result and verified worker",
                 ));
             }
-        } else if binding.restore_at.is_none() {
+        } else if binding.restore_at.is_none() || binding.worker_seal.is_some() {
             return Err(integrity(
                 "initial archive job lacks its pristine import binding",
             ));

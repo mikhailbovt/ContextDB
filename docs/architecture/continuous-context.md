@@ -641,8 +641,18 @@ admission, new jobs and commits staged before sealing. Exact retries and
 after lost acknowledgement or cold restart. Existing copy history, admitted
 snapshots, directory contents and key obligations remain; this is no erasure claim.
 The required v4 journal extension makes older readers fail closed on the unknown
-operation. Maintenance reports `WorkerSealed` when further work needs a verified
-replacement; it does not recreate or delete the directory.
+operation.
+
+A later request can replace a sealed worker with a fresh pristine instance. Its
+first job retains the exact prior seal and completed job, unchanged workspace and
+removal authority, and the prior result's complete readable input. This acceptance
+reserves the input keys through finish Sync. Interrupted registration, job admission
+and import acknowledgement recover the same identity and exact bytes. Previously
+used instances, unsealed lost workers and unrelated input cannot substitute for this
+transition. The controller derives a stable generation from the retained seal and
+uses a sibling directory; later jobs on that generation reuse it without import.
+Old jobs, copy obligations and sealed directories remain. Replacement does not
+authorize disposal or physical erasure.
 
 Embedded hosts can enable `NativeArchiveMaintenance::start` with the encrypted
 owner, stable worker root, explicit workspace list and a host authentication
@@ -688,7 +698,7 @@ If its keys are later retired, supply the accepted path to a usable successor.
 Unclassified records and unretained branch descendants
 require explicit reconciliation. Discovery rescans remain budgeted administrative
 work. The inventory reports identify remaining replacement obligations. Worker
-replacement/disposal, cross-workspace reassignment and physical/external-copy
+disposal, cross-workspace reassignment and physical/external-copy
 dispositions remain open. Maintenance observations cover one request at a time;
 they do not complete global deletion or reopen disclosure.
 
