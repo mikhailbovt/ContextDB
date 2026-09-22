@@ -110,8 +110,12 @@ impl NativeCustodyKeys {
             return Err(integrity("archive job worker or ancestry bound differs"));
         }
         budget.charge(1, 0).map_err(budget_error)?;
-        self.require_registered_instance(snapshot, binding.worker_instance)
-            .map_err(storage_error)?;
+        self.require_worker_job_before_seal(
+            snapshot,
+            binding.worker_instance,
+            job.receipt.sequence,
+        )
+        .map_err(storage_error)?;
         let mut source = self
             .find_contents(snapshot, &binding.original.archive_digest, budget)?
             .ok_or_else(|| integrity("archive job original contents are absent"))?
@@ -180,6 +184,47 @@ impl NativeCustodyKeys {
             return Err(integrity("archive job control exceeds 256 KiB"));
         }
         self.open_backup_record(key, &bytes).map_err(storage_error)
+    }
+
+    // Native-use replay calls this without recursively replaying worker state.
+    // The complete backup verifier separately checks every job dependency and
+    // rejects any later job on the sealed instance.
+    pub(in crate::encryption::keys) fn verify_worker_seal_job<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        receipt: &NativeBackupCleanupJobReceipt,
+        instance: Uuid,
+    ) -> contextdb_storage::Result<()> {
+        receipt.validate(self)?;
+        let head = self.backup_head(snapshot)?;
+        if head
+            .jobs
+            .as_ref()
+            .is_none_or(|last| receipt.sequence > last.sequence)
+        {
+            return Err(failure("worker seal references an unretained job"));
+        }
+        let key = event_key(receipt.sequence);
+        let bytes = snapshot
+            .get(&self.rows, &key)?
+            .ok_or_else(|| failure("worker seal job is absent"))?;
+        if bytes.len() > MAX_EVENT_BYTES + 64 {
+            return Err(failure("worker seal job exceeds its control bound"));
+        }
+        let event: JobEvent = self.open_backup_record(&key, &bytes)?;
+        if event.value.receipt != *receipt
+            || event
+                .commitment()
+                .map_err(|_| failure("worker seal job cannot be verified"))?
+                != receipt.digest
+            || event.value.binding.worker_instance != instance
+            || !event.value.initialized
+            || event.value.terminal.is_none()
+            || event.value.terminal_archive_digest.is_none()
+        {
+            return Err(failure("worker seal requires its exact completed job"));
+        }
+        Ok(())
     }
 }
 

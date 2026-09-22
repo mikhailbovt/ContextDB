@@ -31,6 +31,7 @@ pub(crate) mod preservation;
 mod recovery;
 pub(crate) mod replacements;
 mod routing;
+pub(crate) mod sealing;
 pub use cleanup::{NativeBackupCleanupProgress, NativeBackupCleanupStage};
 pub use executor::{
     NativeArchiveCleanup, NativeArchiveCleanupAction, NativeArchiveCleanupAdvance,

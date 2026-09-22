@@ -11,22 +11,27 @@ mod inventory;
 mod journal;
 mod publication;
 mod reads;
+mod sealing;
 pub use catalog::{
     NativeKeyUseCatalogPage, NativeKeyUseChangesPage, NativeKeyUseOutcome, NativeKeyUseReceipt,
     NativeKeyUseTransaction,
 };
 pub use inventory::{NativeKeyUseAddressInventory, NativeKeyUseInventory, NativeKeyUseTransition};
+pub use sealing::NativeBackupWorkerSeal;
+#[cfg(test)]
+pub(crate) use sealing::{AFTER_SEAL_SYNC, BEFORE_SEAL_SYNC};
 #[cfg(test)]
 mod tests;
 
 pub(in crate::encryption) use publication::UsePublication;
 
-/// Independently verified bootstrap state, never inferred from directory contents.
+/// Independently verified instance state, never inferred from directory contents.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ManagedInstanceState {
     Missing,
     RegisteredOnly,
     Active,
+    Sealed,
 }
 
 pub(super) const HEAD: &[u8] = b"use/head";
@@ -62,12 +67,22 @@ impl NativeCustodyKeys {
         })
     }
 
-    pub(super) fn require_registered_instance<S: ReadSnapshot>(
+    pub(super) fn require_worker_job_before_seal<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         instance: Uuid,
+        sequence: u64,
     ) -> contextdb_storage::Result<()> {
-        self.use_state(snapshot, instance).map(|_| ())
+        let state = self.use_state(snapshot, instance)?;
+        if state
+            .sealed
+            .is_some_and(|seal| sequence > seal.job.sequence)
+        {
+            return Err(failure(
+                "archive job was accepted after its worker was sealed",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -168,6 +183,8 @@ struct InstanceState {
     accepted: UseCheckpoint,
     marker: LocalMarker,
     pending: Option<PendingUse>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sealed: Option<NativeBackupWorkerSeal>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -188,6 +205,10 @@ enum UseOperation {
         prepared: UseCheckpoint,
         instance: Uuid,
         committed: bool,
+    },
+    Seal {
+        previous: LocalMarker,
+        job: NativeBackupCleanupJobReceipt,
     },
 }
 

@@ -40,9 +40,16 @@ fn open(f: &Fixture, name: &str) -> NativeService {
 }
 
 pub(crate) fn cold(f: Fixture, worker: NativeService) -> (Fixture, NativeService) {
+    drop(worker);
+    let f = cold_owner(f);
+    let worker = open(&f, "worker");
+    (f, worker)
+}
+
+pub(crate) fn cold_owner(f: Fixture) -> Fixture {
     let keys_id = f.keys.authority_id();
     let ledger_id = f.ledger.authority_id();
-    drop((worker, f.native, f.keys, f.ledger));
+    drop((f.native, f.keys, f.ledger));
     let keys = NativeCustodyKeys::open(
         f.root.path().join("keys"),
         "primary-decisions",
@@ -63,7 +70,7 @@ pub(crate) fn cold(f: Fixture, worker: NativeService) -> (Fixture, NativeService
         )
         .expect("cold primary"),
     );
-    let f = Fixture {
+    Fixture {
         root: f.root,
         native,
         keys,
@@ -71,9 +78,7 @@ pub(crate) fn cold(f: Fixture, worker: NativeService) -> (Fixture, NativeService
         input: f.input,
         removal: f.removal,
         witness: f.witness,
-    };
-    let worker = open(&f, "worker");
-    (f, worker)
+    }
 }
 
 pub(crate) fn finish(

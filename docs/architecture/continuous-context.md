@@ -632,6 +632,18 @@ an interrupted empty bootstrap. Missing later history requires the original work
 another directory cannot silently create a new instance. Paths remain separate
 from primary and authority trees, and exact identity is checked before reconciliation.
 
+`seal_removal_backup_worker` permanently fences a completed worker before its
+future replacement or disposal. It requires the latest completed job, unchanged
+native archive bytes, reconciled native use and a complete currently readable
+result. The independent native-use `Seal` event rejects reopen, new snapshot
+admission, new jobs and commits staged before sealing. Exact retries and
+`read_removal_backup_worker_seal` recover the receipt through an authorized owner
+after lost acknowledgement or cold restart. Existing copy history, admitted
+snapshots, directory contents and key obligations remain; this is no erasure claim.
+The required v4 journal extension makes older readers fail closed on the unknown
+operation. Maintenance reports `WorkerSealed` when further work needs a verified
+replacement; it does not recreate or delete the directory.
+
 Embedded hosts can enable `NativeArchiveMaintenance::start` with the encrypted
 owner, stable worker root, explicit workspace list and a host authentication
 adapter. The owned background thread obtains fresh Admin authentication for the

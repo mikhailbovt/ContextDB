@@ -58,6 +58,9 @@ impl NativeCustodyKeys {
         let authority = self.engine.begin_read(SnapshotSelector::Latest)?;
         let head = self.use_head(&authority)?;
         let state = self.use_state(&authority, selected.instance)?;
+        if state.sealed.is_some() {
+            return Err(failure("native archive worker is permanently sealed"));
+        }
         let current = self.read_local_marker(&storage.begin_read(SnapshotSelector::Latest)?)?;
         if current.instance != selected.instance
             || current.native_sequence < selected.native_sequence

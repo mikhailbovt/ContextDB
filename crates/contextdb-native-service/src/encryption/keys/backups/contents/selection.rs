@@ -187,7 +187,7 @@ impl NativeCustodyKeys {
         self.select_backup_keys_at(&snapshot, selected, Some((workspace, request)), budget)
     }
 
-    pub(in crate::encryption::keys::backups) fn selected_backup_keys_at<S: ReadSnapshot>(
+    pub(in crate::encryption::keys) fn selected_backup_keys_at<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         selected: &BTreeMap<Uuid, String>,

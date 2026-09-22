@@ -114,6 +114,14 @@ pub enum NativeArchiveCleanupAction {
         /// Required native instance.
         worker_instance: uuid::Uuid,
     },
+    /// This instance is permanently fenced. Its retained copies still exist and
+    /// further work requires a separately verified replacement, not an empty path.
+    WorkerSealed {
+        /// Original whose worker can no longer accept work.
+        original: NativeBackupRegistration,
+        /// Independently retained publication fence.
+        seal: crate::NativeBackupWorkerSeal,
+    },
 }
 
 /// The inspected frontier precedes the action. Reinspect to assess new coverage;
@@ -246,6 +254,18 @@ impl<'a> NativeArchiveCleanup<'a> {
             |job| job.binding.worker_instance,
         );
         let state = keys.managed_instance_state(instance, budget)?;
+        if state == crate::encryption::ManagedInstanceState::Sealed {
+            return advance_response(
+                before,
+                Some(NativeArchiveCleanupAction::WorkerSealed {
+                    original: selected.original,
+                    seal: keys
+                        .backup_worker_seal(instance, budget)?
+                        .ok_or_else(|| integrity("sealed archive worker lost its receipt"))?,
+                }),
+                budget,
+            );
+        }
         let path = self.worker_path(&selected.original, budget)?;
         if !path.is_dir()
             && (previous.is_some() || state == crate::encryption::ManagedInstanceState::Active)

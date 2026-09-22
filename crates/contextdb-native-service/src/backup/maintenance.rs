@@ -102,6 +102,15 @@ pub enum NativeArchiveMaintenanceOperation {
         /// Identity that cannot be replaced by an empty directory.
         worker_instance: uuid::Uuid,
     },
+    /// A permanent fence requires verified worker replacement; no directory is removed.
+    WorkerSealed {
+        /// Exact original issuance.
+        original_sequence: u64,
+        /// Fenced native identity.
+        worker_instance: uuid::Uuid,
+        /// Seal event in the current custody authority's native-use journal.
+        seal_sequence: u64,
+    },
 }
 
 /// Latest bounded observation for a workspace. One request is inspected per tick;

@@ -35,6 +35,7 @@ impl UsePublication<'_> {
                 accepted,
                 marker: marker.clone(),
                 pending: None,
+                sealed: None,
             },
         )?;
         synchronized(tx.commit(Durability::Sync)?)?;
@@ -62,6 +63,11 @@ impl UsePublication<'_> {
                 "managed archive worker already has native history; recover its original directory",
                 false,
             )),
+            ManagedInstanceState::Sealed => Err(ServiceError::new(
+                ErrorCode::EvidenceRequired,
+                "managed archive worker is sealed; a verified replacement is required",
+                false,
+            )),
         }
     }
 
@@ -74,6 +80,9 @@ impl UsePublication<'_> {
         let authority = self.keys.engine.begin_read(SnapshotSelector::Latest)?;
         self.keys.use_head(&authority)?;
         let state = self.keys.use_state(&authority, marker.instance)?;
+        if state.sealed.is_some() {
+            return Err(failure("native archive worker is permanently sealed"));
+        }
         let Some(pending) = &state.pending else {
             if marker != state.marker {
                 return Err(failure(
@@ -112,7 +121,7 @@ impl UsePublication<'_> {
         let mut tx = self.keys.engine.begin_write()?;
         let mut head = self.keys.use_head(&tx)?;
         let mut state = self.keys.use_state(&tx, previous.instance)?;
-        if state.marker != *previous || state.pending.is_some() {
+        if state.marker != *previous || state.pending.is_some() || state.sealed.is_some() {
             return Err(failure(
                 "native key-use preparation requires its reconciled base",
             ));

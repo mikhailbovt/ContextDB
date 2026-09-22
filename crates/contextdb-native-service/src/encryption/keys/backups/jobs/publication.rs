@@ -67,6 +67,17 @@ impl NativeCustodyKeys {
                 true,
             ));
         }
+        if self
+            .worker_seal_at(&tx, value.binding.worker_instance)
+            .map_err(storage_error)?
+            .is_some()
+        {
+            return Err(ServiceError::new(
+                ErrorCode::EvidenceRequired,
+                "archive worker is sealed; a verified replacement is required",
+                false,
+            ));
+        }
         let original = report.jobs.iter().rev().find(|job| {
             job.binding.original.archive_digest == value.binding.original.archive_digest
         });

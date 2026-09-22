@@ -84,6 +84,7 @@ impl NativeCustodyKeys {
                 if registered != instance
                     || state.revision != 1
                     || state.pending.is_some()
+                    || state.sealed.is_some()
                     || state.marker.native_sequence != 1
                     || state.marker.usage.is_some()
                 {
@@ -91,7 +92,8 @@ impl NativeCustodyKeys {
                 }
             }
             UseOperation::Prepare { preparation } => {
-                if state.marker != preparation.previous
+                if state.sealed.is_some()
+                    || state.marker != preparation.previous
                     || state.pending
                         != Some(PendingUse {
                             preparation,
@@ -128,6 +130,7 @@ impl NativeCustodyKeys {
                     || preparation_event.checkpoint != prepared
                     || outcome != accepted
                     || state.pending.is_some()
+                    || state.sealed.is_some()
                     || state.marker != expected
                 {
                     return Err(failure("native key-use completed state differs"));
@@ -137,6 +140,23 @@ impl NativeCustodyKeys {
                 return Err(failure(
                     "native key-use instance state references a transition page",
                 ));
+            }
+            UseOperation::Seal { previous, job } => {
+                self.verify_worker_seal_job(snapshot, &job, instance)?;
+                if state.pending.is_some()
+                    || state.marker != previous
+                    || state.sealed
+                        != Some(sealing::receipt(
+                            self.authority_id(),
+                            &accepted,
+                            &previous,
+                            &job,
+                        )?)
+                {
+                    return Err(failure(
+                        "native worker seal differs from retained acceptance",
+                    ));
+                }
             }
         }
         let prefix = format!("use/instance/{instance}/");
@@ -356,6 +376,7 @@ impl NativeCustodyKeys {
                                         usage: None,
                                     },
                                     pending: None,
+                                    sealed: None,
                                 },
                             )
                             .is_some()
@@ -390,6 +411,7 @@ impl NativeCustodyKeys {
                     if preparation.transaction.is_nil()
                         || !transactions.insert(preparation.transaction)
                         || state.pending.is_some()
+                        || state.sealed.is_some()
                         || preparation.previous != state.marker
                         || preparation.pages != unclaimed_pages
                         || transaction.is_some_and(|prior| prior != preparation.transaction)
@@ -458,6 +480,35 @@ impl NativeCustodyKeys {
                         state.marker = pending.expected()?;
                     }
                     visit(UseVisit::Outcome(&pending, committed, &event.checkpoint))?;
+                    advance_state(state, &event.checkpoint)?;
+                    references.insert(
+                        instance_key(instance, state.revision),
+                        event.checkpoint.clone(),
+                    );
+                }
+                UseOperation::Seal { previous, job } => {
+                    let instance = previous.instance;
+                    let state = states
+                        .get_mut(&instance)
+                        .ok_or_else(|| failure("native worker seal has no registered instance"))?;
+                    if unclaimed_pages != 0
+                        || state.pending.is_some()
+                        || state.sealed.is_some()
+                        || state.marker != previous
+                    {
+                        return Err(failure(
+                            "native worker seal requires its reconciled current state",
+                        ));
+                    }
+                    self.verify_worker_seal_job(snapshot, &job, instance)?;
+                    state.sealed = Some(sealing::receipt(
+                        self.authority_id(),
+                        &event.checkpoint,
+                        &previous,
+                        &job,
+                    )?);
+                    // Sealing disables future access; it removes no ciphertext,
+                    // acknowledged use, pending-copy history or key obligation.
                     advance_state(state, &event.checkpoint)?;
                     references.insert(
                         instance_key(instance, state.revision),

@@ -136,6 +136,13 @@ fn tick(
             original_sequence: original.sequence,
             worker_instance,
         },
+        NativeArchiveCleanupAction::WorkerSealed { original, seal } => {
+            NativeArchiveMaintenanceOperation::WorkerSealed {
+                original_sequence: original.sequence,
+                worker_instance: seal.worker_instance,
+                seal_sequence: seal.sequence,
+            }
+        }
     });
     Ok(NativeArchiveMaintenanceOutcome::Inspected {
         requests: catalog.requests.len() as u64,

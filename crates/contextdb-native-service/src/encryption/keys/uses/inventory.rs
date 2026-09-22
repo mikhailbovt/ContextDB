@@ -55,6 +55,23 @@ pub struct NativeKeyUseInventory {
 }
 
 impl NativeCustodyKeys {
+    pub(crate) fn backup_worker_seal(
+        &self,
+        instance: Uuid,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Option<NativeBackupWorkerSeal>> {
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(crate::storage_error)?;
+        let view = BudgetedSnapshot::new(snapshot, budget);
+        let result = (|| {
+            self.verify_native_use(&view)?;
+            self.worker_seal_at(&view, instance)
+        })();
+        view.complete(result)
+    }
+
     pub(crate) fn managed_instance_state(
         &self,
         instance: Uuid,
@@ -76,17 +93,17 @@ impl NativeCustodyKeys {
                 return Ok(ManagedInstanceState::Missing);
             }
             let state = self.use_state(&view, instance)?;
-            Ok(
-                if state.revision == 1
-                    && state.marker.native_sequence == 1
-                    && state.marker.usage.is_none()
-                    && state.pending.is_none()
-                {
-                    ManagedInstanceState::RegisteredOnly
-                } else {
-                    ManagedInstanceState::Active
-                },
-            )
+            Ok(if state.sealed.is_some() {
+                ManagedInstanceState::Sealed
+            } else if state.revision == 1
+                && state.marker.native_sequence == 1
+                && state.marker.usage.is_none()
+                && state.pending.is_none()
+            {
+                ManagedInstanceState::RegisteredOnly
+            } else {
+                ManagedInstanceState::Active
+            })
         })();
         view.complete(result)
     }
