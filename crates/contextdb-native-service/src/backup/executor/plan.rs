@@ -121,10 +121,11 @@ fn entries(
             }
         }
     }
+    let clean = coverage::CleanCoverage::new(catalog, replacements, clean, budget)?;
     let routes = routing::ArchiveRoutes::new(
         catalog,
         replacements,
-        |sequence| clean.contains_key(&sequence),
+        |sequence| clean.contains(sequence),
         budget,
     )?;
     let mut result = Vec::new();
@@ -152,12 +153,12 @@ fn entries(
                 classify(previous_input(&by_archive, prior)?)
             }
         } else if let Some(route) = route.filter(|route| route.artifact.is_some()) {
+            let (job, clean_path) =
+                clean.proof(route.path.target_sequence, &mut report_bytes, budget)?;
             NativeArchiveCleanupState::Covered {
-                job: (*clean
-                    .get(&route.path.target_sequence)
-                    .ok_or_else(|| integrity("clean archive job disappeared"))?)
-                .clone(),
+                job,
                 path: route.path,
+                clean_path,
                 artifact: route
                     .artifact
                     .ok_or_else(|| integrity("clean archive artifact disappeared"))?,

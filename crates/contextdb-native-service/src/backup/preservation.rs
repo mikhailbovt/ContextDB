@@ -170,7 +170,7 @@ pub(crate) fn inventory(
 }
 
 impl crate::NativeService {
-    // Earlier authorized removals remain usable after their old keys are refused.
+    // Authorized removals remain usable after their old keys are refused.
     // This lets A -> B (request 1) -> C (request 2) preserve all permitted data
     // without decrypting A again. The custody seal is not substitute authority
     // for an independently retained request in the currently supplied ledger.

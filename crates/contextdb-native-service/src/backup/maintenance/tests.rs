@@ -167,6 +167,14 @@ fn archive_maintenance_automatically_resumes_and_discovers_later_requests_on_the
         )
         .expect("request while host runs");
     wait(&host, |status| is_covered(status, next.sequence));
+    let older = wait(&host, |status| is_covered(status, f.removal.sequence));
+    assert!(
+        older
+            .workspaces
+            .values()
+            .any(|entry| matches!(&entry.outcome,
+        NativeArchiveMaintenanceOutcome::Inspected { backlog, .. } if backlog.covered == 3))
+    );
     assert!(!host.shutdown().expect("joined after work").running);
     let f = cold(f);
     let (catalog, _) = f

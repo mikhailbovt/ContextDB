@@ -619,6 +619,10 @@ time. Configure a stable absolute root, then call `advance` from host maintenanc
 It resumes jobs in round-robin order and links accepted input/output aliases to
 their existing owner, including across successive requests. Final coverage requires
 an exact completed job, authorized ancestry and currently readable retained bytes.
+Later authorized replacements preserve earlier cleanup. Coverage reports both the
+original-to-target path and the completed-job-result-to-target `clean_path`, so a
+later output stays covered without claiming the old job inspected it. Unrelated
+archives cannot inherit cleanup from issuance order or native commit alone.
 Unknown inputs, busy owners and unavailable preservation remain explicit; no
 eligible action can mean blocked work. Returned inventory precedes the action.
 Worker identities are deterministic within the custody authority and original.

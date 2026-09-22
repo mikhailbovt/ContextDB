@@ -253,6 +253,173 @@ fn archive_executor_reopens_two_workers_and_reuses_successor_aliases_across_requ
 }
 
 #[test]
+fn archive_executor_keeps_older_requests_covered_after_later_cleanup_outputs() {
+    let f = fixture();
+    let original = issued(&f, true);
+    let root = f.root.path().join("workers");
+    let mut executor = NativeArchiveCleanup::new(&f.native, &root).expect("controller");
+    finish(&f, &mut executor, &f.removal);
+    let next = f
+        .native
+        .request_original_removal(
+            &f.input.context,
+            &BTreeSet::from([request(2, "").event.event_id]),
+            "later",
+            &mut budget(),
+        )
+        .expect("later request");
+    finish(&f, &mut executor, &next);
+    drop(executor);
+    let f = cold(f);
+    let mut executor = NativeArchiveCleanup::new(&f.native, &root).expect("cold controller");
+    let older = executor
+        .inspect(&f.input.context, &f.removal, &mut budget())
+        .expect("older coverage");
+    assert_eq!(older.archives.len(), 3);
+    assert!(
+        older
+            .archives
+            .iter()
+            .all(|entry| matches!(entry.state, NativeArchiveCleanupState::Covered { .. })),
+        "{older:?}"
+    );
+    let (catalog, replacements) = f
+        .keys
+        .selected_backup_keys_for_request(
+            &BTreeMap::new(),
+            &digest_bytes(f.input.context.request.workspace_id.as_bytes()),
+            &f.removal,
+            &mut budget(),
+        )
+        .expect("cold custody evidence");
+    assert_eq!(catalog.jobs.len(), 2);
+    let first_job = &catalog.jobs[0];
+    let later_job = &catalog.jobs[1];
+    assert_eq!(first_job.binding.request, f.removal);
+    assert_eq!(later_job.binding.request, next);
+    let (anchor, _, _) = first_job.next_source().expect("old cleanup anchor");
+    let (target, _, artifact) = later_job.next_source().expect("later endpoint");
+    let later_proof = replacements
+        .iter()
+        .find(|proof| proof.request == next)
+        .expect("independently authorized later edge");
+    assert_eq!(later_proof.source, anchor);
+    assert_eq!(later_proof.target, target);
+    let newest = older
+        .archives
+        .iter()
+        .find(|entry| entry.original == target.registration)
+        .expect("later output");
+    let NativeArchiveCleanupState::Covered {
+        job,
+        path,
+        clean_path,
+        artifact: readable,
+    } = &newest.state
+    else {
+        panic!("older cleanup must cover the later output")
+    };
+    assert_eq!(*job, first_job.receipt);
+    assert_eq!(path.target_sequence, target.registration.sequence);
+    assert!(path.replacements.is_empty());
+    assert_eq!(clean_path.target_sequence, path.target_sequence);
+    assert_eq!(
+        clean_path.replacements.as_slice(),
+        std::slice::from_ref(&later_proof.receipt)
+    );
+    assert_eq!(*readable, artifact);
+    assert!(
+        executor
+            .advance(&f.input.context, &f.removal, &mut budget())
+            .expect("older request stays settled")
+            .action
+            .is_none()
+    );
+    let newer = executor
+        .inspect(&f.input.context, &next, &mut budget())
+        .expect("newer request stays settled");
+    assert!(newer.archives.iter().all(|entry| matches!(&entry.state,
+        NativeArchiveCleanupState::Covered { job, clean_path, .. }
+        if job == &later_job.receipt && clean_path.replacements.is_empty())));
+
+    // Routing-only availability variations; these do not claim key retirement.
+    let mut unavailable = catalog.clone();
+    for archive in &mut unavailable.archives {
+        archive.keys_available = archive.registration == target.registration;
+    }
+    let seeds = BTreeMap::from([(anchor.registration.sequence, &first_job.receipt)]);
+    let clean =
+        coverage::CleanCoverage::new(&unavailable, &replacements, seeds.clone(), &mut budget())
+            .expect("historical cleanup survives unavailable anchor keys");
+    let routes = routing::ArchiveRoutes::new(
+        &unavailable,
+        &replacements,
+        |sequence| clean.contains(sequence),
+        &mut budget(),
+    )
+    .expect("readable final routing");
+    let mut bytes = 0;
+    let routed = routes
+        .best(original.sequence, &mut bytes, &mut budget())
+        .expect("bounded route")
+        .expect("later readable input");
+    assert_eq!(routed.path.target_sequence, target.registration.sequence);
+    assert_eq!(routed.path.replacements.len(), 2);
+    assert_eq!(routed.artifact, Some(artifact));
+    let (job, forwarded) = clean
+        .proof(routed.path.target_sequence, &mut bytes, &mut budget())
+        .expect("independent cleanup ancestry");
+    assert_eq!(job, first_job.receipt);
+    assert_eq!(&forwarded, clean_path);
+    assert!(
+        clean
+            .proof(
+                routed.path.target_sequence,
+                &mut (32 * 1024 * 1024),
+                &mut budget(),
+            )
+            .is_err(),
+        "cleanup ancestry shares the whole-report size bound"
+    );
+    let empty =
+        coverage::CleanCoverage::new(&catalog, &replacements, BTreeMap::new(), &mut budget())
+            .expect("no terminal job");
+    assert!(!empty.contains(target.registration.sequence));
+    let mut invalid = replacements.clone();
+    invalid[1].source.registration.archive_digest = "ab".repeat(32);
+    assert!(
+        coverage::CleanCoverage::new(&catalog, &invalid, seeds.clone(), &mut budget()).is_err()
+    );
+    let mut invalid = replacements.clone();
+    invalid[1].target = invalid[1].source.clone();
+    assert!(coverage::CleanCoverage::new(&catalog, &invalid, seeds, &mut budget()).is_err());
+
+    // Higher issuance and native commit alone cannot carry earlier cleanup.
+    for sequence in 3..=target.registration.native_commit + 1 {
+        f.native
+            .append_event(request(sequence, "unrelated primary capture"))
+            .expect("independent capture");
+    }
+    let unrelated = issued(&f, true);
+    assert!(unrelated.sequence > target.registration.sequence);
+    assert!(unrelated.native_commit > target.registration.native_commit);
+    for request in [&f.removal, &next] {
+        let report = executor
+            .inspect(&f.input.context, request, &mut budget())
+            .expect("coverage with unrelated later archive");
+        assert!(matches!(
+            report
+                .archives
+                .iter()
+                .find(|entry| entry.original == unrelated)
+                .expect("unrelated obligation")
+                .state,
+            NativeArchiveCleanupState::Ready { .. }
+        ));
+    }
+}
+
+#[test]
 fn archive_executor_recovers_registration_only_bootstrap_without_another_identity() {
     let f = fixture();
     let original = issued(&f, true);

@@ -10,6 +10,7 @@ use contextdb_service::AuthenticatedRequestContext;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod coverage;
 mod paths;
 mod plan;
 #[cfg(test)]
@@ -22,10 +23,14 @@ mod tests;
 pub enum NativeArchiveCleanupState {
     /// An exact completed job and authorized ancestry reach a readable clean input.
     Covered {
-        /// Independently accepted terminal job proving this endpoint's cleanup.
+        /// Independently accepted terminal job anchoring this request's cleanup.
         job: NativeBackupCleanupJobReceipt,
         /// Exact source-to-clean-target ancestry, empty for the endpoint itself.
         path: NativeBackupPreservationPath,
+        /// Exact ancestry from the job's clean result to the same readable target.
+        /// Empty when the job itself produced the target; later edges carry its
+        /// cleanup forward without claiming that the job inspected those outputs.
+        clean_path: NativeBackupPreservationPath,
         /// Complete currently readable artifact at the enclosing frontier.
         artifact: crate::NativeBackupArtifactReceipt,
     },
