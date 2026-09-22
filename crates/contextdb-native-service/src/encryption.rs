@@ -8,6 +8,7 @@ mod storage;
 #[cfg(test)]
 pub(crate) mod tests;
 
+pub(crate) use keys::uses::ManagedInstanceState;
 pub use keys::{
     CustodyMasterKey, NativeBackupArtifactProgress, NativeBackupArtifactReceipt,
     NativeBackupCatalogPage, NativeBackupCleanupJob, NativeBackupCleanupJobBinding,
@@ -21,6 +22,8 @@ pub use keys::{
     NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
     NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
 };
+#[cfg(test)]
+pub(crate) use storage::AFTER_MANAGED_REGISTRATION;
 pub(super) use storage::{NativeSnapshot, NativeStorage};
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};

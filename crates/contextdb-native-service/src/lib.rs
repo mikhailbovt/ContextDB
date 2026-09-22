@@ -52,6 +52,8 @@ mod suppression;
 
 pub use backup::{
     NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NATIVE_ENCRYPTED_BACKUP_FORMAT,
+    NativeArchiveCleanup, NativeArchiveCleanupAction, NativeArchiveCleanupAdvance,
+    NativeArchiveCleanupEntry, NativeArchiveCleanupInventory, NativeArchiveCleanupState,
     NativeBackupCleanupJobProgress, NativeBackupCleanupProgress, NativeBackupCleanupStage,
     NativeBackupPreservation, NativeBackupPreservationPath, NativeBackupRecovery,
     NativeBackupRecoveryInput, NativeBackupRecoveryInventory, NativeBackupRecoveryState,
@@ -427,6 +429,7 @@ struct HierarchyRewire {
 /// Incremental Fjall-backed implementation of the canonical application service.
 pub struct NativeService {
     engine: NativeStorage,
+    path: std::path::PathBuf,
     keyspaces: Keyspaces,
     database_id: String,
     token_key: Zeroizing<[u8; 32]>,
@@ -485,36 +488,41 @@ impl NativeService {
             }
         }
         let engine = NativeStorage::open(path.as_ref(), keys).map_err(storage_error)?;
-        if let Some(ledger) = &suppression {
-            let native_path = path
-                .as_ref()
-                .canonicalize()
-                .map_err(|_| integrity("native path is unavailable"))?;
-            if native_path.starts_with(&ledger.path) || ledger.path.starts_with(&native_path) {
-                return Err(invalid(
-                    "suppression and native authorities require separate directory trees",
-                ));
-            }
+        Self::finish_open(path.as_ref(), database_id, token_key, suppression, engine)
+    }
+
+    fn finish_open(
+        path: &Path,
+        database_id: String,
+        token_key: [u8; 32],
+        suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
+        engine: NativeStorage,
+    ) -> ServiceResult<Self> {
+        let native_path = path
+            .canonicalize()
+            .map_err(|_| integrity("native path is unavailable"))?;
+        if let Some(ledger) = &suppression
+            && (native_path.starts_with(&ledger.path) || ledger.path.starts_with(&native_path))
+        {
+            return Err(invalid(
+                "suppression and native authorities require separate directory trees",
+            ));
         }
-        if let Some(keys) = &engine.keys {
-            let native_path = path
-                .as_ref()
-                .canonicalize()
-                .map_err(|_| integrity("native path is unavailable"))?;
-            if native_path.starts_with(&keys.path)
+        if let Some(keys) = &engine.keys
+            && (native_path.starts_with(&keys.path)
                 || keys.path.starts_with(&native_path)
                 || suppression.as_ref().is_some_and(|ledger| {
                     ledger.path.starts_with(&keys.path) || keys.path.starts_with(&ledger.path)
-                })
-            {
-                return Err(invalid(
-                    "native, suppression and custody-key authorities require separate directory trees",
-                ));
-            }
+                }))
+        {
+            return Err(invalid(
+                "native, suppression and custody-key authorities require separate directory trees",
+            ));
         }
         let keyspaces = Keyspaces::new()?;
         let service = Self {
             engine,
+            path: native_path,
             keyspaces,
             database_id,
             token_key: Zeroizing::new(token_key),

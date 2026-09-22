@@ -24,12 +24,17 @@ use super::{
 mod artifacts;
 mod cleanup;
 mod contents;
+mod executor;
 pub(crate) mod jobs;
 pub(crate) mod preservation;
 mod recovery;
 pub(crate) mod replacements;
 mod routing;
 pub use cleanup::{NativeBackupCleanupProgress, NativeBackupCleanupStage};
+pub use executor::{
+    NativeArchiveCleanup, NativeArchiveCleanupAction, NativeArchiveCleanupAdvance,
+    NativeArchiveCleanupEntry, NativeArchiveCleanupInventory, NativeArchiveCleanupState,
+};
 pub use jobs::NativeBackupCleanupJobProgress;
 pub use preservation::{NativeBackupPreservation, NativeBackupPreservationPath};
 pub use recovery::{

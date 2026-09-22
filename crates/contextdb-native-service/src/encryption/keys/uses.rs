@@ -21,6 +21,14 @@ mod tests;
 
 pub(in crate::encryption) use publication::UsePublication;
 
+/// Independently verified bootstrap state, never inferred from directory contents.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ManagedInstanceState {
+    Missing,
+    RegisteredOnly,
+    Active,
+}
+
 pub(super) const HEAD: &[u8] = b"use/head";
 const EVENTS: &[u8] = b"use/event/";
 const STATES: &[u8] = b"use/state/";
@@ -35,6 +43,25 @@ pub(in crate::encryption) const MAX_CHANGES: usize = 2_100_000;
 const MAX_EVENT_BYTES: usize = 1024 * 1024;
 
 impl NativeCustodyKeys {
+    pub(in crate::encryption) fn budgeted_use_publication(
+        &self,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> contextdb_service::ServiceResult<UsePublication<'_>> {
+        if !self.tracks_native_use() {
+            return Err(crate::unsupported(
+                "managed workers require custody version 4",
+            ));
+        }
+        let guard = self
+            .writes
+            .enter(|| budget.check().map_err(crate::raw_index::budget_error))?;
+        self.retirement_frontier().map_err(crate::storage_error)?;
+        Ok(UsePublication {
+            keys: self,
+            _guard: guard,
+        })
+    }
+
     pub(super) fn require_registered_instance<S: ReadSnapshot>(
         &self,
         snapshot: &S,

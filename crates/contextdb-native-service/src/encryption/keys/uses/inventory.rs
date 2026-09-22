@@ -55,6 +55,42 @@ pub struct NativeKeyUseInventory {
 }
 
 impl NativeCustodyKeys {
+    pub(crate) fn managed_instance_state(
+        &self,
+        instance: Uuid,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<ManagedInstanceState> {
+        if !self.tracks_native_use() || instance.is_nil() {
+            return Err(crate::invalid(
+                "managed workers require a nonzero version 4 identity",
+            ));
+        }
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(crate::storage_error)?;
+        let view = BudgetedSnapshot::new(snapshot, budget);
+        let result = (|| {
+            self.verify_native_use(&view)?;
+            if view.get(&self.rows, &state_key(instance))?.is_none() {
+                return Ok(ManagedInstanceState::Missing);
+            }
+            let state = self.use_state(&view, instance)?;
+            Ok(
+                if state.revision == 1
+                    && state.marker.native_sequence == 1
+                    && state.marker.usage.is_none()
+                    && state.pending.is_none()
+                {
+                    ManagedInstanceState::RegisteredOnly
+                } else {
+                    ManagedInstanceState::Active
+                },
+            )
+        })();
+        view.complete(result)
+    }
+
     // Lock order: service publication (when needed), custody, suppression. The
     // returned guard fences native Sync/import/recovery through witness Sync.
     pub(crate) fn lock_inventory_frontier(

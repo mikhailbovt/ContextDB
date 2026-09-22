@@ -5,6 +5,71 @@ use super::*;
 use crate::encryption::keys::uses::{LOCAL_HEAD, LOCAL_SPACE, MAX_CHANGES};
 
 impl NativeStorage {
+    pub(crate) fn open_managed_archive(
+        path: &Path,
+        keys: Arc<NativeCustodyKeys>,
+        instance: uuid::Uuid,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> contextdb_service::ServiceResult<Self> {
+        use crate::{integrity, raw_index::budget_error, storage_error};
+        budget.check().map_err(budget_error)?;
+        let publication = keys.budgeted_use_publication(budget)?;
+        let storage = Self {
+            inner: FjallStorage::open(path).map_err(storage_error)?,
+            keys: Some(keys.clone()),
+        };
+        let snapshot = storage
+            .inner
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        if storage
+            .inner
+            .physical_keyspace_names()
+            .iter()
+            .any(|name| name == LOCAL_SPACE)
+        {
+            let marker = keys.read_local_marker(&snapshot).map_err(storage_error)?;
+            if marker.instance != instance {
+                return Err(integrity(
+                    "managed archive directory belongs to another native instance",
+                ));
+            }
+            publication
+                .reconcile(&storage.inner)
+                .map_err(storage_error)?;
+        } else {
+            if snapshot.sequence() != 0
+                || storage
+                    .inner
+                    .physical_keyspace_names()
+                    .iter()
+                    .any(|name| name != contextdb_storage_fjall::FJALL_INTERNAL_META_KEYSPACE)
+            {
+                return Err(integrity(
+                    "managed archive directory lacks its native-use marker",
+                ));
+            }
+            let marker = publication.register_managed(instance, budget)?;
+            #[cfg(test)]
+            AFTER_MANAGED_REGISTRATION.with(|hook| hook.take().map_or(Ok(()), |hook| hook()))?;
+            let space = Keyspace::new(LOCAL_SPACE).map_err(storage_error)?;
+            let mut tx = storage.inner.begin_write().map_err(storage_error)?;
+            tx.put(
+                &space,
+                LOCAL_HEAD.to_vec(),
+                keys.seal_local_marker(&marker).map_err(storage_error)?,
+            )
+            .map_err(storage_error)?;
+            budget.check().map_err(budget_error)?;
+            let receipt = tx.commit(Durability::Sync).map_err(storage_error)?;
+            if receipt.sequence != marker.native_sequence {
+                return Err(integrity("managed archive bootstrap sequence differs"));
+            }
+            crate::require_sync(receipt.durability)?;
+        }
+        Ok(storage)
+    }
+
     pub(crate) fn registered_instance(&self) -> Result<uuid::Uuid> {
         let keys = self
             .keys
@@ -91,6 +156,13 @@ impl NativeStorage {
             },
         )
     }
+}
+
+#[cfg(test)]
+type RegistrationHook = Box<dyn FnOnce() -> contextdb_service::ServiceResult<()>>;
+#[cfg(test)]
+thread_local! {
+    pub(crate) static AFTER_MANAGED_REGISTRATION: std::cell::RefCell<Option<RegistrationHook>> = const { std::cell::RefCell::new(None) };
 }
 
 impl NativeTransaction<'_> {

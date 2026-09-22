@@ -359,8 +359,13 @@ import. Cold restart and uncertain responses resume that same worker; subsequent
 requests continue its prior result. Only actual terminal cleanup enters the sealed
 job journal. Unfinished jobs prevent refusal of required input keys. Checks cover
 partial-cleanup inputs, empty archives, successive requests, lost finish responses,
-wrong owners and missing or rehashed controls. Automatic execution across all
-archives, worker replacement/disposal and cross-workspace reassignment remain open.
+wrong owners and missing or rehashed controls. An owned controller now selects and
+advances archive jobs automatically, reopens deterministic workers and defers their
+successor aliases to the same owner across requests. Cold tests cover two archives,
+successive removals, registration-only interruption, missing storage before job
+admission and swapped worker directories. Missing inputs stay explicit and create
+no worker. Host maintenance integration, worker replacement/disposal and
+cross-workspace reassignment remain open.
 Owned and mixed assertion keys can now be retired after fresh native-use and
 complete archive-preservation verification. Mixed selections require classified
 replacement batches in every affected native instance, preserving controls,

@@ -58,8 +58,11 @@ and release verifier—not the presence of an API name—determine completion.
   still need cleanup. Durable jobs bind inputs to registered isolated workers and
   survive restart or lost responses; hosts must retain those worker directories.
   Successive requests continue the prior result. Unfinished jobs keep input keys
-  usable until finish acceptance. Automatic scheduling, worker replacement/disposal
-  and cross-workspace reassignment remain unfinished.
+  usable until finish acceptance. An owned controller now schedules archives and
+  reopens stable workers, preserving successor aliases across requests. Missing
+  accepted history requires recovery of the original worker. Host maintenance
+  integration, worker replacement/disposal and cross-workspace reassignment remain
+  unfinished. Scheduling results describe the inventory before each action.
   Owned and mixed-key retirement reject unresolved native/archive obligations and
   deny decryption through old snapshots or restored archives. Mixed keys require
   classified replacement batches preserving independent data and controls in every

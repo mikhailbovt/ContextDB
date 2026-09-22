@@ -614,6 +614,20 @@ publication fences initial binding. Unfinished jobs retain their input-key
 dependency through finish Sync. Terminal retries need no old-input decryption;
 they report historical logical cleanup, not current availability or global removal.
 
+`NativeArchiveCleanup` owns automatic archive selection and one open worker at a
+time. Configure a stable absolute root, then call `advance` from host maintenance.
+It resumes jobs in round-robin order and links accepted input/output aliases to
+their existing owner, including across successive requests. Final coverage requires
+an exact completed job, authorized ancestry and currently readable retained bytes.
+Unknown inputs, busy owners and unavailable preservation remain explicit; no
+eligible action can mean blocked work. Returned inventory precedes the action.
+Worker identities are deterministic within the custody authority and original.
+Before opening a directory, full native-use verification checks its bootstrap
+state. Only a registration with no preparation or accepted native data may resume
+an interrupted empty bootstrap. Missing later history requires the original worker;
+another directory cannot silently create a new instance. Paths remain separate
+from primary and authority trees, and exact identity is checked before reconciliation.
+
 `advance_removal_backup` coordinates logical cleanup in a separate encrypted native
 owner restored from the exact issued original. Each call verifies request, ancestry
 and native replay, then advances bounded source/origin preparation, custody,
@@ -644,10 +658,10 @@ If its keys are later retired, supply the accepted path to a usable successor.
 
 Unclassified records and unretained branch descendants
 require explicit reconciliation. Discovery rescans remain budgeted administrative
-work. The inventory reports identify remaining replacement obligations; executing
-all of them, worker replacement/disposal, cross-workspace reassignment and
-physical/external-copy dispositions remain
-open. These operations do not complete deletion.
+work. The inventory reports identify remaining replacement obligations. Host
+maintenance integration, worker replacement/disposal, cross-workspace reassignment
+and physical/external-copy dispositions remain open. These operations do not
+complete deletion.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
 profile. Record addresses, sizes, lexical hashes and archive metadata remain

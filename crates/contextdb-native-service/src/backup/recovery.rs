@@ -104,47 +104,7 @@ impl NativeService {
             budget,
         )?;
         self.verify_backup_replacement_requests(context, request, &replacements, budget)?;
-        let routes = routing::ArchiveRoutes::new(&catalog, &replacements, |_| true, budget)?;
-        let by_sequence: BTreeMap<_, _> = catalog
-            .archives
-            .iter()
-            .map(|archive| (archive.registration.sequence, archive))
-            .collect();
-        let mut archives = Vec::new();
-        let mut report_bytes = 0;
-        for archive in &catalog.archives {
-            let state = if archive.contents.is_none() {
-                NativeBackupRecoveryState::UnknownContents
-            } else if let Some(route) =
-                routes.best(archive.registration.sequence, &mut report_bytes, budget)?
-            {
-                let target = by_sequence[&route.path.target_sequence]
-                    .contents
-                    .as_ref()
-                    .ok_or_else(|| integrity("archive recovery target contents disappeared"))?
-                    .clone();
-                if let Some(artifact) = route.artifact {
-                    NativeBackupRecoveryState::Available {
-                        target,
-                        path: route.path,
-                        artifact,
-                    }
-                } else {
-                    NativeBackupRecoveryState::AwaitingArtifact {
-                        target,
-                        path: route.path,
-                    }
-                }
-            } else {
-                NativeBackupRecoveryState::KeysUnavailable
-            };
-            let entry = NativeBackupRecovery {
-                original: archive.registration.clone(),
-                state,
-            };
-            routing::reserve(&entry, &mut report_bytes, budget)?;
-            archives.push(entry);
-        }
+        let archives = recovery_from_inventory(&catalog, &replacements, budget)?;
         let report = NativeBackupRecoveryInventory {
             request: request.clone(),
             frontier: catalog.frontier,
@@ -212,4 +172,54 @@ impl NativeService {
 #[cfg(test)]
 thread_local! {
     static BEFORE_RECOVERY_FENCE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
+// Both inputs have already passed request and complete custody verification.
+pub(super) fn recovery_from_inventory(
+    catalog: &crate::NativeBackupKeyInventory,
+    replacements: &[crate::NativeBackupReplacement],
+    budget: &mut QueryBudget,
+) -> ServiceResult<Vec<NativeBackupRecovery>> {
+    let routes = routing::ArchiveRoutes::new(catalog, replacements, |_| true, budget)?;
+    let by_sequence: BTreeMap<_, _> = catalog
+        .archives
+        .iter()
+        .map(|archive| (archive.registration.sequence, archive))
+        .collect();
+    let mut archives = Vec::new();
+    let mut report_bytes = 0;
+    for archive in &catalog.archives {
+        let state = if archive.contents.is_none() {
+            NativeBackupRecoveryState::UnknownContents
+        } else if let Some(route) =
+            routes.best(archive.registration.sequence, &mut report_bytes, budget)?
+        {
+            let target = by_sequence[&route.path.target_sequence]
+                .contents
+                .as_ref()
+                .ok_or_else(|| integrity("archive recovery target contents disappeared"))?
+                .clone();
+            if let Some(artifact) = route.artifact {
+                NativeBackupRecoveryState::Available {
+                    target,
+                    path: route.path,
+                    artifact,
+                }
+            } else {
+                NativeBackupRecoveryState::AwaitingArtifact {
+                    target,
+                    path: route.path,
+                }
+            }
+        } else {
+            NativeBackupRecoveryState::KeysUnavailable
+        };
+        let entry = NativeBackupRecovery {
+            original: archive.registration.clone(),
+            state,
+        };
+        routing::reserve(&entry, &mut report_bytes, budget)?;
+        archives.push(entry);
+    }
+    Ok(archives)
 }

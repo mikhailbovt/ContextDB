@@ -11,6 +11,8 @@ use super::{keys::PendingKeys, *};
 
 mod uses;
 #[cfg(test)]
+pub(crate) use uses::AFTER_MANAGED_REGISTRATION;
+#[cfg(test)]
 pub(super) use uses::AFTER_NATIVE_COMMIT;
 
 pub(crate) struct NativeStorage {

@@ -11,9 +11,12 @@ pub(in crate::encryption) struct UsePublication<'a> {
 
 impl UsePublication<'_> {
     pub(in crate::encryption) fn register(&self) -> contextdb_storage::Result<LocalMarker> {
+        self.register_instance(contextdb_core::ObservationId::new().as_uuid())
+    }
+
+    fn register_instance(&self, instance: Uuid) -> contextdb_storage::Result<LocalMarker> {
         let mut tx = self.keys.engine.begin_write()?;
         let mut head = self.keys.use_head(&tx)?;
-        let instance = contextdb_core::ObservationId::new().as_uuid();
         if tx.get(&self.keys.rows, &state_key(instance))?.is_some() {
             return Err(failure("native key-use instance already exists"));
         }
@@ -36,6 +39,30 @@ impl UsePublication<'_> {
         )?;
         synchronized(tx.commit(Durability::Sync)?)?;
         Ok(marker)
+    }
+
+    pub(in crate::encryption) fn register_managed(
+        &self,
+        instance: Uuid,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> contextdb_service::ServiceResult<LocalMarker> {
+        use contextdb_service::{ErrorCode, ServiceError};
+        let state = self.keys.managed_instance_state(instance, budget)?;
+        match state {
+            ManagedInstanceState::Missing => self
+                .register_instance(instance)
+                .map_err(crate::storage_error),
+            ManagedInstanceState::RegisteredOnly => Ok(LocalMarker {
+                instance,
+                native_sequence: 1,
+                usage: None,
+            }),
+            ManagedInstanceState::Active => Err(ServiceError::new(
+                ErrorCode::EvidenceRequired,
+                "managed archive worker already has native history; recover its original directory",
+                false,
+            )),
+        }
     }
 
     pub(in crate::encryption) fn reconcile(
