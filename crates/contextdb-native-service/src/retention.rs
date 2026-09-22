@@ -41,7 +41,40 @@ pub struct NativeRemovalRequestReceipt {
     pub roots: BTreeSet<ObservationId>,
 }
 
+/// Complete request metadata for one authorized workspace at a retained frontier.
+/// Payload inventories and cleanup remain separately verified operations.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeRemovalRequestInventory {
+    /// Independent suppression authority; never a native checkpoint identity.
+    pub authority_id: uuid::Uuid,
+    /// Global removal journal position, including control publications.
+    pub sequence: u64,
+    /// Exact global journal commitment at inspection.
+    pub digest: String,
+    /// Every accepted request for the caller's workspace, in acceptance order.
+    pub requests: Vec<NativeRemovalRequestReceipt>,
+}
+
 impl NativeService {
+    /// Discover accepted requests from verified retained history, not a host queue.
+    /// Missing request, retry or current-head indexes are errors rather than idle
+    /// work. New requests after this frontier appear on the next inspection.
+    pub fn read_original_removal_requests(
+        &self,
+        context: &AuthenticatedRequestContext,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeRemovalRequestInventory> {
+        require_capability(context, Capability::Admin)?;
+        let ledger = self.suppression.as_ref().ok_or_else(|| {
+            unsupported("request discovery requires the retained suppression authority")
+        })?;
+        ledger.removal_requests(
+            &digest_bytes(context.request.workspace_id.as_bytes()),
+            budget,
+        )
+    }
+
     /// Durably request explicit removal after inspecting source dependencies.
     /// The external Sync closes disclosure even if no native cleanup is published
     /// before a crash. Repeating the exact retry key returns this same receipt.

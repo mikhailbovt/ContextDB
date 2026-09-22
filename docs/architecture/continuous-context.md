@@ -628,6 +628,19 @@ an interrupted empty bootstrap. Missing later history requires the original work
 another directory cannot silently create a new instance. Paths remain separate
 from primary and authority trees, and exact identity is checked before reconciliation.
 
+Embedded hosts can enable `NativeArchiveMaintenance::start` with the encrypted
+owner, stable worker root, explicit workspace list and a host authentication
+adapter. The owned background thread obtains fresh Admin authentication for the
+exact workspace on every tick; runtime/model contexts do not supply these grants.
+It discovers requests through `read_original_removal_requests`, which verifies
+ordered retention history, request/retry/current indexes and the final frontier.
+Missing metadata cannot become an idle queue. Each tick shares a cooperative
+budget across authentication, discovery and one archive operation. Workspaces and
+requests advance round-robin; capture does not invoke this loop. Status retains
+bounded pre-action counts, missing-worker obligations and failures. Shutdown
+cancels work, wakes the timer and joins the thread, retaining worker directories.
+Restart rediscovers requests and resumes durable jobs without an enqueue command.
+
 `advance_removal_backup` coordinates logical cleanup in a separate encrypted native
 owner restored from the exact issued original. Each call verifies request, ancestry
 and native replay, then advances bounded source/origin preparation, custody,
@@ -658,10 +671,10 @@ If its keys are later retired, supply the accepted path to a usable successor.
 
 Unclassified records and unretained branch descendants
 require explicit reconciliation. Discovery rescans remain budgeted administrative
-work. The inventory reports identify remaining replacement obligations. Host
-maintenance integration, worker replacement/disposal, cross-workspace reassignment
-and physical/external-copy dispositions remain open. These operations do not
-complete deletion.
+work. The inventory reports identify remaining replacement obligations. Worker
+replacement/disposal, cross-workspace reassignment and physical/external-copy
+dispositions remain open. Maintenance observations cover one request at a time;
+they do not complete global deletion or reopen disclosure.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
 profile. Record addresses, sizes, lexical hashes and archive metadata remain

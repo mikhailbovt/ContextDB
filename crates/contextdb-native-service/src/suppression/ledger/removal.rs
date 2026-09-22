@@ -14,6 +14,7 @@ mod primary_keys;
 mod raw_copies;
 mod raw_inventory;
 mod record_witness;
+mod requests;
 #[cfg(test)]
 mod tests;
 

@@ -60,9 +60,11 @@ and release verifier—not the presence of an API name—determine completion.
   Successive requests continue the prior result. Unfinished jobs keep input keys
   usable until finish acceptance. An owned controller now schedules archives and
   reopens stable workers, preserving successor aliases across requests. Missing
-  accepted history requires recovery of the original worker. Host maintenance
-  integration, worker replacement/disposal and cross-workspace reassignment remain
-  unfinished. Scheduling results describe the inventory before each action.
+  accepted history requires recovery of the original worker. Embedded hosts can
+  enable bounded background maintenance with fresh host authentication and verified
+  request discovery. CLI/MCP encrypted profile provisioning, worker replacement/
+  disposal and cross-workspace reassignment remain unfinished. Scheduling results
+  describe one request's inventory before each action, not global deletion completion.
   Owned and mixed-key retirement reject unresolved native/archive obligations and
   deny decryption through old snapshots or restored archives. Mixed keys require
   classified replacement batches preserving independent data and controls in every

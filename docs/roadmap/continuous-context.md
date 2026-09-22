@@ -364,8 +364,12 @@ advances archive jobs automatically, reopens deterministic workers and defers th
 successor aliases to the same owner across requests. Cold tests cover two archives,
 successive removals, registration-only interruption, missing storage before job
 admission and swapped worker directories. Missing inputs stay explicit and create
-no worker. Host maintenance integration, worker replacement/disposal and
-cross-workspace reassignment remain open.
+no worker. Embedded hosts can now start a background maintenance service with fresh
+workspace-bound host authentication, verified request discovery and bounded steps.
+It resumes after restart, discovers later requests and reports revoked access or
+missing inputs while capture continues. Shutdown cancels work and joins the thread.
+Worker replacement/disposal, cross-workspace reassignment and CLI/MCP encrypted
+profile provisioning remain open.
 Owned and mixed assertion keys can now be retired after fresh native-use and
 complete archive-preservation verification. Mixed selections require classified
 replacement batches in every affected native instance, preserving controls,

@@ -26,6 +26,7 @@ mod cleanup;
 mod contents;
 mod executor;
 pub(crate) mod jobs;
+mod maintenance;
 pub(crate) mod preservation;
 mod recovery;
 pub(crate) mod replacements;
@@ -36,6 +37,12 @@ pub use executor::{
     NativeArchiveCleanupEntry, NativeArchiveCleanupInventory, NativeArchiveCleanupState,
 };
 pub use jobs::NativeBackupCleanupJobProgress;
+pub use maintenance::{
+    NativeArchiveMaintenance, NativeArchiveMaintenanceAuthority, NativeArchiveMaintenanceBacklog,
+    NativeArchiveMaintenanceObservation, NativeArchiveMaintenanceOperation,
+    NativeArchiveMaintenanceOptions, NativeArchiveMaintenanceOutcome,
+    NativeArchiveMaintenanceStatus,
+};
 pub use preservation::{NativeBackupPreservation, NativeBackupPreservationPath};
 pub use recovery::{
     NativeBackupRecovery, NativeBackupRecoveryInput, NativeBackupRecoveryInventory,

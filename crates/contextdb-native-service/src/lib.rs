@@ -54,10 +54,13 @@ pub use backup::{
     NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NATIVE_ENCRYPTED_BACKUP_FORMAT,
     NativeArchiveCleanup, NativeArchiveCleanupAction, NativeArchiveCleanupAdvance,
     NativeArchiveCleanupEntry, NativeArchiveCleanupInventory, NativeArchiveCleanupState,
-    NativeBackupCleanupJobProgress, NativeBackupCleanupProgress, NativeBackupCleanupStage,
-    NativeBackupPreservation, NativeBackupPreservationPath, NativeBackupRecovery,
-    NativeBackupRecoveryInput, NativeBackupRecoveryInventory, NativeBackupRecoveryState,
-    NativeRemovalBackup,
+    NativeArchiveMaintenance, NativeArchiveMaintenanceAuthority, NativeArchiveMaintenanceBacklog,
+    NativeArchiveMaintenanceObservation, NativeArchiveMaintenanceOperation,
+    NativeArchiveMaintenanceOptions, NativeArchiveMaintenanceOutcome,
+    NativeArchiveMaintenanceStatus, NativeBackupCleanupJobProgress, NativeBackupCleanupProgress,
+    NativeBackupCleanupStage, NativeBackupPreservation, NativeBackupPreservationPath,
+    NativeBackupRecovery, NativeBackupRecoveryInput, NativeBackupRecoveryInventory,
+    NativeBackupRecoveryState, NativeRemovalBackup,
 };
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
@@ -99,8 +102,8 @@ pub use retention::{
     NativeOwnedKeyRemovalReceipt, NativeOwnedKeyRemovalWitness, NativePrimaryKeyAction,
     NativePrimaryKeyDisposition, NativePrimaryKeyInventory, NativePrimaryKeyRemovalReceipt,
     NativePrimaryKeyRemovalWitness, NativeRemovalBackupInventory, NativeRemovalKeyInventory,
-    NativeRemovalKeySelection, NativeRemovalPreparationReceipt, NativeRemovalRequestReceipt,
-    NativeSourcePruningReceipt,
+    NativeRemovalKeySelection, NativeRemovalPreparationReceipt, NativeRemovalRequestInventory,
+    NativeRemovalRequestReceipt, NativeSourcePruningReceipt,
 };
 pub use suppression::{NativeSuppressionLedger, SuppressionProgress};
 
