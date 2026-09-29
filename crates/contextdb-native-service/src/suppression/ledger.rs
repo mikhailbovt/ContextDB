@@ -14,6 +14,11 @@ use uuid::Uuid;
 
 use super::*;
 
+mod record_sources;
+mod removal;
+pub(crate) use record_sources::{RecordSourceControl, RecordSourcesCheckpoint};
+pub(crate) use removal::{RemovalCheckpoint, RemovalIntent};
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Identity {
@@ -79,13 +84,25 @@ impl NativeSuppressionLedger {
         let engine = FjallStorage::open(path.as_ref()).map_err(storage_error)?;
         let rows = keyspace("contextdb_suppression")?;
         let identity = Identity {
-            version: 1,
+            version: 3,
             authority: ObservationId::new().as_uuid(),
             database: digest_bytes(database_id.as_bytes()),
         };
         let mut tx = engine.begin_write().map_err(storage_error)?;
         tx.put(&rows, b"identity".to_vec(), encode(&identity)?)
             .map_err(storage_error)?;
+        tx.put(
+            &rows,
+            removal::HEAD.to_vec(),
+            encode(&removal::genesis(&identity)?)?,
+        )
+        .map_err(storage_error)?;
+        tx.put(
+            &rows,
+            record_sources::HEAD.to_vec(),
+            encode(&record_sources::genesis(&identity)?)?,
+        )
+        .map_err(storage_error)?;
         require_sync(
             tx.commit(Durability::Sync)
                 .map_err(storage_error)?
@@ -116,7 +133,7 @@ impl NativeSuppressionLedger {
                 .ok_or_else(|| integrity("suppression identity is missing"))?,
             "suppression identity",
         )?;
-        if identity.version != 1
+        if !matches!(identity.version, 1..=3)
             || identity.authority != authority
             || identity.database != digest_bytes(database_id.as_bytes())
         {
@@ -224,7 +241,8 @@ impl NativeSuppressionLedger {
         Ok(snapshot
             .get(&self.rows, &denied_key(workspace, id))
             .map_err(storage_error)?
-            .is_some())
+            .is_some()
+            || self.removal_denies(&snapshot, workspace, id)?)
     }
 
     pub(super) fn deny(
@@ -346,6 +364,8 @@ impl NativeSuppressionLedger {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         let mut expected = BTreeMap::from([(b"identity".to_vec(), encode(&self.identity)?)]);
+        self.verify_removal_ledger(&snapshot, &mut expected)?;
+        self.verify_record_source_ledger(&snapshot, &mut expected)?;
         for row in snapshot
             .scan_prefix(&self.rows, b"head/")
             .map_err(storage_error)?

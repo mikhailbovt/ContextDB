@@ -175,7 +175,7 @@ fn issued_registry_is_idempotent_paged_and_reopens_but_corruption_or_total_loss_
             master()
         )
         .is_err(),
-        "a version 2 authority must never replace a missing registry with an empty one"
+        "a registry-capable authority must never replace a missing registry with an empty one"
     );
 }
 
@@ -183,7 +183,8 @@ fn issued_registry_is_idempotent_paged_and_reopens_but_corruption_or_total_loss_
 fn legacy_key_authority_remains_readable_but_cannot_issue_unregistered_archives() {
     let root = tempfile::tempdir().expect("root");
     let created =
-        NativeCustodyKeys::create(root.path().join("keys"), "legacy", master()).expect("keys");
+        NativeCustodyKeys::create_version(&root.path().join("keys"), "legacy", master(), 2)
+            .expect("version 2 fixture before explicit downgrade to the version 1 wire format");
     let mut fixture = Arc::try_unwrap(created).expect("sole authority handle");
     fixture.identity.version = 1;
     let id = fixture.authority_id();
@@ -324,6 +325,13 @@ fn crash_before_backup_response_retains_the_potential_copy_and_retry_is_idempote
         .backup_catalog_page(0, None, 1)
         .expect("potential copy");
     assert_eq!((page.revision, page.entries.len()), (1, 1));
+    let membership = keys
+        .backup_contents(
+            &page.entries[0].archive_digest,
+            &mut crate::raw_index::copies::tests::budget(),
+        )
+        .expect("contents lookup after abrupt exit")
+        .expect("all copy pages were accepted before the lost response");
     let ledger =
         crate::NativeSuppressionLedger::open(root.path().join("ledger"), "backup-crash", ledger_id)
             .expect("ledger");
@@ -341,6 +349,14 @@ fn crash_before_backup_response_retains_the_potential_copy_and_retry_is_idempote
         })
         .expect("lost-response retry");
     assert_eq!(archive.digest, page.entries[0].archive_digest);
+    assert_eq!(
+        keys.backup_contents(
+            &archive.digest,
+            &mut crate::raw_index::copies::tests::budget()
+        )
+        .expect("contents retry"),
+        Some(membership)
+    );
     assert_eq!(
         keys.backup_catalog_page(0, None, 1)
             .expect("one registration")

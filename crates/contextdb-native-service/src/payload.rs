@@ -31,6 +31,12 @@ pub const CAPTURE_MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 pub const CAPTURE_MAX_REQUEST_PARTS: usize = 512;
 const CHUNK_BYTES: usize = 256 * 1024;
 
+pub(crate) mod keys;
+mod pruning;
+pub use keys::NativePayloadKeyInventory;
+pub use pruning::NativePayloadPruningProgress;
+pub(super) use pruning::{PAYLOAD_PRUNING_FEATURE, PayloadPruningPublication};
+
 #[cfg(test)]
 mod tests;
 
@@ -369,6 +375,7 @@ impl NativeService {
             &super::digest_bytes(context.request.workspace_id.as_bytes()),
         )?;
         let header = self.payload_header(snapshot, reference.block_id)?;
+        self.require_payload_unpruned(snapshot, reference.block_id)?;
         if !policy_allows(&context.request, &header.access) {
             return Err(permission_denied());
         }
@@ -415,6 +422,7 @@ impl NativeService {
         snapshot: &S,
         header: &PayloadHeader,
     ) -> ServiceResult<Vec<u8>> {
+        self.require_payload_unpruned(snapshot, header.reference.block_id)?;
         let length = usize::try_from(header.reference.byte_length)
             .map_err(|_| integrity("payload length overflow"))?;
         let mut bytes = Vec::with_capacity(length);
@@ -448,6 +456,7 @@ impl NativeService {
         start: u64,
         end: u64,
     ) -> ServiceResult<Vec<u8>> {
+        self.require_payload_unpruned(snapshot, header.reference.block_id)?;
         let length = usize::try_from(header.reference.byte_length)
             .map_err(|_| integrity("payload length overflow"))?;
         let range = source_range(start, end, length)?;
@@ -712,6 +721,7 @@ impl NativeService {
         &self,
         snapshot: &S,
     ) -> ServiceResult<()> {
+        let pruned = self.verify_payload_pruning_records(snapshot)?;
         let rows = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"payload/")
             .map_err(storage_error)?;
@@ -728,52 +738,26 @@ impl NativeService {
         if !manifest.features.contains(SOURCE_FEATURE) {
             return Err(integrity("staged payload format feature is absent"));
         }
-        let mut expected = BTreeSet::new();
+        let mut expected: BTreeSet<_> = pruned.keys().map(|id| pruning::pruning_key(*id)).collect();
+        let mut budget = super::retention::audit_budget();
         for row in &rows {
             if !row.key.starts_with(b"payload/header/") {
                 continue;
             }
             let declared: PayloadHeader = decode(&row.value, "payload header")?;
             let header = self.payload_header(snapshot, declared.reference.block_id)?;
-            self.payload_bytes(snapshot, &header)?;
+            if !pruned.contains_key(&header.reference.block_id) {
+                self.payload_bytes(snapshot, &header)?;
+            }
             expected.insert(header_key(header.reference.block_id));
-            for index in 0..header.chunks {
+            let from = pruned.get(&header.reference.block_id).copied().unwrap_or(0);
+            for index in from..header.chunks {
+                if pruned.contains_key(&header.reference.block_id) {
+                    self.verified_pruning_chunk(snapshot, &header, index, &mut budget)?;
+                }
                 expected.insert(chunk_key(header.reference.block_id, index));
             }
-            let receipt: super::StoredIdempotency = decode(
-                &snapshot
-                    .get(
-                        &self.keyspaces.idempotency,
-                        header.idempotency_digest.as_bytes(),
-                    )
-                    .map_err(storage_error)?
-                    .ok_or_else(|| integrity("payload retry binding absent"))?,
-                "payload receipt",
-            )?;
-            let staged: PayloadReceipt = decode(&receipt.response_bytes, "payload response")?;
-            if receipt.operation != "stage_payload"
-                || staged.reference != header.reference
-                || staged.database_id != self.database_id
-            {
-                return Err(integrity("payload retry binding differs"));
-            }
-            let event: super::StoredEvent = decode(
-                &snapshot
-                    .get(
-                        &self.keyspaces.events,
-                        &header.accepted_global_commit.to_be_bytes(),
-                    )
-                    .map_err(storage_error)?
-                    .ok_or_else(|| integrity("payload journal absent"))?,
-                "payload journal",
-            )?;
-            if event.operation != "stage_payload"
-                || event.accepted_payload.as_ref() != Some(&header.reference)
-            {
-                return Err(integrity(
-                    "payload journal lacks its durable source reference",
-                ));
-            }
+            self.verify_payload_header_control(snapshot, &header)?;
         }
         if expected.len() != rows.len() || rows.iter().any(|row| !expected.contains(&row.key)) {
             return Err(integrity("payload chunk/header closure is invalid"));

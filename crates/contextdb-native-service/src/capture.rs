@@ -175,6 +175,32 @@ impl CapturePort for NativeService {
 }
 
 impl NativeService {
+    // Called only after a retained request and the complete local source history
+    // have been verified. Missing journal membership cannot hide orphan controls.
+    pub(crate) fn require_absent_capture<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<()> {
+        let original = digest_bytes(id.to_string().as_bytes()).into_bytes();
+        for (space, key) in [
+            (&self.keyspaces.continuous, record_key(id)),
+            (&self.keyspaces.observations_content, original.clone()),
+            (&self.keyspaces.observations_policy, original),
+        ] {
+            budget
+                .charge(1, 0)
+                .map_err(super::raw_index::budget_error)?;
+            if snapshot.get(space, &key).map_err(storage_error)?.is_some() {
+                return Err(integrity(
+                    "selected source has rows outside its accepted local history",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn captured_receipt_metadata<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -778,10 +804,16 @@ impl NativeService {
                     && !entry.key.starts_with(b"raw/")
                     && !entry.key.starts_with(b"state/")
                     && !entry.key.starts_with(b"semantic/")
+                    && !entry.key.starts_with(b"record-source-applied/")
+                    && !entry.key.starts_with(b"record-write/")
+                    && !entry.key.starts_with(b"record-control/")
+                    && !entry.key.starts_with(b"record-prepared/")
+                    && !entry.key.starts_with(b"record-pruned/")
                     && !entry.key.starts_with(b"catalog/")
                     && !entry.key.starts_with(b"custody/")
                     && !entry.key.starts_with(b"suppression/")
                     && !entry.key.starts_with(b"recovery/")
+                    && !entry.key.starts_with(b"removal/")
             })
             .collect::<Vec<_>>();
         if entries.is_empty() {
@@ -807,10 +839,12 @@ impl NativeService {
             ));
         }
         let mut accepted = Vec::new();
+        let mut budget = super::retention::audit_budget();
         for entry in &entries {
             if entry.key.starts_with(b"receipt/") {
                 let record: CaptureRecord = decode(&entry.value, "capture record")?;
-                let original = self.load_captured_original(snapshot, record.receipt.event_id)?;
+                let control =
+                    self.verified_capture_control(snapshot, record.receipt.event_id, &mut budget)?;
                 if let Some(version) = record.custody_version {
                     if version != super::custody::CUSTODY_VERSION
                         || !manifest.features.contains(super::custody::CUSTODY_FEATURE)
@@ -819,49 +853,42 @@ impl NativeService {
                             "capture custody format is absent or incompatible",
                         ));
                     }
-                    self.require_capture_custody_metadata(snapshot, &original.event)?;
+                    self.require_capture_custody_metadata(snapshot, &record.receipt)?;
                 }
-                if matches!(
-                    original.event.provenance,
-                    Some(EventProvenance::ModelOutput { .. })
-                ) && !manifest
-                    .features
-                    .contains(super::payload::MODEL_PROTOCOL_FEATURE)
-                {
-                    return Err(integrity("model protocol format feature is absent"));
-                }
+                control.recovery.verify_features(&manifest)?;
                 if record.affects_scope.is_some() && !manifest.features.contains(IMPACT_FEATURE) {
                     return Err(integrity("capture scope-impact format feature is absent"));
                 }
-                if matches!(
-                    original.event.provenance,
-                    Some(EventProvenance::OwnedCheckpoint { .. })
-                ) && !manifest.features.contains(super::owned::OWNED_FEATURE)
-                {
-                    return Err(integrity("owned checkpoint format feature is absent"));
+                if let Some(event) = &control.original {
+                    let workspace =
+                        digest_bytes(record.receipt.workspace_id.to_string().as_bytes());
+                    if !self.source_prepared_at(
+                        snapshot,
+                        &workspace,
+                        record.receipt.event_id,
+                        Some(u64::MAX),
+                        &mut budget,
+                    )? {
+                        self.verify_capture_source_integrity(snapshot, event)
+                            .map_err(|_| {
+                                integrity("captured original source closure is invalid")
+                            })?;
+                    }
+                    if entry.key != record_key(event.event_id)
+                        || record.producer_sequence != event.producer_sequence
+                    {
+                        return Err(integrity("capture record identity is invalid"));
+                    }
                 }
-                if (original.event.provenance.is_some()
-                    || matches!(
-                        original.event.payload,
-                        EventPayload::Staged { .. } | EventPayload::Assembly { .. }
-                    ))
-                    && !manifest.features.contains(super::payload::SOURCE_FEATURE)
-                {
-                    return Err(integrity("capture source format feature is absent"));
-                }
-                self.verify_capture_source_integrity(snapshot, &original.event)
-                    .map_err(|_| integrity("captured original source closure is invalid"))?;
-                if entry.key != record_key(original.event.event_id)
-                    || record.producer_sequence != original.event.producer_sequence
-                {
-                    return Err(integrity("capture record identity is invalid"));
+                if entry.key != record_key(record.receipt.event_id) {
+                    return Err(integrity("capture record key differs from its identity"));
                 }
                 let positioned: ObservationId = read_required(
                     snapshot,
                     self,
                     &position_key(&record.producer_key, record.producer_sequence),
                 )?;
-                if positioned != original.event.event_id {
+                if positioned != record.receipt.event_id {
                     return Err(integrity(
                         "capture producer position differs from its original",
                     ));
@@ -881,11 +908,7 @@ impl NativeService {
                 {
                     return Err(integrity("capture retry binding is invalid"));
                 }
-                let recovery = match &record.recovery {
-                    Some(recovery) => recovery.clone(),
-                    None => CaptureRecovery::from_event(&original.event)?,
-                };
-                accepted.push((record, recovery));
+                accepted.push((record, control.recovery));
             } else if entry.key.starts_with(b"producer/") {
                 validate_coverage(&decode(&entry.value, "producer coverage")?)?;
             } else if entry.key.starts_with(b"position/") {
@@ -930,6 +953,12 @@ impl NativeService {
                 &record.receipt.workspace_id.to_string(),
                 Some(work.workspace_commit),
             )?;
+            if record.recovery.is_some() != recovery_activation.is_some_and(|first| global >= first)
+            {
+                return Err(integrity(
+                    "capture recovery activation differs from accepted control",
+                ));
+            }
             let journal: super::StoredEvent = decode(
                 &snapshot
                     .get(&self.keyspaces.events, &global.to_be_bytes())
@@ -1016,15 +1045,6 @@ impl NativeService {
         event_id: ObservationId,
     ) -> ServiceResult<()> {
         self.authorize_derived_custody(snapshot, context, event_id)
-    }
-
-    /// Materialized intersection of every input's disclosure restrictions.
-    pub(super) fn capture_index_policies<S: ReadSnapshot>(
-        &self,
-        snapshot: &S,
-        event_id: ObservationId,
-    ) -> ServiceResult<Vec<contextdb_service::AccessPolicy>> {
-        self.derived_custody_policies(snapshot, event_id)
     }
 
     pub(super) fn verify_capture_journal_reference<S: ReadSnapshot>(

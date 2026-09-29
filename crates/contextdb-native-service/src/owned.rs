@@ -56,6 +56,14 @@ pub(super) struct RecoveredRunHead {
 }
 
 impl OwnedRunPort for NativeService {
+    fn recover_record_writes(
+        &self,
+        context: &AuthenticatedRequestContext,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        self.recover_runtime_record_writes(context, budget)
+    }
+
     fn save_run_checkpoint(
         &self,
         request: SaveRunCheckpointRequest,
