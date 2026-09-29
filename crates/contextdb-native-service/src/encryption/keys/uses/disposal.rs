@@ -20,6 +20,10 @@ pub struct NativeBackupWorkerDisposalBinding {
     pub directory_digest: String,
     /// Authorized continuation from the sealed job's clean result.
     pub preservation_path: Vec<NativeBackupReplacementReceipt>,
+    /// Exact retained requests for mixed-workspace preservation. These record
+    /// provenance; fresh host grants are required separately on every operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preservation_scope_requests: Option<Vec<NativeBackupScopeRequest>>,
     /// Complete preserved bytes whose keys stay held until directory removal.
     pub preservation_artifact: NativeBackupArtifactReceipt,
 }

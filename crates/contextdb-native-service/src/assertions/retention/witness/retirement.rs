@@ -12,15 +12,17 @@ use uuid::Uuid;
 mod tests;
 
 impl NativeService {
-    pub(crate) fn retire_assertion_keys(
+    pub(crate) fn retire_assertion_keys_authorized(
         &self,
         context: &AuthenticatedRequestContext,
         request: &NativeRemovalRequestReceipt,
         witness: &NativeAssertionRemovalWitnessReceipt,
         selected: &BTreeSet<Uuid>,
+        scopes: Option<&crate::backup::scopes::VerifiedArchiveScopes>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeKeyRetirement> {
-        let report = self.read_assertion_backup_inventory(context, request, witness, budget)?;
+        let report =
+            self.assertion_backup_inventory_authorized(context, request, witness, scopes, budget)?;
         let ledger = self
             .suppression
             .as_ref()
@@ -109,7 +111,14 @@ impl NativeService {
                 hook();
             }
         });
-        keys.accept_key_retirement(value, usage, &targets, &preserved, Some(ledger), budget)
+        keys.accept_key_retirement(
+            value,
+            usage,
+            &targets,
+            &preserved,
+            Some((ledger, scopes.map(|scopes| &scopes.removal_frontier))),
+            budget,
+        )
     }
 }
 
@@ -185,11 +194,9 @@ fn preserve_native(
         budget
             .charge(history.acknowledged.len() as u64, 0)
             .map_err(budget_error)?;
-        if history
-            .acknowledged
-            .values()
-            .any(|version| version.key_id == allocation.key_id)
-        {
+        if history.acknowledged.iter().any(|(instance, version)| {
+            version.key_id == allocation.key_id && !usage.disposed_workers.contains_key(instance)
+        }) {
             return Err(invalid(
                 "shared retirement key still has acknowledged native copies",
             ));
@@ -209,6 +216,15 @@ fn preserve_native(
                     return Err(invalid("shared retirement key has unresolved native use"));
                 }
                 NativeKeyUseOutcome::Committed => {
+                    // Verified completed disposal ends this managed native's
+                    // execution dependency. Archive/control preservation remains
+                    // independently required by the enclosing retirement proof.
+                    if usage
+                        .disposed_workers
+                        .contains_key(&change.transaction.native_instance)
+                    {
+                        continue;
+                    }
                     instances
                         .entry(change.transaction.native_instance)
                         .or_default()

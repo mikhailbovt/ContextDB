@@ -56,15 +56,30 @@ and release verifier—not the presence of an API name—determine completion.
   Original archives can also be retained, and recovery automatically selects a
   readable original or separately authorized successor. Readable input bytes may
   still need cleanup. Durable jobs bind inputs to registered isolated workers and
-  survive restart or lost responses; hosts must retain those worker directories.
+  survive restart or lost responses; hosts retain workers until verified controlled
+  disposal.
   Successive requests continue the prior result. Unfinished jobs keep input keys
   usable until finish acceptance. An owned controller now schedules archives and
   reopens stable workers, preserving successor aliases across requests. Missing
   accepted history requires recovery of the original worker. Embedded hosts can
   enable bounded background maintenance with fresh host authentication and verified
-  request discovery. CLI/MCP encrypted profile provisioning, worker replacement/
-  disposal and cross-workspace reassignment remain unfinished. Scheduling results
-  describe one request's inventory before each action, not global deletion completion.
+  request discovery. An explicit host `NativeArchiveScopeResolver` supports 1..64
+  workspaces with fresh separate Admin contexts and exact retained request provenance.
+  Paths admit at most 256 edges and 512 transitive requests. A workspace change
+  seals the exact completed predecessor and continues its verified result on a
+  pristine deterministic generation. Mixed mutations through single-context APIs
+  refuse even empty input paths. Denied foreign ancestry blocks that original while
+  independent authorized work can progress; whole-catalog recovery, preservation
+  and retirement reports still require every relevant grant. Host authentication
+  is fresh per operation; the adapter supplies no revocation lease for later I/O.
+  Controlled disposal requires backend/snapshot drainage, retained intent and
+  readable preservation before bounded unlink. Only verified completed disposal
+  clears that managed instance's current key obligation; historical copy evidence
+  remains, and older witnesses retain conservative obligations. Local namespace
+  absence does not certify media, master-key or external-copy destruction.
+  CLI/MCP encrypted profile provisioning, migration, measured backlog and scale
+  remain unfinished. Scheduling results describe one request's inventory before
+  each action, not global deletion completion.
   Owned and mixed-key retirement reject unresolved native/archive obligations and
   deny decryption through old snapshots or restored archives. Mixed keys require
   classified replacement batches preserving independent data and controls in every

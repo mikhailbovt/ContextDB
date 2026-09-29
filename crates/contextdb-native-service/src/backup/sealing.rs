@@ -15,11 +15,19 @@ pub(crate) struct VerifiedBackupWorkerSeal {
     job: NativeBackupCleanupJob,
     frontier: NativeBackupFrontier,
     native_sequence: u64,
+    removal: Option<scopes::ArchiveRemovalFence>,
 }
 
 impl VerifiedBackupWorkerSeal {
-    pub(crate) fn into_parts(self) -> (NativeBackupCleanupJob, NativeBackupFrontier, u64) {
-        (self.job, self.frontier, self.native_sequence)
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        NativeBackupCleanupJob,
+        NativeBackupFrontier,
+        u64,
+        Option<scopes::ArchiveRemovalFence>,
+    ) {
+        (self.job, self.frontier, self.native_sequence, self.removal)
     }
 }
 
@@ -88,7 +96,42 @@ impl NativeService {
         receipt: &NativeBackupCleanupJobReceipt,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupWorkerSeal> {
+        self.seal_backup_worker_authorized(context, request, receipt, None, budget)
+    }
+
+    /// Seal a mixed-scope worker only after fresh host authorization of its full
+    /// retained ancestry, then keep the removal frontier through custody Sync.
+    pub fn seal_removal_backup_worker_with_scope_authority(
+        &self,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        receipt: &NativeBackupCleanupJobReceipt,
+        resolver: &NativeArchiveScopeResolver<'_>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupWorkerSeal> {
+        let current = resolver.context(workspace, budget)?;
+        let job = self.read_removal_backup_job(&current, request, receipt, budget)?;
+        let scopes = self.archive_job_scope_frame(
+            resolver,
+            workspace,
+            request,
+            &job.binding.original,
+            budget,
+        )?;
+        let context = scopes.context_for(&digest_bytes(workspace.as_bytes()), request)?;
+        self.seal_backup_worker_authorized(context, request, receipt, Some(&scopes), budget)
+    }
+
+    fn seal_backup_worker_authorized(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        receipt: &NativeBackupCleanupJobReceipt,
+        scopes: Option<&scopes::VerifiedArchiveScopes>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupWorkerSeal> {
         let job = self.read_removal_backup_job(context, request, receipt, budget)?;
+        jobs::require_job_scopes(&job, scopes)?;
         let _job_guard = self
             .backup_jobs
             .enter(|| budget.check().map_err(crate::raw_index::budget_error))?;
@@ -120,12 +163,16 @@ impl NativeService {
                 false,
             ));
         }
-        let (catalog, _) = keys.selected_backup_keys_for_request(
-            &BTreeMap::new(),
-            &digest_bytes(context.request.workspace_id.as_bytes()),
-            request,
-            budget,
-        )?;
+        let (catalog, _) = if scopes.is_some() {
+            keys.selected_backup_keys_for_authority(&BTreeMap::new(), request, budget)?
+        } else {
+            keys.selected_backup_keys_for_request(
+                &BTreeMap::new(),
+                &digest_bytes(context.request.workspace_id.as_bytes()),
+                request,
+                budget,
+            )?
+        };
         let native_sequence = self.engine.head_sequence().map_err(storage_error)?;
         let (_, current) = self.build_native_backup()?;
         budget
@@ -143,6 +190,11 @@ impl NativeService {
                 job,
                 frontier: catalog.frontier,
                 native_sequence,
+                removal: scopes.and_then(|scopes| {
+                    self.suppression
+                        .as_ref()
+                        .map(|ledger| (ledger.clone(), scopes.removal_frontier.clone()))
+                }),
             },
             budget,
         )

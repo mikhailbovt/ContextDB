@@ -7,6 +7,16 @@ pub(super) fn inventory(
     request: &NativeRemovalRequestReceipt,
     budget: &mut QueryBudget,
 ) -> ServiceResult<NativeArchiveCleanupInventory> {
+    inventory_authorized(owner, context, request, None, budget)
+}
+
+pub(super) fn inventory_authorized(
+    owner: &NativeService,
+    context: &AuthenticatedRequestContext,
+    request: &NativeRemovalRequestReceipt,
+    scopes: Option<&scopes::VerifiedArchiveScopes>,
+    budget: &mut QueryBudget,
+) -> ServiceResult<NativeArchiveCleanupInventory> {
     owner.read_original_removal_inventory(context, request, budget)?;
     let keys = owner
         .engine
@@ -14,10 +24,55 @@ pub(super) fn inventory(
         .as_ref()
         .ok_or_else(|| integrity("archive custody absent"))?;
     let workspace = digest_bytes(context.request.workspace_id.as_bytes());
-    let (catalog, replacements) =
-        keys.selected_backup_keys_for_request(&BTreeMap::new(), &workspace, request, budget)?;
-    owner.verify_backup_replacement_requests(context, request, &replacements, budget)?;
-    let archives = entries(&catalog, &replacements, &workspace, request, budget)?;
+    let (catalog, replacements, ownership) = if let Some(scopes) = scopes {
+        let (catalog, ownership) =
+            keys.selected_backup_keys_for_authority(&BTreeMap::new(), request, budget)?;
+        let mut replacements = Vec::new();
+        for proof in &ownership {
+            budget
+                .charge(1, 0)
+                .map_err(crate::raw_index::budget_error)?;
+            if scopes
+                .context_for(&proof.workspace_digest, &proof.request)
+                .is_ok()
+            {
+                replacements.push(proof.clone());
+            }
+        }
+        owner.verify_backup_replacement_requests_with_scopes(
+            scopes,
+            request,
+            &replacements,
+            budget,
+        )?;
+        (catalog, replacements, ownership)
+    } else {
+        let (catalog, replacements) =
+            keys.selected_backup_keys_for_request(&BTreeMap::new(), &workspace, request, budget)?;
+        owner.verify_backup_replacement_requests(context, request, &replacements, budget)?;
+        // Ownership is content-free verified custody metadata. It prevents a
+        // foreign successor alias becoming a second worker; only current-scope
+        // edges above authorize recovery or clean coverage in the legacy API.
+        let (owners, ownership) =
+            keys.selected_backup_keys_for_authority(&BTreeMap::new(), request, budget)?;
+        if owners.frontier != catalog.frontier {
+            return Err(ServiceError::new(
+                ErrorCode::IndexTooStale,
+                "archive ownership changed; repeat inspection",
+                true,
+            ));
+        }
+        (catalog, replacements, ownership)
+    };
+    let archives = entries(
+        &catalog,
+        &replacements,
+        &ownership,
+        &workspace,
+        request,
+        scopes,
+        budget,
+    )?;
     let report = NativeArchiveCleanupInventory {
         request: request.clone(),
         frontier: catalog.frontier,
@@ -25,14 +80,19 @@ pub(super) fn inventory(
     };
     crate::retention::keys::charge_report(&report, budget)?;
     let _guard = keys.lock_backup_frontier(&report.frontier, budget)?;
+    if let Some(scopes) = scopes {
+        scopes.require_frontier(owner, budget)?;
+    }
     Ok(report)
 }
 
 fn entries(
     catalog: &NativeBackupKeyInventory,
     replacements: &[NativeBackupReplacement],
+    ownership: &[NativeBackupReplacement],
     workspace: &str,
     request: &NativeRemovalRequestReceipt,
+    scopes: Option<&scopes::VerifiedArchiveScopes>,
     budget: &mut QueryBudget,
 ) -> ServiceResult<Vec<NativeArchiveCleanupEntry>> {
     let recovery = recovery::recovery_from_inventory(catalog, replacements, budget)?;
@@ -40,7 +100,7 @@ fn entries(
     let mut current = BTreeMap::new();
     let mut clean = BTreeMap::new();
     let mut owners = BTreeMap::new();
-    let by_sequence: BTreeMap<_, _> = replacements
+    let by_sequence: BTreeMap<_, _> = ownership
         .iter()
         .map(|proof| (proof.receipt.sequence, proof))
         .collect();
@@ -50,7 +110,7 @@ fn entries(
         .map(|archive| (archive.registration.sequence, archive))
         .collect();
     let mut outputs = BTreeMap::<_, Vec<_>>::new();
-    for proof in replacements {
+    for proof in ownership {
         budget
             .charge(1, 0)
             .map_err(crate::raw_index::budget_error)?;
@@ -67,9 +127,7 @@ fn entries(
             .charge(1, 0)
             .map_err(crate::raw_index::budget_error)?;
         latest.insert(job.binding.original.sequence, job);
-        if job.binding.workspace_digest == workspace
-            && job.binding.request.authority_id == request.authority_id
-        {
+        if job.binding.request.authority_id == request.authority_id {
             let original = job.binding.original.sequence;
             let mut assign = |sequence| {
                 if sequence != original {
@@ -113,7 +171,10 @@ fn entries(
                 }
             }
         }
-        if job.binding.workspace_digest == workspace && job.binding.request == *request {
+        if job.binding.workspace_digest == workspace
+            && job.binding.request == *request
+            && authorized_job(job, workspace, scopes)
+        {
             current.insert(job.binding.original.sequence, job);
             if job.terminal.is_some() {
                 let (source, _, _) = job.next_source()?;
@@ -135,7 +196,9 @@ fn entries(
         let prior = latest.get(&sequence).copied();
         let job = current.get(&sequence).copied();
         let route = routes.best(sequence, &mut report_bytes, budget)?;
-        let state = if let Some(active) = prior.filter(|job| job.terminal.is_none()) {
+        let state = if prior.is_some_and(|job| !authorized_job(job, workspace, scopes)) {
+            NativeArchiveCleanupState::WorkerScopeRequired
+        } else if let Some(active) = prior.filter(|job| job.terminal.is_none()) {
             if active.binding.workspace_digest == workspace && active.binding.request == *request {
                 NativeArchiveCleanupState::Running {
                     job: active.receipt.clone(),
@@ -145,7 +208,7 @@ fn entries(
                 NativeArchiveCleanupState::WorkerBusy
             }
         } else if let Some(prior) = prior.filter(|_| job.is_none()) {
-            if prior.binding.workspace_digest != workspace
+            if (scopes.is_none() && prior.binding.workspace_digest != workspace)
                 || prior.binding.request.authority_id != request.authority_id
             {
                 NativeArchiveCleanupState::WorkerScopeRequired
@@ -182,6 +245,21 @@ fn entries(
         result.push(entry);
     }
     Ok(result)
+}
+
+fn authorized_job(
+    job: &NativeBackupCleanupJob,
+    workspace: &str,
+    scopes: Option<&scopes::VerifiedArchiveScopes>,
+) -> bool {
+    if let Some(scopes) = scopes {
+        scopes
+            .context_for(&job.binding.workspace_digest, &job.binding.request)
+            .is_ok()
+            && jobs::require_job_scopes(job, Some(scopes)).is_ok()
+    } else {
+        job.binding.workspace_digest == workspace && job.binding.scope_continuation.is_none()
+    }
 }
 
 fn classify(input: NativeBackupRecoveryState) -> NativeArchiveCleanupState {

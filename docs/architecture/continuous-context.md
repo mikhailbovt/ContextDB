@@ -264,8 +264,8 @@ the retained keys and restore behind current suppression.
 This executor is incomplete: primary pruning rejects affected assertions or
 generic revisions whose body copies remain, and records with unknown origins.
 No local completion/admission publication exists, so removal requests continue to
-close disclosure. Complete copy inventory, legacy migration, key disablement and
-physical/provider/export/backup dispositions remain open. These Rust APIs do not
+close disclosure. Complete copy inventory, legacy migration, key destruction and
+physical/provider/export closure remain open. These Rust APIs do not
 claim completed hard deletion or expose a model-facing deletion tool.
 
 `NativeService::open_with_suppression` retains plaintext native values.
@@ -520,9 +520,10 @@ reports whether every key remains usable, including keys outside the selected
 removal family. Unknown membership never establishes key availability.
 
 Both reports include preservation for every issued archive. A path follows verified
-replacement proofs within this workspace and removal authority. Each edge's exact
-request is independently verified, allowing successive authorized removals to share
-a path. The target must be free of selected removal values and have usable keys.
+replacement proofs under one removal authority. Single-context calls stay within
+their workspace; host scope APIs authenticate each edge's exact retained request
+in its own workspace. Successive authorized removals can then share a path.
+The target must be free of selected removal values and have usable keys.
 Routing follows later authorized replacements when an earlier target has a retired
 key, even if its bytes remain completely retained. `Preserved` also requires
 complete, verified artifact bytes. Unknown membership or composition, absent paths
@@ -533,13 +534,13 @@ key retirement must revalidate current coverage and all independently needed cop
 
 `retire_removal_keys` accepts 1..256 primary, payload, revision, observed raw or
 assertion keys after deriving fresh removal, native-use and archive evidence.
-Prepared or acknowledged native copies, unknown membership and unresolved
+Prepared or current acknowledged native copies, unknown membership and unresolved
 preservation block acceptance. Every key needed to read a selected clean target
 must remain available. The custody queue rechecks all frontiers through Sync.
 
 Assertion selections bind an exact retained ownership witness. Every known value
-of a retiring key must contain selected mutations. Each native instance that
-committed such a value must acknowledge a usable replacement batch preserving
+of a retiring key must contain selected mutations. Each instance with a current
+managed-copy obligation must acknowledge a usable replacement batch preserving
 replay controls, host policies and still-required independent mutations. Other
 removals can reduce that set only through their exact authorized ownership
 witnesses. Pending batch publications require reconciliation. Acceptance holds
@@ -614,6 +615,17 @@ publication fences initial binding. Unfinished jobs retain their input-key
 dependency through finish Sync. Terminal retries need no old-input decryption;
 they report historical logical cleanup, not current availability or global removal.
 
+`NativeArchiveScopeResolver` gives explicitly configured hosts a separate route
+across 1..64 exact workspace IDs. Configuration supplies names, not grants.
+Each operation obtains fresh Admin authentication and verifies every required
+complete retained request before reading bytes or opening a worker. Private
+operation frames keep contexts separate; persisted continuation binds only exact
+request/scope provenance, including earlier continuation requirements. Input paths
+are limited to 256 edges and transitive provenance to 512 requests; overflow fails
+explicitly. Neither model contexts nor stored receipts supply or union grants.
+Mixed-job mutations through the original single-context APIs refuse even when
+the predecessor was unchanged and the input path is empty.
+
 `NativeArchiveCleanup` owns automatic archive selection and one open worker at a
 time. Configure a stable absolute root, then call `advance` from host maintenance.
 It resumes jobs in round-robin order and links accepted input/output aliases to
@@ -644,8 +656,11 @@ The required v4 journal extension makes older readers fail closed on the unknown
 operation.
 
 A later request can replace a sealed worker with a fresh pristine instance. Its
-first job retains the exact prior seal and completed job, unchanged workspace and
-removal authority, and the prior result's complete readable input. This acceptance
+first job retains the exact prior seal and completed job, the same removal
+authority, and the prior result's complete readable input. A workspace change
+requires fresh host authority for its complete provenance. For that change, the
+host controller automatically seals the exact completed predecessor before admitting a
+deterministic pristine generation on a later step. This acceptance
 reserves the input keys through finish Sync. Interrupted registration, job admission
 and import acknowledgement recover the same identity and exact bytes. Previously
 used instances, unsealed lost workers and unrelated input cannot substitute for this
@@ -663,10 +678,18 @@ The custody publication fence spans filesystem work. Windows rename releases and
 reacquires the backend lock under that fence; the host must exclusively administer
 the managed namespace. Preservation keys stay reserved until a second Sync records
 observed absence of both names. Lost responses and restart resume the same intent.
+New scoped disposal can preserve the latest authorized readable result through
+later workspace replacements; accepted intents keep their fixed path and keys.
 `read_removal_backup_worker_disposal` returns the historical observation; a disposal
 retry checks both names again and refuses any reappeared directory. Power-loss
 durability of namespace changes, media remnants, keys and external copies are not
 certified. All copy and job history remains, and global disclosure stays closed.
+Only fully verified completed disposal discharges that managed instance's current
+key obligation. A seal, pending intent or unexplained directory absence does not.
+Versioned inventories distinguish this current disposition from historical
+acknowledgements; older witnesses retain their conservative acknowledged set.
+Key refusal still verifies all current native, archive and independent-data
+dependencies through its publication fence.
 
 Embedded hosts can enable `NativeArchiveMaintenance::start` with the encrypted
 owner, stable worker root, explicit workspace list and a host authentication
@@ -685,7 +708,11 @@ jobs and removing at most 16 entries per tick. A seal alone never creates intent
 Archive and disposal cursors alternate work within each request; interleaved requests
 and recurring failures cannot reset another request's progress. At most 65,536 active
 request cursors are retained. Exhaustion fails explicitly; observing an idle request
-releases its cursor without evicting active work.
+releases its cursor without evicting active work. Scoped scheduling marks denied
+foreign ancestry as `WorkerScopeRequired` while allowing unrelated authorized
+originals to progress. Selected input/job operations verify their own complete
+provenance; whole-catalog recovery, preservation and retirement reports require
+all scopes they inspect and fail if a required grant is unavailable.
 
 `advance_removal_backup` coordinates logical cleanup in a separate encrypted native
 owner restored from the exact issued original. Each call verifies request, ancestry
@@ -718,8 +745,8 @@ If its keys are later retired, supply the accepted path to a usable successor.
 Unclassified records and unretained branch descendants
 require explicit reconciliation. Discovery rescans remain budgeted administrative
 work. The inventory reports identify remaining replacement obligations.
-Cross-workspace reassignment and physical/external-copy
-dispositions remain open. Maintenance observations cover one request at a time;
+Physical/external-copy dispositions, migration and measured scale remain open.
+Maintenance observations cover one request at a time;
 they do not complete global deletion or reopen disclosure.
 
 These are local Rust APIs; the CLI and MCP do not yet provision this encrypted

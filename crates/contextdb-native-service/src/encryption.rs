@@ -8,6 +8,8 @@ mod storage;
 #[cfg(test)]
 pub(crate) mod tests;
 
+#[cfg(test)]
+pub(crate) use keys::retirement::{AFTER_RETIREMENT_DURABLE, BEFORE_RETIREMENT_SYNC};
 pub(crate) use keys::uses::ManagedInstanceState;
 #[cfg(test)]
 pub(crate) use keys::uses::{AFTER_DISPOSAL_SYNC, BEFORE_DISPOSAL_SYNC};
@@ -19,13 +21,13 @@ pub use keys::{
     NativeBackupCleanupJobReceipt, NativeBackupContentsInventory, NativeBackupContentsPage,
     NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
     NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
-    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeBackupWorkerDisposal,
-    NativeBackupWorkerDisposalBinding, NativeBackupWorkerSeal, NativeCustodyKeys,
-    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyRetirement,
-    NativeKeyRetirementClassification, NativeKeyRetirementEvidence, NativeKeyRetirementReceipt,
-    NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
-    NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
-    NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
+    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeBackupScopeContinuation,
+    NativeBackupScopeRequest, NativeBackupWorkerDisposal, NativeBackupWorkerDisposalBinding,
+    NativeBackupWorkerSeal, NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage,
+    NativeKeyRetirement, NativeKeyRetirementClassification, NativeKeyRetirementEvidence,
+    NativeKeyRetirementReceipt, NativeKeyUseAddressInventory, NativeKeyUseCatalogPage,
+    NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome,
+    NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
 };
 #[cfg(test)]
 pub(crate) use storage::AFTER_MANAGED_REGISTRATION;

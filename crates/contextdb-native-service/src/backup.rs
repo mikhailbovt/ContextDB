@@ -31,6 +31,7 @@ pub(crate) mod preservation;
 mod recovery;
 pub(crate) mod replacements;
 mod routing;
+pub(crate) mod scopes;
 pub(crate) mod sealing;
 pub use cleanup::{NativeBackupCleanupProgress, NativeBackupCleanupStage};
 pub use executor::NativeArchiveWorkerDisposalProgress;
@@ -52,6 +53,7 @@ pub use recovery::{
     NativeBackupRecoveryState,
 };
 pub use replacements::NativeRemovalBackup;
+pub use scopes::NativeArchiveScopeResolver;
 
 /// Exact format returned by the native administrative backup operation.
 pub const NATIVE_BACKUP_FORMAT: &str = "contextdb.native-fjall.logical-backup.v1";

@@ -75,6 +75,7 @@ impl NativeArchiveCleanup<'_> {
         context: &AuthenticatedRequestContext,
         request: &NativeRemovalRequestReceipt,
         pending: BTreeMap<u64, (NativeBackupRegistration, NativeBackupWorkerDisposal)>,
+        resolver: Option<&NativeArchiveScopeResolver<'_>>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeArchiveCleanupAction> {
         let request_key = (request.authority_id, request.sequence);
@@ -93,8 +94,18 @@ impl NativeArchiveCleanup<'_> {
         };
         schedule.disposal_after = sequence;
         schedule.prefer_archive = true;
-        let progress =
-            self.dispose_worker(context, request, &disposal.binding.seal.job, 16, budget)?;
+        let progress = if let Some(resolver) = resolver {
+            self.dispose_worker_with_scope_authority(
+                &context.request.workspace_id,
+                request,
+                &disposal.binding.seal.job,
+                resolver,
+                16,
+                budget,
+            )?
+        } else {
+            self.dispose_worker(context, request, &disposal.binding.seal.job, 16, budget)?
+        };
         Ok(NativeArchiveCleanupAction::DisposalAdvanced {
             original: original.clone(),
             progress: Box::new(progress),
@@ -119,6 +130,36 @@ impl NativeArchiveCleanup<'_> {
         max_entries: u32,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeArchiveWorkerDisposalProgress> {
+        self.dispose_worker_authorized(context, request, job, max_entries, None, budget)
+    }
+
+    /// Dispose a sealed generation whose preservation traverses freshly
+    /// authorized workspace requests. The immutable intent records exact scopes.
+    pub fn dispose_worker_with_scope_authority(
+        &mut self,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        job: &NativeBackupCleanupJobReceipt,
+        resolver: &NativeArchiveScopeResolver<'_>,
+        max_entries: u32,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeArchiveWorkerDisposalProgress> {
+        let scopes = self
+            .owner
+            .archive_available_scope_frame(resolver, workspace, request, budget)?;
+        let context = scopes.context_for(&digest_bytes(workspace.as_bytes()), request)?;
+        self.dispose_worker_authorized(context, request, job, max_entries, Some(&scopes), budget)
+    }
+
+    fn dispose_worker_authorized(
+        &mut self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        job: &NativeBackupCleanupJobReceipt,
+        max_entries: u32,
+        scopes: Option<&scopes::VerifiedArchiveScopes>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeArchiveWorkerDisposalProgress> {
         if !(1..=256).contains(&max_entries) {
             return Err(crate::invalid(
                 "worker disposal accepts 1..256 entries per call",
@@ -127,6 +168,7 @@ impl NativeArchiveCleanup<'_> {
         let job = self
             .owner
             .read_removal_backup_job(context, request, job, budget)?;
+        jobs::require_job_scopes(&job, scopes)?;
         let keys = self
             .owner
             .engine
@@ -143,14 +185,43 @@ impl NativeArchiveCleanup<'_> {
                     false,
                 )
             })?;
-        let (catalog, replacements) = keys.selected_backup_keys_for_request(
-            &BTreeMap::new(),
-            &digest_bytes(context.request.workspace_id.as_bytes()),
-            request,
-            budget,
-        )?;
-        self.owner
-            .verify_backup_replacement_requests(context, request, &replacements, budget)?;
+        let (catalog, replacements) = if let Some(scopes) = scopes {
+            let (catalog, replacements) =
+                keys.selected_backup_keys_for_authority(&BTreeMap::new(), request, budget)?;
+            let mut authorized = Vec::new();
+            for proof in replacements {
+                budget
+                    .charge(1, 0)
+                    .map_err(crate::raw_index::budget_error)?;
+                if scopes
+                    .context_for(&proof.workspace_digest, &proof.request)
+                    .is_ok()
+                {
+                    authorized.push(proof);
+                }
+            }
+            self.owner.verify_backup_replacement_requests_with_scopes(
+                scopes,
+                request,
+                &authorized,
+                budget,
+            )?;
+            (catalog, authorized)
+        } else {
+            let (catalog, replacements) = keys.selected_backup_keys_for_request(
+                &BTreeMap::new(),
+                &digest_bytes(context.request.workspace_id.as_bytes()),
+                request,
+                budget,
+            )?;
+            self.owner.verify_backup_replacement_requests(
+                context,
+                request,
+                &replacements,
+                budget,
+            )?;
+            (catalog, replacements)
+        };
         let generation = catalog
             .jobs
             .iter()
@@ -162,6 +233,18 @@ impl NativeArchiveCleanup<'_> {
         let path = self.existing_worker_path(&job.binding.original, generation, budget)?;
         let directory_digest = directory_digest(&path)?;
         let prior = keys.backup_worker_disposal(seal.worker_instance, budget)?;
+        if let Some(prior) = &prior
+            && let Some(required) = &prior.binding.preservation_scope_requests
+        {
+            let scopes = scopes.ok_or_else(|| ServiceError::new(
+                ErrorCode::EvidenceRequired,
+                "mixed worker disposal requires fresh host authority for its retained preservation",
+                false,
+            ))?;
+            for required in required {
+                scopes.context_for(&required.workspace_digest, &required.request)?;
+            }
+        }
         if self
             .worker
             .as_ref()
@@ -177,19 +260,22 @@ impl NativeArchiveCleanup<'_> {
             ));
         }
         let preservation = if prior.is_none() {
-            let (source, _, _) = job.next_source()?;
-            Some(self.owner.read_removal_backup_input(
-                context,
-                request,
-                &source.registration,
-                budget,
-            )?)
+            Some(self.worker_disposal_input(context, request, &job, &catalog, scopes, budget)?)
         } else {
             None
         };
         #[cfg(test)]
         BEFORE_DISPOSAL_PUBLICATION.with(|hook| hook.take().map_or(Ok(()), |hook| hook()))?;
         let _publication = keys.lock_backup_frontier(&catalog.frontier, budget)?;
+        let _removal = scopes
+            .map(|scopes| {
+                self.owner
+                    .suppression
+                    .as_ref()
+                    .ok_or_else(|| integrity("archive scope authority absent"))?
+                    .lock_removal_frontier(&scopes.removal_frontier, budget)
+            })
+            .transpose()?;
         keys.require_current_worker_disposal(seal.worker_instance, prior.as_ref(), budget)?;
         let Some(disposal) = prior else {
             let Some(_closed) = keys.lock_closed_backup_worker(&path, &seal, budget)? else {
@@ -200,11 +286,26 @@ impl NativeArchiveCleanup<'_> {
             };
             let input =
                 preservation.ok_or_else(|| integrity("worker disposal preservation absent"))?;
+            let preservation_scope_requests = scopes
+                .map(|scopes| {
+                    scopes::path_scope_requests(
+                        &job.binding.workspace_digest,
+                        &job.binding.request,
+                        &input.replacements,
+                        &replacements,
+                        Some(&job),
+                        scopes,
+                        budget,
+                    )
+                })
+                .transpose()?
+                .flatten();
             let binding = NativeBackupWorkerDisposalBinding {
                 seal,
                 directory_digest,
                 preservation_path: input.replacements,
                 preservation_artifact: input.artifact,
+                preservation_scope_requests,
             };
             let disposal = keys.retain_worker_disposal(
                 VerifiedWorkerDisposal {
@@ -322,6 +423,73 @@ impl NativeArchiveCleanup<'_> {
             NativeArchiveWorkerDisposalProgress::DirectoryAbsent {
                 disposal: Box::new(disposal),
             },
+            budget,
+        )
+    }
+
+    fn worker_disposal_input(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        sealed: &NativeBackupCleanupJob,
+        catalog: &crate::NativeBackupKeyInventory,
+        scopes: Option<&scopes::VerifiedArchiveScopes>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupRecoveryInput> {
+        let (source, prefix, _) = sealed.next_source()?;
+        if let Some(scopes) = scopes
+            && let Some(latest) = catalog
+                .jobs
+                .iter()
+                .rev()
+                .find(|job| job.binding.original == sealed.binding.original)
+            && latest.receipt != sealed.receipt
+            && latest.terminal.is_some()
+            && scopes
+                .context_for(&latest.binding.workspace_digest, &latest.binding.request)
+                .is_ok()
+            && jobs::require_job_scopes(latest, Some(scopes)).is_ok()
+        {
+            let (target, path, artifact) = latest.next_source()?;
+            if !path.starts_with(&prefix) {
+                return Err(integrity(
+                    "worker disposal successor changes its sealed ancestry",
+                ));
+            }
+            if catalog.archives.iter().any(|archive| {
+                archive.contents.as_ref() == Some(&target)
+                    && archive.keys_available
+                    && archive
+                        .artifact
+                        .as_ref()
+                        .is_some_and(|value| value.complete && value.receipt == artifact)
+            }) {
+                let replacements = path[prefix.len()..].to_vec();
+                if replacements.len() > 256 {
+                    return Err(exhausted("worker disposal preservation exceeds 256 edges"));
+                }
+                let backup = self.owner.read_fixed_job_input(
+                    context,
+                    request,
+                    &path,
+                    &artifact,
+                    Some(scopes),
+                    budget,
+                )?;
+                return Ok(NativeBackupRecoveryInput {
+                    original: source.registration,
+                    target,
+                    replacements,
+                    artifact,
+                    backup,
+                });
+            }
+        }
+        self.owner.removal_backup_input_authorized(
+            context,
+            request,
+            &source.registration,
+            scopes,
             budget,
         )
     }

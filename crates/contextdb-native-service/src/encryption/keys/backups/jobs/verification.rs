@@ -140,16 +140,66 @@ impl NativeCustodyKeys {
         if source.registration != binding.original {
             return Err(integrity("archive job original issuance differs"));
         }
+        let mut scopes = vec![NativeBackupScopeRequest {
+            workspace_digest: binding.workspace_digest.clone(),
+            request: binding.request.clone(),
+        }];
         for receipt in &binding.source_path {
             let proof = self.replacement_at(snapshot, receipt, budget)?;
-            if proof.source != source
-                || proof.workspace_digest != binding.workspace_digest
-                || proof.request.authority_id != binding.request.authority_id
+            if proof.source != source || proof.request.authority_id != binding.request.authority_id
             {
                 return Err(integrity("archive job source ancestry or scope differs"));
             }
+            scopes.push(NativeBackupScopeRequest {
+                workspace_digest: proof.workspace_digest,
+                request: proof.request,
+            });
             source = proof.target;
         }
+        if let Some(continuation) = &binding.scope_continuation
+            && let Some(receipt) = &continuation.previous_job
+        {
+            receipt.validate(self).map_err(storage_error)?;
+            let event: JobEvent =
+                self.read_job_record(snapshot, &event_key(receipt.sequence), budget)?;
+            if event.value.receipt != *receipt
+                || event.commitment()? != receipt.digest
+                || !event.value.initialized
+                || event.value.terminal.is_none()
+                || event.value.terminal_archive_digest.is_none()
+                || event.value.binding.original != binding.original
+                || (job.receipt.sequence != 0 && receipt.sequence >= job.receipt.sequence)
+            {
+                return Err(integrity(
+                    "archive continuation lacks its exact completed predecessor",
+                ));
+            }
+            let (input, path, artifact) = event.value.next_source()?;
+            if binding.source != input
+                || binding.source_path != path
+                || binding.source_artifact != artifact
+            {
+                return Err(integrity(
+                    "archive continuation changes its predecessor result",
+                ));
+            }
+            scopes.push(NativeBackupScopeRequest {
+                workspace_digest: event.value.binding.workspace_digest.clone(),
+                request: event.value.binding.request.clone(),
+            });
+            if let Some(continuation) = event.value.binding.scope_continuation {
+                scopes.extend(continuation.requests);
+            }
+        }
+        scopes::verify_scope_requests(
+            binding
+                .scope_continuation
+                .as_ref()
+                .map(|continuation| continuation.requests.as_slice()),
+            &scopes,
+            &binding.workspace_digest,
+            binding.request.authority_id,
+        )?;
         let artifact = self.artifact_at(snapshot, &binding.source_artifact, budget)?;
         if source != binding.source || artifact.contents != source || !artifact.complete {
             return Err(integrity(
@@ -254,18 +304,34 @@ impl NativeCustodyKeys {
             .verify_worker_seal_job(snapshot, &binding.seal.job, binding.seal.worker_instance)
             .map_err(storage_error)?;
         let (mut source, _, _) = job.next_source()?;
+        let mut scopes = vec![NativeBackupScopeRequest {
+            workspace_digest: job.binding.workspace_digest.clone(),
+            request: job.binding.request.clone(),
+        }];
+        if let Some(continuation) = &job.binding.scope_continuation {
+            scopes.extend(continuation.requests.iter().cloned());
+        }
         for receipt in &binding.preservation_path {
             let proof = self.replacement_at(snapshot, receipt, budget)?;
             if proof.source != source
-                || proof.workspace_digest != job.binding.workspace_digest
                 || proof.request.authority_id != job.binding.request.authority_id
             {
                 return Err(integrity(
                     "worker disposal preservation changes ancestry or scope",
                 ));
             }
+            scopes.push(NativeBackupScopeRequest {
+                workspace_digest: proof.workspace_digest,
+                request: proof.request,
+            });
             source = proof.target;
         }
+        scopes::verify_scope_requests(
+            binding.preservation_scope_requests.as_deref(),
+            &scopes,
+            &job.binding.workspace_digest,
+            job.binding.request.authority_id,
+        )?;
         let artifact = self.artifact_at(snapshot, &binding.preservation_artifact, budget)?;
         if !artifact.complete || artifact.contents != source {
             return Err(integrity(
@@ -320,9 +386,24 @@ pub(super) fn require_transition(
                         && binding.restore_at.is_none()
                 }
             };
+            let continuation = binding.scope_continuation.as_ref();
+            if original.binding.scope_continuation.is_some() && continuation.is_none() {
+                return Err(integrity(
+                    "archive continuation drops its inherited scope provenance",
+                ));
+            }
+            let valid_scope = binding.workspace_digest == original.binding.workspace_digest
+                || (continuation.is_some() && binding.worker_seal.is_some());
+            if continuation.is_some_and(|continuation| {
+                continuation.previous_job.as_ref() != Some(&original.receipt)
+            }) {
+                return Err(integrity(
+                    "archive continuation changes its latest predecessor",
+                ));
+            }
             if !valid_worker
+                || !valid_scope
                 || binding.original != original.binding.original
-                || binding.workspace_digest != original.binding.workspace_digest
                 || binding.request.authority_id != original.binding.request.authority_id
                 || binding.source != source
                 || binding.source_path != path
@@ -332,7 +413,13 @@ pub(super) fn require_transition(
                     "archive job does not continue its prior result and verified worker",
                 ));
             }
-        } else if binding.restore_at.is_none() || binding.worker_seal.is_some() {
+        } else if binding.restore_at.is_none()
+            || binding.worker_seal.is_some()
+            || binding
+                .scope_continuation
+                .as_ref()
+                .is_some_and(|continuation| continuation.previous_job.is_some())
+        {
             return Err(integrity(
                 "initial archive job lacks its pristine import binding",
             ));

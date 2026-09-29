@@ -61,8 +61,12 @@ impl NativeCustodyKeys {
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupWorkerSeal> {
         use crate::{integrity, raw_index::budget_error, storage_error};
-        let (job, frontier, native_sequence) = proof.into_parts();
+        let (job, frontier, native_sequence, removal) = proof.into_parts();
         let _guard = self.writes.enter(|| budget.check().map_err(budget_error))?;
+        let _removal = removal
+            .as_ref()
+            .map(|(ledger, frontier)| ledger.lock_removal_frontier(frontier, budget))
+            .transpose()?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
         let catalog = self.selected_backup_keys_at(&tx, &BTreeMap::new(), budget)?;
         let mut state = self

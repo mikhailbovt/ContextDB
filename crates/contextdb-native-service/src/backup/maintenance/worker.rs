@@ -26,6 +26,7 @@ pub(super) fn run(
     shared: &Shared,
 ) -> ServiceResult<()> {
     let mut executor = NativeArchiveCleanup::new(owner, root)?;
+    let resolver = NativeArchiveScopeResolver::new(workspaces, authority)?;
     let mut cursors = vec![0; workspaces.len()];
     let mut next = 0;
     while !shared.cancellation.is_cancelled() {
@@ -40,7 +41,7 @@ pub(super) fn run(
             owner,
             &mut executor,
             workspace,
-            authority,
+            &resolver,
             &mut cursors[next],
             &mut budget,
         ) {
@@ -77,12 +78,12 @@ fn tick(
     owner: &NativeService,
     executor: &mut NativeArchiveCleanup<'_>,
     workspace: &str,
-    authority: &dyn NativeArchiveMaintenanceAuthority,
+    resolver: &NativeArchiveScopeResolver<'_>,
     after: &mut u64,
     budget: &mut QueryBudget,
 ) -> ServiceResult<NativeArchiveMaintenanceOutcome> {
     budget.check().map_err(crate::raw_index::budget_error)?;
-    let context = authority.context(workspace, budget)?;
+    let context = resolver.context(workspace, budget)?;
     budget.check().map_err(crate::raw_index::budget_error)?;
     if context.request.workspace_id != workspace {
         return Err(crate::permission_denied());
@@ -101,7 +102,7 @@ fn tick(
     };
     // An unavailable request must not starve another accepted request or workspace.
     *after = request.sequence;
-    let advanced = executor.advance(&context, request, budget)?;
+    let advanced = executor.advance_with_scope_authority(workspace, request, resolver, budget)?;
     let mut backlog = NativeArchiveMaintenanceBacklog::default();
     for entry in &advanced.before.archives {
         match entry.state {

@@ -43,6 +43,27 @@ impl NativeBackupCleanupJobReceipt {
     }
 }
 
+/// One exact retained request whose workspace authorizes an input path edge.
+/// This is historical provenance, never a current capability grant.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeBackupScopeRequest {
+    /// Exact native hash of the independently authenticated workspace ID.
+    pub workspace_digest: String,
+    /// Complete independently retained request, not merely its source roots.
+    pub request: NativeRemovalRequestReceipt,
+}
+
+/// Immutable mixed-workspace input provenance accepted with the job start.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeBackupScopeContinuation {
+    /// Latest completed predecessor for this original, absent only on first use.
+    pub previous_job: Option<NativeBackupCleanupJobReceipt>,
+    /// Canonical exact request set covering current, predecessor and path scopes.
+    pub requests: Vec<NativeBackupScopeRequest>,
+}
+
 /// Fixed input and native owner. Retries never select a different readable branch.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -65,6 +86,10 @@ pub struct NativeBackupCleanupJobBinding {
     /// job. Old jobs and native-copy obligations remain independently retained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_seal: Option<NativeBackupWorkerSeal>,
+    /// Explicit host-authorized mixed-scope provenance. Omitted historical fields
+    /// keep their exact encoding; later jobs retain required older scope edges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_continuation: Option<NativeBackupScopeContinuation>,
     /// Pristine physical sequence at initial or replacement admission. Import
     /// occurs only at this sequence; continuing the same worker needs no import.
     pub restore_at: Option<u64>,

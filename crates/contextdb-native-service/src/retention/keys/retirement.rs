@@ -25,20 +25,60 @@ impl NativeService {
         key_ids: &BTreeSet<Uuid>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeKeyRetirement> {
+        self.retire_removal_keys_authorized(context, request, selection, key_ids, None, budget)
+    }
+
+    /// Refuse selected keys after fresh host authorization of every archive scope.
+    /// The verified removal frontier stays locked through actual custody Sync;
+    /// managed disposal does not discharge physical or external-copy obligations.
+    pub fn retire_removal_keys_with_scope_authority(
+        &self,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        selection: &NativeRemovalKeySelection,
+        key_ids: &BTreeSet<Uuid>,
+        resolver: &NativeArchiveScopeResolver<'_>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeKeyRetirement> {
+        let scopes = self.archive_scope_frame(resolver, workspace, request, budget)?;
+        let context = scopes.context_for(&digest_bytes(workspace.as_bytes()), request)?;
+        self.retire_removal_keys_authorized(
+            context,
+            request,
+            selection,
+            key_ids,
+            Some(&scopes),
+            budget,
+        )
+    }
+
+    fn retire_removal_keys_authorized(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        selection: &NativeRemovalKeySelection,
+        key_ids: &BTreeSet<Uuid>,
+        scopes: Option<&backup::scopes::VerifiedArchiveScopes>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeKeyRetirement> {
         if !(1..=256).contains(&key_ids.len()) || key_ids.iter().any(Uuid::is_nil) {
             return Err(invalid(
                 "key retirement requires 1..256 distinct key identities",
             ));
         }
         if let NativeRemovalKeySelection::Assertions { witness } = selection {
-            return self.retire_assertion_keys(context, request, witness, key_ids, budget);
+            return self.retire_assertion_keys_authorized(
+                context, request, witness, key_ids, scopes, budget,
+            );
         }
-        let report = self.read_removal_backup_inventory(context, request, selection, budget)?;
+        let report = self.removal_backup_inventory(context, request, selection, scopes, budget)?;
         let mut allocations = BTreeMap::new();
         for disposition in report.dispositions.values().flatten() {
             budget.charge(1, 0).map_err(raw_index::budget_error)?;
             if key_ids.contains(&disposition.allocation.key_id) {
-                if disposition.action != NativeOwnedKeyAction::AssessRetainedCopies {
+                if disposition.action != NativeOwnedKeyAction::AssessRetainedCopies
+                    || !disposition.current_instances().is_empty()
+                {
                     return Err(invalid(
                         "selected key still has prepared or acknowledged native copies",
                     ));
@@ -98,11 +138,19 @@ impl NativeService {
                 hook();
             }
         });
+        let ledger = scopes
+            .map(|scopes| {
+                self.suppression
+                    .as_deref()
+                    .ok_or_else(|| integrity("scope retirement authority absent"))
+                    .map(|ledger| (ledger, Some(&scopes.removal_frontier)))
+            })
+            .transpose()?;
         self.engine
             .keys
             .as_ref()
             .ok_or_else(|| unsupported("key retirement requires retained custody"))?
-            .accept_key_retirement(value, usage, &targets, &BTreeSet::new(), None, budget)
+            .accept_key_retirement(value, usage, &targets, &BTreeSet::new(), ledger, budget)
     }
 }
 

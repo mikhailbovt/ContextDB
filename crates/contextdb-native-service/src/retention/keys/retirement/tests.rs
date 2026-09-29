@@ -3,6 +3,9 @@ use crate::capture::tests::request;
 use crate::retention::keys::witness::tests::{Fixture, budget, fixture};
 use contextdb_service::CapturePort;
 
+mod disposal;
+mod scopes;
+
 fn ids(f: &Fixture) -> BTreeSet<Uuid> {
     f.witness
         .dispositions

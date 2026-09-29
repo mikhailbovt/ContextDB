@@ -183,7 +183,10 @@ impl NativeCustodyKeys {
         usage: &NativeKeyUseInventory,
         targets: &BTreeSet<String>,
         preserved: &BTreeSet<Uuid>,
-        ledger: Option<&crate::NativeSuppressionLedger>,
+        ledger: Option<(
+            &crate::NativeSuppressionLedger,
+            Option<&crate::suppression::RemovalCheckpoint>,
+        )>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeKeyRetirement> {
         if value.evidence.use_revision != usage.revision
@@ -198,19 +201,35 @@ impl NativeCustodyKeys {
             budget,
         )?;
         self.require_backup_frontier(&value.evidence.backups, budget)?;
-        let _classification_guard = match (&value.evidence.classification, ledger) {
-            (Some(frontier), Some(ledger)) if frontier.authority_id == ledger.authority_id() => {
-                Some(ledger.lock_removal_frontier(
-                    &crate::suppression::RemovalCheckpoint {
-                        sequence: frontier.sequence,
-                        digest: frontier.digest.clone(),
-                    },
-                    budget,
-                )?)
+        let removal_fence = match (&value.evidence.classification, ledger) {
+            (Some(frontier), Some((ledger, scope)))
+                if frontier.authority_id == ledger.authority_id() =>
+            {
+                let classification = crate::suppression::RemovalCheckpoint {
+                    sequence: frontier.sequence,
+                    digest: frontier.digest.clone(),
+                };
+                if scope.is_some_and(|scope| *scope != classification) {
+                    return Err(integrity(
+                        "key retirement scope and classification frontiers differ",
+                    ));
+                }
+                Some((ledger, classification))
             }
             (None, None) => None,
+            (None, Some((ledger, Some(scope))))
+                if value.request.authority_id == ledger.authority_id() =>
+            {
+                Some((ledger, scope.clone()))
+            }
             _ => return Err(integrity("key retirement classification authority differs")),
         };
+        // One ledger lock spans validation and custody Sync. Scoped ordinary
+        // retirement uses this fence without inventing classification evidence.
+        let _removal_guard = removal_fence
+            .as_ref()
+            .map(|(ledger, frontier)| ledger.lock_removal_frontier(frontier, budget))
+            .transpose()?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
         let mut next = self.load_retirements(&tx, budget)?;
         {
@@ -556,6 +575,8 @@ impl NativeCustodyKeys {
                 revision: value.evidence.use_revision,
                 revision_digest: value.evidence.use_digest.clone(),
                 addresses: BTreeMap::new(),
+                managed_disposition_version: None,
+                disposed_workers: BTreeMap::new(),
             },
             budget,
         )?;

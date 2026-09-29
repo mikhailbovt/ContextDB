@@ -91,19 +91,61 @@ impl NativeService {
         request: &NativeRemovalRequestReceipt,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupRecoveryInventory> {
+        self.removal_backup_recovery_authorized(context, request, None, budget)
+    }
+
+    /// Resolve mixed-workspace inputs using current authentication from an
+    /// explicit host profile. Every retained edge keeps its original scope.
+    pub fn read_removal_backup_recovery_with_scope_authority(
+        &self,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        resolver: &NativeArchiveScopeResolver<'_>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupRecoveryInventory> {
+        let scopes = self.archive_scope_frame(resolver, workspace, request, budget)?;
+        let context = scopes.context_for(&digest_bytes(workspace.as_bytes()), request)?;
+        self.removal_backup_recovery_authorized(context, request, Some(&scopes), budget)
+    }
+
+    pub(super) fn removal_backup_recovery_authorized(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        scopes: Option<&scopes::VerifiedArchiveScopes>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupRecoveryInventory> {
         self.read_original_removal_inventory(context, request, budget)?;
         let keys = self
             .engine
             .keys
             .as_ref()
             .ok_or_else(|| integrity("archive custody is absent"))?;
-        let (catalog, replacements) = keys.selected_backup_keys_for_request(
-            &BTreeMap::new(),
-            &digest_bytes(context.request.workspace_id.as_bytes()),
-            request,
-            budget,
-        )?;
-        self.verify_backup_replacement_requests(context, request, &replacements, budget)?;
+        let (catalog, replacements) = if let Some(scopes) = scopes {
+            let (catalog, mut replacements) =
+                keys.selected_backup_keys_for_authority(&BTreeMap::new(), request, budget)?;
+            replacements.retain(|proof| {
+                scopes
+                    .context_for(&proof.workspace_digest, &proof.request)
+                    .is_ok()
+            });
+            self.verify_backup_replacement_requests_with_scopes(
+                scopes,
+                request,
+                &replacements,
+                budget,
+            )?;
+            (catalog, replacements)
+        } else {
+            let selected = keys.selected_backup_keys_for_request(
+                &BTreeMap::new(),
+                &digest_bytes(context.request.workspace_id.as_bytes()),
+                request,
+                budget,
+            )?;
+            self.verify_backup_replacement_requests(context, request, &selected.1, budget)?;
+            selected
+        };
         let archives = recovery_from_inventory(&catalog, &replacements, budget)?;
         let report = NativeBackupRecoveryInventory {
             request: request.clone(),
@@ -118,6 +160,9 @@ impl NativeService {
             }
         });
         let _guard = keys.lock_backup_frontier(&report.frontier, budget)?;
+        if let Some(scopes) = scopes {
+            scopes.require_frontier(self, budget)?;
+        }
         Ok(report)
     }
 
@@ -133,7 +178,34 @@ impl NativeService {
         original: &NativeBackupRegistration,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupRecoveryInput> {
-        let inventory = self.read_removal_backup_recovery(context, request, budget)?;
+        self.removal_backup_input_authorized(context, request, original, None, budget)
+    }
+
+    /// Read complete verified bytes only after independently authenticating all
+    /// workspaces used by the accepted recovery path. No caller report grants access.
+    pub fn read_removal_backup_input_with_scope_authority(
+        &self,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        original: &NativeBackupRegistration,
+        resolver: &NativeArchiveScopeResolver<'_>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupRecoveryInput> {
+        let scopes = self.archive_available_scope_frame(resolver, workspace, request, budget)?;
+        let context = scopes.context_for(&digest_bytes(workspace.as_bytes()), request)?;
+        self.removal_backup_input_authorized(context, request, original, Some(&scopes), budget)
+    }
+
+    pub(super) fn removal_backup_input_authorized(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        original: &NativeBackupRegistration,
+        scopes: Option<&scopes::VerifiedArchiveScopes>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeBackupRecoveryInput> {
+        let inventory =
+            self.removal_backup_recovery_authorized(context, request, scopes, budget)?;
         let entry = inventory
             .archives
             .iter()
@@ -159,6 +231,9 @@ impl NativeService {
         let backup = keys.read_archive_artifact(artifact, budget)?;
         self.verify_encrypted_archive(&backup, budget)?;
         let _guard = keys.lock_backup_frontier(&inventory.frontier, budget)?;
+        if let Some(scopes) = scopes {
+            scopes.require_frontier(self, budget)?;
+        }
         Ok(NativeBackupRecoveryInput {
             original: original.clone(),
             target: target.clone(),

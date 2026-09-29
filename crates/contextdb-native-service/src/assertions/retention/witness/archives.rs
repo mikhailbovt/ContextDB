@@ -42,6 +42,32 @@ impl NativeService {
         witness: &NativeAssertionRemovalWitnessReceipt,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeAssertionBackupInventory> {
+        self.assertion_backup_inventory_authorized(context, request, witness, None, budget)
+    }
+
+    /// Inspect shared assertion preservation through independently authenticated
+    /// workspaces. Host configuration supplies no grants or content classification.
+    pub fn read_assertion_backup_inventory_with_scope_authority(
+        &self,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        witness: &NativeAssertionRemovalWitnessReceipt,
+        resolver: &crate::NativeArchiveScopeResolver<'_>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeAssertionBackupInventory> {
+        let scopes = self.archive_scope_frame(resolver, workspace, request, budget)?;
+        let context = scopes.context_for(&digest_bytes(workspace.as_bytes()), request)?;
+        self.assertion_backup_inventory_authorized(context, request, witness, Some(&scopes), budget)
+    }
+
+    pub(crate) fn assertion_backup_inventory_authorized(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        witness: &NativeAssertionRemovalWitnessReceipt,
+        scopes: Option<&crate::backup::scopes::VerifiedArchiveScopes>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeAssertionBackupInventory> {
         self.read_original_removal_inventory(context, request, budget)?;
         if witness.authority_id != request.authority_id
             || witness.removal_sequence != request.sequence
@@ -78,13 +104,26 @@ impl NativeService {
             .keys
             .as_ref()
             .ok_or_else(|| integrity("assertion archive custody absent"))?;
-        let (backups, replacements) = keys.selected_backup_keys_for_request(
-            &allocations,
-            &digest_bytes(context.request.workspace_id.as_bytes()),
-            request,
-            budget,
-        )?;
-        self.verify_backup_replacement_requests(context, request, &replacements, budget)?;
+        let (backups, replacements) = if let Some(scopes) = scopes {
+            let selected =
+                keys.selected_backup_keys_for_authority(&allocations, request, budget)?;
+            self.verify_backup_replacement_requests_with_scopes(
+                scopes,
+                request,
+                &selected.1,
+                budget,
+            )?;
+            selected
+        } else {
+            let selected = keys.selected_backup_keys_for_request(
+                &allocations,
+                &digest_bytes(context.request.workspace_id.as_bytes()),
+                request,
+                budget,
+            )?;
+            self.verify_backup_replacement_requests(context, request, &selected.1, budget)?;
+            selected
+        };
         inventory.value_ownership =
             self.assertion_value_inventory(&owner, &selected, &inventory, Some(&backups), budget)?;
         let values = inventory
@@ -142,6 +181,9 @@ impl NativeService {
             budget,
         )?;
         keys.require_backup_frontier(&backups.frontier, budget)?;
+        if let Some(scopes) = scopes {
+            scopes.require_frontier(self, budget)?;
+        }
         let ledger = self
             .suppression
             .as_ref()

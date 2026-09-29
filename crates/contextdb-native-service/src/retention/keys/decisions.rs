@@ -10,9 +10,9 @@ use uuid::Uuid;
 pub enum NativeOwnedKeyAction {
     /// Resolve preparations involving this key; their data may already be durable.
     ResolvePreparedUse,
-    /// Remove acknowledged values from the listed registered native instances.
+    /// Remove acknowledged copies in the disposition's current instances.
     RemoveAcknowledgedCopies,
-    /// No tracked current value remains. Assess historical and outside copies;
+    /// No prepared or current managed obligation remains. Assess outside copies;
     /// unused or aborted allocations do not establish their absence.
     AssessRetainedCopies,
 }
@@ -26,12 +26,27 @@ pub struct NativeOwnedKeyDisposition {
     pub allocation: NativeKeyAllocation,
     /// Exact versions, including aborted and unresolved after-values.
     pub versions: Vec<NativeKeyUseVersion>,
-    /// Instances whose last acknowledged value still uses this key.
+    /// Historical instances whose last acknowledged value uses this key. Managed
+    /// disposal does not erase this retained projection or its transitions.
     pub acknowledged_instances: BTreeSet<Uuid>,
+    /// Current managed obligations when disposal changes the historical set.
+    /// An omitted legacy field retains all acknowledged-instance obligations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_instances: Option<BTreeSet<Uuid>>,
     /// Unresolved changes involving either a preimage or an after-value.
     pub unresolved_preparations: Vec<NativeKeyUseTransaction>,
     /// First unresolved native task; other obligations remain relevant.
     pub action: NativeOwnedKeyAction,
+}
+
+impl NativeOwnedKeyDisposition {
+    /// Instances still requiring tracked native removal. Legacy decisions keep
+    /// their complete acknowledged set until independently verified disposal.
+    pub fn current_instances(&self) -> &BTreeSet<Uuid> {
+        self.active_instances
+            .as_ref()
+            .unwrap_or(&self.acknowledged_instances)
+    }
 }
 
 pub(super) fn dispositions<T: Ord + Clone + Serialize>(
@@ -39,6 +54,7 @@ pub(super) fn dispositions<T: Ord + Clone + Serialize>(
     owners: &BTreeMap<T, Vec<NativeKeyAllocation>>,
     budget: &mut QueryBudget,
 ) -> ServiceResult<BTreeMap<T, Vec<NativeOwnedKeyDisposition>>> {
+    require_disposition_version(usage)?;
     let mut output = BTreeMap::new();
     for (owner, allocations) in owners {
         let mut selected = Vec::new();
@@ -76,9 +92,14 @@ pub(super) fn dispositions<T: Ord + Clone + Serialize>(
                 .filter(|(_, version)| version.key_id == allocation.key_id)
                 .map(|(instance, _)| *instance)
                 .collect();
+            let active: BTreeSet<_> = acknowledged
+                .iter()
+                .filter(|instance| !usage.disposed_workers.contains_key(instance))
+                .copied()
+                .collect();
             let action = if !unresolved.is_empty() {
                 NativeOwnedKeyAction::ResolvePreparedUse
-            } else if !acknowledged.is_empty() {
+            } else if !active.is_empty() {
                 NativeOwnedKeyAction::RemoveAcknowledgedCopies
             } else {
                 NativeOwnedKeyAction::AssessRetainedCopies
@@ -86,6 +107,7 @@ pub(super) fn dispositions<T: Ord + Clone + Serialize>(
             selected.push(NativeOwnedKeyDisposition {
                 allocation: allocation.clone(),
                 versions: versions.into_values().collect(),
+                active_instances: (active != acknowledged).then_some(active),
                 acknowledged_instances: acknowledged,
                 unresolved_preparations: unresolved,
                 action,
@@ -129,11 +151,29 @@ pub(super) fn verify_use_prefix(
     retained: &NativeKeyUseInventory,
     budget: &mut QueryBudget,
 ) -> ServiceResult<()> {
+    require_disposition_version(current)?;
+    require_disposition_version(retained)?;
     if current.authority_id != retained.authority_id
         || retained.revision > current.revision
         || current.addresses.keys().ne(retained.addresses.keys())
     {
         return Err(integrity("owned key use authority or frontier differs"));
+    }
+    let prior_disposals: BTreeMap<_, _> = current
+        .disposed_workers
+        .iter()
+        .filter(|(_, disposal)| disposal.sequence <= retained.revision)
+        .map(|(instance, disposal)| (*instance, disposal.clone()))
+        .collect();
+    budget
+        .charge(prior_disposals.len() as u64, 0)
+        .map_err(raw_index::budget_error)?;
+    if retained.managed_disposition_version == Some(1)
+        && prior_disposals != retained.disposed_workers
+    {
+        return Err(integrity(
+            "owned key managed disposal differs from retained history",
+        ));
     }
     for (key, address) in &current.addresses {
         let mut prior = NativeKeyUseAddressInventory {
@@ -170,4 +210,12 @@ pub(super) fn verify_use_prefix(
         }
     }
     Ok(())
+}
+
+fn require_disposition_version(usage: &NativeKeyUseInventory) -> ServiceResult<()> {
+    match usage.managed_disposition_version {
+        None if usage.disposed_workers.is_empty() => Ok(()),
+        Some(1) => Ok(()),
+        _ => Err(integrity("native-use managed disposition version differs")),
+    }
 }

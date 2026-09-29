@@ -9,6 +9,7 @@ mod artifacts;
 mod contents;
 mod jobs;
 mod replacements;
+mod scopes;
 pub use artifacts::{NativeBackupArtifactProgress, NativeBackupArtifactReceipt};
 pub use contents::{
     NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
@@ -16,6 +17,7 @@ pub use contents::{
 };
 pub use jobs::{
     NativeBackupCleanupJob, NativeBackupCleanupJobBinding, NativeBackupCleanupJobReceipt,
+    NativeBackupScopeContinuation, NativeBackupScopeRequest,
 };
 pub use replacements::{
     NativeBackupPruningCounts, NativeBackupReplacement, NativeBackupReplacementReceipt,

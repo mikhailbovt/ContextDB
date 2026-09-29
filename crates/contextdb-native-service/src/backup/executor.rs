@@ -215,6 +215,21 @@ impl<'a> NativeArchiveCleanup<'a> {
         plan::inventory(self.owner, context, request, budget)
     }
 
+    /// Inspect mixed-workspace ancestry using only fresh host authentication.
+    pub fn inspect_with_scope_authority(
+        &self,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        resolver: &NativeArchiveScopeResolver<'_>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeArchiveCleanupInventory> {
+        let scopes = self
+            .owner
+            .archive_available_scope_frame(resolver, workspace, request, budget)?;
+        let context = scopes.context_for(&digest_bytes(workspace.as_bytes()), request)?;
+        plan::inventory_authorized(self.owner, context, request, Some(&scopes), budget)
+    }
+
     /// Select one eligible archive or resume one already accepted disposal intent.
     /// Alternate these classes within each request when both have work. Neither a
     /// seal nor logical coverage creates intent; resumed disposal removes at most 16 entries.
@@ -229,7 +244,42 @@ impl<'a> NativeArchiveCleanup<'a> {
         request: &NativeRemovalRequestReceipt,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeArchiveCleanupAdvance> {
-        let before = self.inspect(context, request, budget)?;
+        self.advance_authorized(context, request, None, budget)
+    }
+
+    /// Continue one host-authorized archive across workspace requests. A change
+    /// seals the actual completed worker before admitting a pristine successor.
+    pub fn advance_with_scope_authority(
+        &mut self,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        resolver: &NativeArchiveScopeResolver<'_>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeArchiveCleanupAdvance> {
+        let scopes = self
+            .owner
+            .archive_available_scope_frame(resolver, workspace, request, budget)?;
+        let context = scopes.context_for(&digest_bytes(workspace.as_bytes()), request)?;
+        self.advance_authorized(context, request, Some((resolver, &scopes)), budget)
+    }
+
+    fn advance_authorized(
+        &mut self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        scoped: Option<(
+            &NativeArchiveScopeResolver<'_>,
+            &scopes::VerifiedArchiveScopes,
+        )>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeArchiveCleanupAdvance> {
+        let before = plan::inventory_authorized(
+            self.owner,
+            context,
+            request,
+            scoped.map(|(_, scopes)| scopes),
+            budget,
+        )?;
         // inspect authenticated the exact retained request; sequence is unique
         // within its authority and its retained binding already covers workspace.
         let request_key = (request.authority_id, request.sequence);
@@ -258,7 +308,13 @@ impl<'a> NativeArchiveCleanup<'a> {
         }
         let schedule = self.schedules.entry(request_key).or_default();
         if !pending.is_empty() && (!schedule.prefer_archive || eligible.is_empty()) {
-            let action = self.resume_worker_disposal(context, request, pending, budget)?;
+            let action = self.resume_worker_disposal(
+                context,
+                request,
+                pending,
+                scoped.map(|(resolver, _)| resolver),
+                budget,
+            )?;
             return advance_response(before, Some(action), budget);
         }
         let Some(selected) = eligible
@@ -281,12 +337,16 @@ impl<'a> NativeArchiveCleanup<'a> {
         // Do not hold custody publication while opening native storage: its own
         // registration/import path acquires the same queue and rechecks authority.
         drop(keys.lock_backup_frontier(&before.frontier, budget)?);
-        let (catalog, _) = keys.selected_backup_keys_for_request(
-            &BTreeMap::new(),
-            &digest_bytes(context.request.workspace_id.as_bytes()),
-            request,
-            budget,
-        )?;
+        let (catalog, _) = if scoped.is_some() {
+            keys.selected_backup_keys_for_authority(&BTreeMap::new(), request, budget)?
+        } else {
+            keys.selected_backup_keys_for_request(
+                &BTreeMap::new(),
+                &digest_bytes(context.request.workspace_id.as_bytes()),
+                request,
+                budget,
+            )?
+        };
         if catalog.frontier != before.frontier {
             return Err(ServiceError::new(
                 ErrorCode::IndexTooStale,
@@ -304,6 +364,61 @@ impl<'a> NativeArchiveCleanup<'a> {
             |job| job.binding.worker_instance,
         );
         let mut state = keys.managed_instance_state(instance, budget)?;
+        if let Some((_, scopes)) = scoped {
+            scopes.require_frontier(self.owner, budget)?;
+        }
+        // A mixed-scope transfer cannot relabel a live worker. Open and seal its
+        // exact terminal bytes under the predecessor's freshly verified grants.
+        if let (Some(previous), Some((resolver, scopes))) = (previous, scoped)
+            && previous.binding.workspace_digest
+                != digest_bytes(context.request.workspace_id.as_bytes())
+            && state != crate::encryption::ManagedInstanceState::Sealed
+        {
+            let prior_context = scopes.context_for(
+                &previous.binding.workspace_digest,
+                &previous.binding.request,
+            )?;
+            let generation = catalog
+                .jobs
+                .iter()
+                .any(|job| {
+                    job.binding.worker_instance == instance && job.binding.worker_seal.is_some()
+                })
+                .then_some(instance);
+            let path = self.worker_path(&selected.original, generation, budget)?;
+            if !path.is_dir() {
+                return advance_response(
+                    before,
+                    Some(NativeArchiveCleanupAction::AwaitingWorker {
+                        original: selected.original,
+                        worker_instance: instance,
+                    }),
+                    budget,
+                );
+            }
+            self.open_worker(&path, instance, budget)?;
+            let worker = &self
+                .worker
+                .as_ref()
+                .ok_or_else(|| integrity("archive worker absent"))?
+                .1;
+            let seal = worker.seal_removal_backup_worker_with_scope_authority(
+                &prior_context.request.workspace_id,
+                &previous.binding.request,
+                &previous.receipt,
+                resolver,
+                budget,
+            )?;
+            self.worker = None;
+            return advance_response(
+                before,
+                Some(NativeArchiveCleanupAction::WorkerSealed {
+                    original: selected.original,
+                    seal,
+                }),
+                budget,
+            );
+        }
         let mut replacement = false;
         if let Some(previous) = previous
             && state == crate::encryption::ManagedInstanceState::Sealed
@@ -354,27 +469,7 @@ impl<'a> NativeArchiveCleanup<'a> {
             );
         }
         self.require_worker_path(&path)?;
-        if self
-            .worker
-            .as_ref()
-            .is_none_or(|(opened, _)| *opened != path)
-        {
-            self.worker = None;
-            let engine = crate::encryption::NativeStorage::open_managed_archive(
-                &path,
-                keys.clone(),
-                instance,
-                budget,
-            )?;
-            let worker = NativeService::finish_open(
-                &path,
-                self.owner.database_id.clone(),
-                *self.owner.token_key,
-                self.owner.suppression.clone(),
-                engine,
-            )?;
-            self.worker = Some((path.clone(), worker));
-        }
+        self.open_worker(&path, instance, budget)?;
         let worker = &self
             .worker
             .as_ref()
@@ -384,23 +479,73 @@ impl<'a> NativeArchiveCleanup<'a> {
         BEFORE_MANAGED_JOB.with(|hook| hook.take().map_or(Ok(()), |hook| hook()))?;
         let action = match selected.state {
             NativeArchiveCleanupState::Ready { .. } => NativeArchiveCleanupAction::Started {
-                job: Box::new(worker.start_removal_backup_job(
-                    context,
-                    request,
-                    &selected.original,
-                    budget,
-                )?),
+                job: Box::new(if let Some((resolver, _)) = scoped {
+                    worker.start_removal_backup_job_with_scope_authority(
+                        &context.request.workspace_id,
+                        request,
+                        &selected.original,
+                        resolver,
+                        budget,
+                    )?
+                } else {
+                    worker.start_removal_backup_job(context, request, &selected.original, budget)?
+                }),
             },
             NativeArchiveCleanupState::Running { job, .. } => {
                 NativeArchiveCleanupAction::Advanced {
-                    result: Box::new(
-                        worker.advance_removal_backup_job(context, request, &job, budget)?,
-                    ),
+                    result: Box::new(if let Some((resolver, _)) = scoped {
+                        worker.advance_removal_backup_job_with_scope_authority(
+                            &context.request.workspace_id,
+                            request,
+                            &job,
+                            resolver,
+                            budget,
+                        )?
+                    } else {
+                        worker.advance_removal_backup_job(context, request, &job, budget)?
+                    }),
                 }
             }
             _ => return Err(integrity("archive scheduling selected ineligible work")),
         };
         advance_response(before, Some(action), budget)
+    }
+
+    fn open_worker(
+        &mut self,
+        path: &Path,
+        instance: uuid::Uuid,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        self.require_worker_path(path)?;
+        if self
+            .worker
+            .as_ref()
+            .is_none_or(|(opened, _)| opened != path)
+        {
+            self.worker = None;
+            let keys = self
+                .owner
+                .engine
+                .keys
+                .as_ref()
+                .ok_or_else(|| integrity("archive custody absent"))?;
+            let engine = crate::encryption::NativeStorage::open_managed_archive(
+                path,
+                keys.clone(),
+                instance,
+                budget,
+            )?;
+            let worker = NativeService::finish_open(
+                path,
+                self.owner.database_id.clone(),
+                *self.owner.token_key,
+                self.owner.suppression.clone(),
+                engine,
+            )?;
+            self.worker = Some((path.to_path_buf(), worker));
+        }
+        Ok(())
     }
 }
 

@@ -51,6 +51,15 @@ pub struct NativeKeyUseInventory {
     /// Every selected address, including empty tracked histories. Allocation and
     /// removal-request frontiers are supplied by the enclosing inventory.
     pub addresses: BTreeMap<String, NativeKeyUseAddressInventory>,
+    /// Version of service-derived managed obligations. Legacy None retains every
+    /// historical acknowledgement and must not carry disposal dispositions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_disposition_version: Option<u8>,
+    /// Permanently sealed managed instances with fully replayed completed local
+    /// disposal. Historical acknowledgements remain above. These receipts end
+    /// current managed execution dependencies, not media or external-copy duties.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub disposed_workers: BTreeMap<Uuid, NativeBackupWorkerDisposal>,
 }
 
 impl NativeCustodyKeys {
@@ -214,6 +223,8 @@ impl NativeCustodyKeys {
                         )
                     })
                     .collect(),
+                managed_disposition_version: Some(1),
+                disposed_workers: BTreeMap::new(),
             };
             let mut positions: BTreeMap<u64, Vec<(String, usize)>> = BTreeMap::new();
             let mut count = 0;
@@ -297,6 +308,44 @@ impl NativeCustodyKeys {
                 }
                 Ok(())
             })?;
+            let instances: BTreeSet<_> = inventory
+                .addresses
+                .values()
+                .flat_map(|address| &address.transitions)
+                .map(|change| change.transaction.native_instance)
+                .collect();
+            for instance in instances {
+                let state = self.use_state(&view, instance)?;
+                if let Some(disposal) = state.disposal
+                    && disposal.directory_absent
+                {
+                    let marker = self.verify_disposal_binding(&view, &disposal.binding)?;
+                    if state.pending.is_some()
+                        || state.marker != marker
+                        || state.sealed.as_ref() != Some(&disposal.binding.seal)
+                        || disposal.authority_id != self.authority_id()
+                        || disposal.sequence > head.sequence
+                    {
+                        return Err(failure(
+                            "disposed native worker differs from its verified state",
+                        ));
+                    }
+                    let bytes = encode(&disposal)?.len() + 64;
+                    report_bytes += bytes;
+                    if report_bytes > MAX_REPORT_BYTES {
+                        return Err(
+                            view.reject(crate::exhausted("native-use inventory exceeds 32 MiB"))
+                        );
+                    }
+                    view.charge(1, bytes as u64)?;
+                    inventory.disposed_workers.insert(instance, disposal);
+                }
+            }
+            if !inventory.disposed_workers.is_empty() {
+                // Complete job/reverse-index and exact preservation replay shares
+                // this same immutable snapshot and charged storage boundary.
+                self.verify_backup_catalog(&view)?;
+            }
             let bytes = encode(&inventory)?.len();
             if bytes > MAX_REPORT_BYTES {
                 return Err(view.reject(crate::exhausted("native-use inventory exceeds 32 MiB")));

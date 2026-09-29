@@ -18,7 +18,7 @@ native or model acceptance.
 | 07 | Owned conversation runtime, rolling, checkpoint and resume | Merged in #9; all eight CI jobs passed; reader/cache acceptance remains open |
 | 08 | Atomic lease admission, invalidation and action fences | Merged in #10; all eight CI jobs passed; strict transport handoff remains open |
 | 09 | Cache/cost controller and paired runtime evaluation | Merged in #11; all eight CI jobs passed; R0 quality and total monetary benefit remain open |
-| 10 | Restore/revocation, retention, custody and bounded publication | Custody, suppression, encrypted backups and lineage implemented; local source/assertion/generic/chunk cleanup verified on Windows; complete copy/key/external closure and completion admission remain open |
+| 10 | Restore/revocation, retention, custody and bounded publication | Local cleanup, host-authorized archive continuation across workspaces, worker disposal and current key refusal implemented; complete copy/key/external closure and completion admission remain open |
 | 11 | Migration, integrations, demo and release evidence | Planned |
 | 12 | Router replay corpus, contracts and training lineage | Planned |
 | 13 | Measured R1 scorer and optional bounded R2 cascade | Planned |
@@ -318,8 +318,9 @@ cover multi-step cleanup, legacy membership backfill, reversed issuance order,
 different requests, both-authority restart and older native restore. Reports are
 limited to their selected family and current frontiers; they grant no key retirement
 or deletion-completion authority.
-Successive requests can share a path only after each exact request is independently
-verified within the same workspace and removal authority.
+Successive requests share a path only after each exact request is independently
+verified in its own workspace under the same removal authority. Mixed paths use
+the explicit host scope API; single-context mutations do not acquire foreign grants.
 Routing now skips complete targets with retired keys and can follow later readable
 replacements. Reports bind the current refusal frontier, so retirement alone also
 invalidates an in-flight archive inventory.
@@ -378,7 +379,19 @@ responses, wrong identity/scope, conflicting intents and reappeared paths preser
 obligations. Local namespace absence does not certify media/key/external erasure.
 Request-scoped archive/disposal scheduling now preserves progress across interleaved
 requests and recurring failures, with an explicit 65,536 active-cursor bound.
-Cross-workspace reassignment and CLI/MCP encrypted profile provisioning remain open.
+Explicit hosts now configure `NativeArchiveScopeResolver` for 1..64 workspaces.
+Fresh private operation frames verify each retained request. Durable bindings
+store provenance without grants; model contexts remain separate. Transitive input provenance is bounded to 512 requests
+and 256 edges. For a workspace change, maintenance seals the exact completed
+predecessor, admits a deterministic pristine generation and imports its latest
+result once. Denied foreign ancestry stays explicit while independent authorized
+archive work progresses; complete catalog reports still require all relevant grants.
+Actual native A/B/C acceptance covers cold continuation, revoked foreign grants,
+empty-path bypass refusal, independent scheduling and exact preserved originals
+and receipts. Completed controlled disposal can discharge a managed instance's
+current key obligation without rewriting acknowledgements; versioned witnesses
+preserve older conservative decisions. Mixed recovery remains usable after current
+selected-key refusal. CLI/MCP encrypted provisioning, migration and scale remain open.
 Owned and mixed assertion keys can now be retired after fresh native-use and
 complete archive-preservation verification. Mixed selections require classified
 replacement batches in every affected native instance, preserving controls,
@@ -392,5 +405,5 @@ partial archive bytes, lost responses, ambiguous Sync, journal corruption and re
 process exits around publication. Mixed-key tests also cover two native instances,
 independent deletions in both orders, missing preservation, unknown composition
 and classification races. Wrapped keys remain; this is not destruction.
-Remaining replacement execution, version 1/2 key migration,
+Version 1/2 key migration,
 physical/external-copy closure and verified deletion completion/admission remain open.

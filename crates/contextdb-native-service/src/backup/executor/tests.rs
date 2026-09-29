@@ -8,6 +8,7 @@ use zeroize::Zeroizing;
 
 mod disposal;
 mod replacement;
+mod scopes;
 
 pub(crate) fn issued(f: &Fixture, retain: bool) -> NativeBackupRegistration {
     let backup = f

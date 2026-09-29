@@ -5,6 +5,8 @@ use crate::assertions::retention::witness::tests::budget;
 use crate::{NativeCustodyKeys, NativeSuppressionLedger};
 use contextdb_service::{BackupResponse, CognitiveMemoryService, RestoreBackupRequest};
 
+mod disposal;
+
 fn selection(f: &Fixture) -> NativeRemovalKeySelection {
     NativeRemovalKeySelection::Assertions {
         witness: f.witness.clone(),

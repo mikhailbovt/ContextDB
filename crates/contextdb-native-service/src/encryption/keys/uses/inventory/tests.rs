@@ -2,6 +2,7 @@ use super::*;
 use crate::encryption::NativeStorage;
 use std::time::Duration;
 
+mod disposal;
 mod witness;
 
 fn budget() -> QueryBudget {

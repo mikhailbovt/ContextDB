@@ -57,11 +57,11 @@ pub use backup::{
     NativeArchiveMaintenance, NativeArchiveMaintenanceAuthority, NativeArchiveMaintenanceBacklog,
     NativeArchiveMaintenanceObservation, NativeArchiveMaintenanceOperation,
     NativeArchiveMaintenanceOptions, NativeArchiveMaintenanceOutcome,
-    NativeArchiveMaintenanceStatus, NativeArchiveWorkerDisposalProgress,
-    NativeBackupCleanupJobProgress, NativeBackupCleanupProgress, NativeBackupCleanupStage,
-    NativeBackupPreservation, NativeBackupPreservationPath, NativeBackupRecovery,
-    NativeBackupRecoveryInput, NativeBackupRecoveryInventory, NativeBackupRecoveryState,
-    NativeRemovalBackup,
+    NativeArchiveMaintenanceStatus, NativeArchiveScopeResolver,
+    NativeArchiveWorkerDisposalProgress, NativeBackupCleanupJobProgress,
+    NativeBackupCleanupProgress, NativeBackupCleanupStage, NativeBackupPreservation,
+    NativeBackupPreservationPath, NativeBackupRecovery, NativeBackupRecoveryInput,
+    NativeBackupRecoveryInventory, NativeBackupRecoveryState, NativeRemovalBackup,
 };
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
@@ -72,13 +72,13 @@ pub use encryption::{
     NativeBackupCleanupJobReceipt, NativeBackupContentsInventory, NativeBackupContentsPage,
     NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
     NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
-    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeBackupWorkerDisposal,
-    NativeBackupWorkerDisposalBinding, NativeBackupWorkerSeal, NativeCustodyKeys,
-    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyRetirement,
-    NativeKeyRetirementClassification, NativeKeyRetirementEvidence, NativeKeyRetirementReceipt,
-    NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
-    NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
-    NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
+    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeBackupScopeContinuation,
+    NativeBackupScopeRequest, NativeBackupWorkerDisposal, NativeBackupWorkerDisposalBinding,
+    NativeBackupWorkerSeal, NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage,
+    NativeKeyRetirement, NativeKeyRetirementClassification, NativeKeyRetirementEvidence,
+    NativeKeyRetirementReceipt, NativeKeyUseAddressInventory, NativeKeyUseCatalogPage,
+    NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome,
+    NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
 };
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
 pub use payload::{

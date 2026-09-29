@@ -7,6 +7,24 @@ use super::*;
 #[cfg(test)]
 mod tests;
 
+enum ReplacementScope<'a> {
+    None,
+    Workspace(&'a str, Uuid),
+    Authority(Uuid),
+}
+
+impl ReplacementScope<'_> {
+    fn includes(&self, proof: &NativeBackupReplacement) -> bool {
+        match self {
+            Self::None => false,
+            Self::Workspace(workspace, authority) => {
+                proof.workspace_digest == *workspace && proof.request.authority_id == *authority
+            }
+            Self::Authority(authority) => proof.request.authority_id == *authority,
+        }
+    }
+}
+
 /// Archive histories and current refusal at one custody inspection. Backfill,
 /// replacement acceptance and key retirement change this frontier even when no
 /// new archive is issued.
@@ -199,7 +217,35 @@ impl NativeCustodyKeys {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
-        self.select_backup_keys_at(&snapshot, selected, Some((workspace, request)), budget)
+        self.select_backup_keys_at(
+            &snapshot,
+            selected,
+            ReplacementScope::Workspace(workspace, request.authority_id),
+            budget,
+        )
+    }
+
+    // Internal host continuation only. Every returned edge must be separately
+    // authorized by the service's configured scope resolver before use or bytes.
+    // Custody provenance and matching removal authority never mint workspace grants.
+    pub(crate) fn selected_backup_keys_for_authority(
+        &self,
+        selected: &BTreeMap<Uuid, String>,
+        request: &crate::NativeRemovalRequestReceipt,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(NativeBackupKeyInventory, Vec<NativeBackupReplacement>)> {
+        self.require_backup_contents()?;
+        budget.check().map_err(budget_error)?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        self.select_backup_keys_at(
+            &snapshot,
+            selected,
+            ReplacementScope::Authority(request.authority_id),
+            budget,
+        )
     }
 
     pub(in crate::encryption::keys) fn selected_backup_keys_at<S: ReadSnapshot>(
@@ -208,7 +254,7 @@ impl NativeCustodyKeys {
         selected: &BTreeMap<Uuid, String>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupKeyInventory> {
-        self.select_backup_keys_at(snapshot, selected, None, budget)
+        self.select_backup_keys_at(snapshot, selected, ReplacementScope::None, budget)
             .map(|(inventory, _)| inventory)
     }
 
@@ -216,7 +262,7 @@ impl NativeCustodyKeys {
         &self,
         snapshot: &S,
         selected: &BTreeMap<Uuid, String>,
-        request: Option<(&str, &crate::NativeRemovalRequestReceipt)>,
+        scope: ReplacementScope<'_>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<(NativeBackupKeyInventory, Vec<NativeBackupReplacement>)> {
         // Keep the classification coherent while walking all memberships. The
@@ -291,10 +337,7 @@ impl NativeCustodyKeys {
         let mut replacements = Vec::new();
         self.walk_backup_replacements(snapshot, &head, budget, |event, budget| {
             event.add_expected_keys(&mut expected);
-            if request.is_some_and(|(workspace, request)| {
-                event.value.workspace_digest == workspace
-                    && event.value.request.authority_id == request.authority_id
-            }) {
+            if scope.includes(&event.value) {
                 reserve(&mut report_bytes, &event.value, budget)?;
                 replacements.push(event.value.clone());
             }

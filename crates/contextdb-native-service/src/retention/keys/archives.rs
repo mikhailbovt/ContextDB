@@ -89,6 +89,32 @@ impl NativeService {
         selection: &NativeRemovalKeySelection,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeRemovalBackupInventory> {
+        self.removal_backup_inventory(context, request, selection, None, budget)
+    }
+
+    /// Inspect mixed-workspace preservation using fresh, explicitly configured
+    /// host authority. Historical receipts never supply another workspace's grants.
+    pub fn read_removal_backup_inventory_with_scope_authority(
+        &self,
+        workspace: &str,
+        request: &NativeRemovalRequestReceipt,
+        selection: &NativeRemovalKeySelection,
+        resolver: &NativeArchiveScopeResolver<'_>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeRemovalBackupInventory> {
+        let scopes = self.archive_scope_frame(resolver, workspace, request, budget)?;
+        let context = scopes.context_for(&digest_bytes(workspace.as_bytes()), request)?;
+        self.removal_backup_inventory(context, request, selection, Some(&scopes), budget)
+    }
+
+    pub(crate) fn removal_backup_inventory(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        selection: &NativeRemovalKeySelection,
+        scopes: Option<&backup::scopes::VerifiedArchiveScopes>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeRemovalBackupInventory> {
         let inventory = match selection {
             NativeRemovalKeySelection::Assertions { .. } => {
                 return Err(unsupported(
@@ -158,13 +184,25 @@ impl NativeService {
             .keys
             .as_ref()
             .ok_or_else(|| unsupported("archive key inventory requires independent custody"))?;
-        let (backups, replacements) = keys.selected_backup_keys_for_request(
-            &selected,
-            &digest_bytes(context.request.workspace_id.as_bytes()),
-            request,
-            budget,
-        )?;
-        self.verify_backup_replacement_requests(context, request, &replacements, budget)?;
+        let (backups, replacements) = if let Some(scopes) = scopes {
+            let selected = keys.selected_backup_keys_for_authority(&selected, request, budget)?;
+            self.verify_backup_replacement_requests_with_scopes(
+                scopes,
+                request,
+                &selected.1,
+                budget,
+            )?;
+            selected
+        } else {
+            let selected = keys.selected_backup_keys_for_request(
+                &selected,
+                &digest_bytes(context.request.workspace_id.as_bytes()),
+                request,
+                budget,
+            )?;
+            self.verify_backup_replacement_requests(context, request, &selected.1, budget)?;
+            selected
+        };
         let preservation = backup::preservation::inventory(
             &backups,
             &replacements,
@@ -179,6 +217,9 @@ impl NativeService {
         });
         let _guard = keys.lock_inventory_frontier(revision, digest, usage, budget)?;
         keys.require_backup_frontier(&backups.frontier, budget)?;
+        if let Some(scopes) = scopes {
+            scopes.require_frontier(self, budget)?;
+        }
         let report = NativeRemovalBackupInventory {
             key_inventory: inventory,
             dispositions,

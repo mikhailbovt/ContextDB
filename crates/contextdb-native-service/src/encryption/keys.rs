@@ -16,7 +16,7 @@ use super::*;
 
 mod attestations;
 mod backups;
-mod retirement;
+pub(super) mod retirement;
 pub(super) mod uses;
 mod versions;
 pub use backups::{
@@ -25,7 +25,7 @@ pub use backups::{
     NativeBackupContentsInventory, NativeBackupContentsPage, NativeBackupContentsReceipt,
     NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy, NativeBackupKeyInventory,
     NativeBackupPruningCounts, NativeBackupRegistration, NativeBackupReplacement,
-    NativeBackupReplacementReceipt,
+    NativeBackupReplacementReceipt, NativeBackupScopeContinuation, NativeBackupScopeRequest,
 };
 pub use retirement::{
     NativeKeyRetirement, NativeKeyRetirementClassification, NativeKeyRetirementEvidence,

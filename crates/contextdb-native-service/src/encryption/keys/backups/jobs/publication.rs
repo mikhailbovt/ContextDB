@@ -36,8 +36,12 @@ impl NativeCustodyKeys {
         proof: crate::backup::jobs::VerifiedBackupJob,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupCleanupJob> {
-        let (mut value, frontier) = proof.into_parts();
+        let (mut value, frontier, removal) = proof.into_parts();
         let _guard = self.writes.enter(|| budget.check().map_err(budget_error))?;
+        let _removal = removal
+            .as_ref()
+            .map(|(ledger, frontier)| ledger.lock_removal_frontier(frontier, budget))
+            .transpose()?;
         let mut tx = self.engine.begin_write().map_err(storage_error)?;
         let report = self.selected_backup_keys_at(&tx, &BTreeMap::new(), budget)?;
         let index = job_key(&value.binding);

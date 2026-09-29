@@ -170,6 +170,40 @@ pub(crate) fn inventory(
 }
 
 impl crate::NativeService {
+    pub(crate) fn verify_backup_replacement_requests_with_scopes(
+        &self,
+        scopes: &super::scopes::VerifiedArchiveScopes,
+        request: &crate::NativeRemovalRequestReceipt,
+        replacements: &[NativeBackupReplacement],
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        let mut verified = BTreeMap::new();
+        for proof in replacements {
+            budget.charge(1, 0).map_err(budget_error)?;
+            if proof.request.authority_id != request.authority_id {
+                return Err(integrity("archive preservation changes removal authority"));
+            }
+            let context = scopes.context_for(&proof.workspace_digest, &proof.request)?;
+            if crate::digest_bytes(context.request.workspace_id.as_bytes())
+                != proof.workspace_digest
+            {
+                return Err(crate::permission_denied());
+            }
+            let key = (&proof.workspace_digest, proof.request.sequence);
+            if let Some(prior) = verified.get(&key) {
+                if *prior != &proof.request {
+                    return Err(integrity(
+                        "archive scope repeats a request with different fields",
+                    ));
+                }
+            } else {
+                self.read_original_removal_inventory(context, &proof.request, budget)?;
+                verified.insert(key, &proof.request);
+            }
+        }
+        Ok(())
+    }
+
     // Authorized removals remain usable after their old keys are refused.
     // This lets A -> B (request 1) -> C (request 2) preserve all permitted data
     // without decrypting A again. The custody seal is not substitute authority
