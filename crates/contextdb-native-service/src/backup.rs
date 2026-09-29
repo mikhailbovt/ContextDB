@@ -24,7 +24,7 @@ use super::{
 mod artifacts;
 mod cleanup;
 mod contents;
-mod executor;
+pub(crate) mod executor;
 pub(crate) mod jobs;
 mod maintenance;
 pub(crate) mod preservation;
@@ -33,6 +33,8 @@ pub(crate) mod replacements;
 mod routing;
 pub(crate) mod sealing;
 pub use cleanup::{NativeBackupCleanupProgress, NativeBackupCleanupStage};
+pub use executor::NativeArchiveWorkerDisposalProgress;
+pub(crate) use executor::VerifiedWorkerDisposal;
 pub use executor::{
     NativeArchiveCleanup, NativeArchiveCleanupAction, NativeArchiveCleanupAdvance,
     NativeArchiveCleanupEntry, NativeArchiveCleanupInventory, NativeArchiveCleanupState,

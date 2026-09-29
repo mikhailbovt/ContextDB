@@ -371,8 +371,14 @@ missing inputs while capture continues. Shutdown cancels work and joins the thre
 Completed archive workers can be permanently sealed; later requests reserve a
 fresh instance from the exact seal and prior clean input. Bootstrap and import
 uncertainty recover that same generation while preserving old jobs and copy
-obligations. Worker disposal, cross-workspace reassignment and CLI/MCP encrypted
-profile provisioning remain open.
+obligations. Explicit worker disposal now waits for actual backend/snapshot drainage,
+retains intent and readable preservation, and removes a bounded managed directory.
+Cold background maintenance resumes accepted intent with fresh authority. Lost
+responses, wrong identity/scope, conflicting intents and reappeared paths preserve
+obligations. Local namespace absence does not certify media/key/external erasure.
+Request-scoped archive/disposal scheduling now preserves progress across interleaved
+requests and recurring failures, with an explicit 65,536 active-cursor bound.
+Cross-workspace reassignment and CLI/MCP encrypted profile provisioning remain open.
 Owned and mixed assertion keys can now be retired after fresh native-use and
 complete archive-preservation verification. Mixed selections require classified
 replacement batches in every affected native instance, preserving controls,

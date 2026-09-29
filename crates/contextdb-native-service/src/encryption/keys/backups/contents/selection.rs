@@ -102,9 +102,24 @@ impl NativeCustodyKeys {
     ) -> ServiceResult<()> {
         let head = self.backup_head(snapshot).map_err(storage_error)?;
         let jobs = self.walk_backup_jobs(snapshot, &head, &mut BTreeSet::new(), budget)?;
-        for job in jobs.into_iter().filter(|job| job.terminal.is_none()) {
+        let mut inputs: BTreeSet<_> = jobs
+            .iter()
+            .filter(|job| job.terminal.is_none())
+            .map(|job| job.binding.source.receipt.archive_digest.clone())
+            .collect();
+        let workers: BTreeSet<_> = jobs.iter().map(|job| job.binding.worker_instance).collect();
+        for instance in workers {
+            if let Some(disposal) = self
+                .worker_disposal_at(snapshot, instance)
+                .map_err(storage_error)?
+                && !disposal.directory_absent
+            {
+                inputs.insert(disposal.binding.preservation_artifact.archive_digest);
+            }
+        }
+        for input in inputs {
             let contents = self
-                .find_contents(snapshot, &job.binding.source.receipt.archive_digest, budget)?
+                .find_contents(snapshot, &input, budget)?
                 .ok_or_else(|| integrity("active archive job input is absent"))?;
             for page in 0..contents.pages {
                 for copy in self
@@ -115,7 +130,7 @@ impl NativeCustodyKeys {
                     if retiring.contains(&copy.version.key_id) {
                         return Err(ServiceError::new(
                             ErrorCode::EvidenceRequired,
-                            "unfinished archive job still requires its fixed input keys",
+                            "unfinished archive job or worker disposal still requires its fixed input keys",
                             false,
                         ));
                     }

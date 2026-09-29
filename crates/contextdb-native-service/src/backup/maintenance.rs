@@ -79,6 +79,13 @@ pub struct NativeArchiveMaintenanceBacklog {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NativeArchiveMaintenanceOperation {
+    /// A previously authorized worker disposal was resumed, without creating intent.
+    DisposalAdvanced {
+        /// Exact original issuance.
+        original_sequence: u64,
+        /// Actual bounded progress; directory absence is not media/key erasure.
+        progress: Box<NativeArchiveWorkerDisposalProgress>,
+    },
     /// A durable job was admitted or its start response recovered.
     Started {
         /// Exact original issuance.

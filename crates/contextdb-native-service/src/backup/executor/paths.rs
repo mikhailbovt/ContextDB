@@ -1,6 +1,26 @@
 use super::*;
 
 impl NativeArchiveCleanup<'_> {
+    pub(super) fn existing_worker_path(
+        &self,
+        original: &NativeBackupRegistration,
+        generation: Option<uuid::Uuid>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<PathBuf> {
+        budget.check().map_err(crate::raw_index::budget_error)?;
+        let root = prospective_root(&self.root)?;
+        self.require_separate(&root)?;
+        let authority = root.join(original.authority_id.to_string());
+        self.require_worker_path(&authority)?;
+        let name = generation.map_or_else(
+            || original.archive_digest.clone(),
+            |instance| format!("{}.{instance}", original.archive_digest),
+        );
+        let path = authority.join(name);
+        self.require_worker_path(&path)?;
+        Ok(path)
+    }
+
     pub(super) fn worker_path(
         &self,
         original: &NativeBackupRegistration,

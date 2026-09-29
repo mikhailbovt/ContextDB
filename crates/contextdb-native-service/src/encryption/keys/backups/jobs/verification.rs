@@ -76,6 +76,12 @@ impl NativeCustodyKeys {
             if actual != digest {
                 return Err(integrity("archive job worker index differs"));
             }
+            if let Some(disposal) = self
+                .worker_disposal_at(snapshot, instance)
+                .map_err(storage_error)?
+            {
+                self.verify_worker_disposal_preservation(snapshot, &disposal.binding, budget)?;
+            }
             expected.insert(key);
         }
         let mut jobs: Vec<_> = jobs.into_values().collect();
@@ -205,7 +211,7 @@ impl NativeCustodyKeys {
         snapshot: &S,
         receipt: &NativeBackupCleanupJobReceipt,
         instance: Uuid,
-    ) -> contextdb_storage::Result<()> {
+    ) -> contextdb_storage::Result<NativeBackupCleanupJob> {
         receipt.validate(self)?;
         let head = self.backup_head(snapshot)?;
         if head
@@ -234,6 +240,37 @@ impl NativeCustodyKeys {
             || event.value.terminal_archive_digest.is_none()
         {
             return Err(failure("worker seal requires its exact completed job"));
+        }
+        Ok(event.value)
+    }
+
+    pub(in crate::encryption::keys) fn verify_worker_disposal_preservation<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        binding: &NativeBackupWorkerDisposalBinding,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        let job = self
+            .verify_worker_seal_job(snapshot, &binding.seal.job, binding.seal.worker_instance)
+            .map_err(storage_error)?;
+        let (mut source, _, _) = job.next_source()?;
+        for receipt in &binding.preservation_path {
+            let proof = self.replacement_at(snapshot, receipt, budget)?;
+            if proof.source != source
+                || proof.workspace_digest != job.binding.workspace_digest
+                || proof.request.authority_id != job.binding.request.authority_id
+            {
+                return Err(integrity(
+                    "worker disposal preservation changes ancestry or scope",
+                ));
+            }
+            source = proof.target;
+        }
+        let artifact = self.artifact_at(snapshot, &binding.preservation_artifact, budget)?;
+        if !artifact.complete || artifact.contents != source {
+            return Err(integrity(
+                "worker disposal lacks its complete preserved input",
+            ));
         }
         Ok(())
     }

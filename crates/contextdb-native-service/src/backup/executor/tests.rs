@@ -6,9 +6,10 @@ use contextdb_service::{CapturePort, CognitiveMemoryService};
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
+mod disposal;
 mod replacement;
 
-fn issued(f: &Fixture, retain: bool) -> NativeBackupRegistration {
+pub(crate) fn issued(f: &Fixture, retain: bool) -> NativeBackupRegistration {
     let backup = f
         .native
         .create_backup(CreateBackupRequest {
@@ -64,7 +65,7 @@ fn cold(f: Fixture) -> Fixture {
     }
 }
 
-fn finish(
+pub(crate) fn finish(
     f: &Fixture,
     executor: &mut NativeArchiveCleanup<'_>,
     request: &NativeRemovalRequestReceipt,
@@ -93,7 +94,7 @@ fn finish(
     panic!("owned archive execution did not settle");
 }
 
-fn worker_path(root: &Path, original: &NativeBackupRegistration) -> PathBuf {
+pub(crate) fn worker_path(root: &Path, original: &NativeBackupRegistration) -> PathBuf {
     root.join(original.authority_id.to_string())
         .join(&original.archive_digest)
 }

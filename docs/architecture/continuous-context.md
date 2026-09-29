@@ -654,6 +654,20 @@ uses a sibling directory; later jobs on that generation reuse it without import.
 Old jobs, copy obligations and sealed directories remain. Replacement does not
 authorize disposal or physical erasure.
 
+`NativeArchiveCleanup::dispose_worker` requires explicit Admin authority, that
+exact seal, a matching closed native directory and complete readable preservation.
+Fjall's actual OS lock waits for the last backend handle, including snapshot clones.
+An independent Sync retains intent before the directory moves to a sibling
+quarantine; each call removes at most 1..256 entries, without following aliases.
+The custody publication fence spans filesystem work. Windows rename releases and
+reacquires the backend lock under that fence; the host must exclusively administer
+the managed namespace. Preservation keys stay reserved until a second Sync records
+observed absence of both names. Lost responses and restart resume the same intent.
+`read_removal_backup_worker_disposal` returns the historical observation; a disposal
+retry checks both names again and refuses any reappeared directory. Power-loss
+durability of namespace changes, media remnants, keys and external copies are not
+certified. All copy and job history remains, and global disclosure stays closed.
+
 Embedded hosts can enable `NativeArchiveMaintenance::start` with the encrypted
 owner, stable worker root, explicit workspace list and a host authentication
 adapter. The owned background thread obtains fresh Admin authentication for the
@@ -664,8 +678,14 @@ Missing metadata cannot become an idle queue. Each tick shares a cooperative
 budget across authentication, discovery and one archive operation. Workspaces and
 requests advance round-robin; capture does not invoke this loop. Status retains
 bounded pre-action counts, missing-worker obligations and failures. Shutdown
-cancels work, wakes the timer and joins the thread, retaining worker directories.
+cancels work, wakes the timer and joins the thread, retaining unfinished obligations.
 Restart rediscovers requests and resumes durable jobs without an enqueue command.
+Already accepted disposal intents are also rediscovered, alternating with archive
+jobs and removing at most 16 entries per tick. A seal alone never creates intent.
+Archive and disposal cursors alternate work within each request; interleaved requests
+and recurring failures cannot reset another request's progress. At most 65,536 active
+request cursors are retained. Exhaustion fails explicitly; observing an idle request
+releases its cursor without evicting active work.
 
 `advance_removal_backup` coordinates logical cleanup in a separate encrypted native
 owner restored from the exact issued original. Each call verifies request, ancestry
@@ -697,8 +717,8 @@ If its keys are later retired, supply the accepted path to a usable successor.
 
 Unclassified records and unretained branch descendants
 require explicit reconciliation. Discovery rescans remain budgeted administrative
-work. The inventory reports identify remaining replacement obligations. Worker
-disposal, cross-workspace reassignment and physical/external-copy
+work. The inventory reports identify remaining replacement obligations.
+Cross-workspace reassignment and physical/external-copy
 dispositions remain open. Maintenance observations cover one request at a time;
 they do not complete global deletion or reopen disclosure.
 

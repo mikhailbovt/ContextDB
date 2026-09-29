@@ -11,10 +11,15 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 mod coverage;
+mod disposal;
+pub use disposal::NativeArchiveWorkerDisposalProgress;
+pub(crate) use disposal::VerifiedWorkerDisposal;
 mod paths;
 mod plan;
 #[cfg(test)]
-mod tests;
+mod scheduling;
+#[cfg(test)]
+pub(crate) mod tests;
 
 /// Request-scoped logical work. These states never authorize physical disposal,
 /// retiring keys or global removal admission.
@@ -97,6 +102,13 @@ pub struct NativeArchiveCleanupInventory {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NativeArchiveCleanupAction {
+    /// Continued an already accepted disposal intent; no new intent is inferred.
+    DisposalAdvanced {
+        /// Original whose sealed generation is being disposed.
+        original: NativeBackupRegistration,
+        /// Actual exclusion, bounded unlink or namespace-absence observation.
+        progress: Box<NativeArchiveWorkerDisposalProgress>,
+    },
     /// Reserved the verified input and worker; import occurs on a later advance.
     Started {
         /// Durable new or recovered job binding.
@@ -136,16 +148,29 @@ pub struct NativeArchiveCleanupAdvance {
 }
 
 /// Host-owned archive executor with stable directories per original and generation.
-/// Keeps one worker open, advances round-robin and never disposes an instance.
+/// Keeps one worker open and advances round-robin. Explicit disposal intent is
+/// required before advance can resume bounded removal of a sealed generation.
 /// Recreate the controller with the same root after restart. Paths are locators;
 /// independently retained jobs and native-use records remain authoritative.
 #[derive(Debug)]
 pub struct NativeArchiveCleanup<'a> {
     owner: &'a NativeService,
     root: PathBuf,
-    after: u64,
+    // Entries require actual eligible work and leave when that request is idle.
+    // Exhaustion is explicit; evicting an active cursor would restore starvation.
+    schedules: BTreeMap<(uuid::Uuid, u64), RequestSchedule>,
     worker: Option<(PathBuf, NativeService)>,
 }
+
+#[derive(Debug, Default)]
+struct RequestSchedule {
+    archive_after: u64,
+    disposal_after: u64,
+    prefer_archive: bool,
+}
+
+// Each entry contains a fixed-size key and three scalars, never an inventory.
+const MAX_REQUEST_SCHEDULES: usize = 65_536;
 
 impl<'a> NativeArchiveCleanup<'a> {
     /// Configure execution without creating directories or touching storage.
@@ -174,7 +199,7 @@ impl<'a> NativeArchiveCleanup<'a> {
         Ok(Self {
             owner,
             root,
-            after: 0,
+            schedules: BTreeMap::new(),
             worker: None,
         })
     }
@@ -190,10 +215,14 @@ impl<'a> NativeArchiveCleanup<'a> {
         plan::inventory(self.owner, context, request, budget)
     }
 
-    /// Select and advance one eligible archive, reusing its registered worker.
+    /// Select one eligible archive or resume one already accepted disposal intent.
+    /// Alternate these classes within each request when both have work. Neither a
+    /// seal nor logical coverage creates intent; resumed disposal removes at most 16 entries.
     /// A failed attempt advances the in-memory round-robin cursor so other eligible
     /// archives can proceed. Restart progress comes from jobs and native journals.
     /// Missing directories with accepted native history remain explicit obligations.
+    /// Up to 65,536 active request cursors are retained; reaching that limit fails
+    /// explicitly. Advancing an idle request releases its cursor without eviction.
     pub fn advance(
         &mut self,
         context: &AuthenticatedRequestContext,
@@ -201,6 +230,9 @@ impl<'a> NativeArchiveCleanup<'a> {
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeArchiveCleanupAdvance> {
         let before = self.inspect(context, request, budget)?;
+        // inspect authenticated the exact retained request; sequence is unique
+        // within its authority and its retained binding already covers workspace.
+        let request_key = (request.authority_id, request.sequence);
         let eligible: Vec<_> = before
             .archives
             .iter()
@@ -212,16 +244,34 @@ impl<'a> NativeArchiveCleanup<'a> {
                 )
             })
             .collect();
+        let pending = self.pending_worker_disposals(context, request, budget)?;
+        if eligible.is_empty() && pending.is_empty() {
+            self.schedules.remove(&request_key);
+            return advance_response(before, None, budget);
+        }
+        if !self.schedules.contains_key(&request_key)
+            && self.schedules.len() >= MAX_REQUEST_SCHEDULES
+        {
+            return Err(exhausted(
+                "archive execution exceeds 65,536 active request cursors",
+            ));
+        }
+        let schedule = self.schedules.entry(request_key).or_default();
+        if !pending.is_empty() && (!schedule.prefer_archive || eligible.is_empty()) {
+            let action = self.resume_worker_disposal(context, request, pending, budget)?;
+            return advance_response(before, Some(action), budget);
+        }
         let Some(selected) = eligible
             .iter()
-            .find(|entry| entry.original.sequence > self.after)
+            .find(|entry| entry.original.sequence > schedule.archive_after)
             .or_else(|| eligible.first())
             .copied()
         else {
-            return advance_response(before, None, budget);
+            return Err(integrity("archive scheduling lost its eligible work"));
         };
         let selected = selected.clone();
-        self.after = selected.original.sequence;
+        schedule.prefer_archive = false;
+        schedule.archive_after = selected.original.sequence;
         let keys = self
             .owner
             .engine

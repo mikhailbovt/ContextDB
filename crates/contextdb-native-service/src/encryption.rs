@@ -10,6 +10,8 @@ pub(crate) mod tests;
 
 pub(crate) use keys::uses::ManagedInstanceState;
 #[cfg(test)]
+pub(crate) use keys::uses::{AFTER_DISPOSAL_SYNC, BEFORE_DISPOSAL_SYNC};
+#[cfg(test)]
 pub(crate) use keys::uses::{AFTER_SEAL_SYNC, BEFORE_SEAL_SYNC};
 pub use keys::{
     CustodyMasterKey, NativeBackupArtifactProgress, NativeBackupArtifactReceipt,
@@ -17,8 +19,9 @@ pub use keys::{
     NativeBackupCleanupJobReceipt, NativeBackupContentsInventory, NativeBackupContentsPage,
     NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
     NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
-    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeBackupWorkerSeal,
-    NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyRetirement,
+    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeBackupWorkerDisposal,
+    NativeBackupWorkerDisposalBinding, NativeBackupWorkerSeal, NativeCustodyKeys,
+    NativeKeyAllocation, NativeKeyCatalogPage, NativeKeyRetirement,
     NativeKeyRetirementClassification, NativeKeyRetirementEvidence, NativeKeyRetirementReceipt,
     NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
     NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,

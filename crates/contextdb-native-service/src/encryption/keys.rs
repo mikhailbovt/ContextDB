@@ -32,9 +32,10 @@ pub use retirement::{
     NativeKeyRetirementReceipt,
 };
 pub use uses::{
-    NativeBackupWorkerSeal, NativeKeyUseAddressInventory, NativeKeyUseCatalogPage,
-    NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome,
-    NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
+    NativeBackupWorkerDisposal, NativeBackupWorkerDisposalBinding, NativeBackupWorkerSeal,
+    NativeKeyUseAddressInventory, NativeKeyUseCatalogPage, NativeKeyUseChange,
+    NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome, NativeKeyUseReceipt,
+    NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
 };
 pub use versions::{NativeKeyAllocation, NativeKeyCatalogPage};
 

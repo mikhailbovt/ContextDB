@@ -118,6 +118,12 @@ fn tick(
         }
     }
     let operation = advanced.action.map(|action| match action {
+        NativeArchiveCleanupAction::DisposalAdvanced { original, progress } => {
+            NativeArchiveMaintenanceOperation::DisposalAdvanced {
+                original_sequence: original.sequence,
+                progress,
+            }
+        }
         NativeArchiveCleanupAction::Started { job } => NativeArchiveMaintenanceOperation::Started {
             original_sequence: job.binding.original.sequence,
             worker_instance: job.binding.worker_instance,

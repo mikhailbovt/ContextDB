@@ -24,6 +24,34 @@ impl VerifiedBackupWorkerSeal {
 }
 
 impl NativeService {
+    /// Read independently retained disposal intent or an earlier namespace-absence
+    /// observation. This does not inspect current files or certify physical erasure.
+    pub fn read_removal_backup_worker_disposal(
+        &self,
+        context: &AuthenticatedRequestContext,
+        request: &NativeRemovalRequestReceipt,
+        receipt: &NativeBackupCleanupJobReceipt,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Option<crate::NativeBackupWorkerDisposal>> {
+        let job = self.read_removal_backup_job(context, request, receipt, budget)?;
+        let disposal = self
+            .engine
+            .keys
+            .as_ref()
+            .ok_or_else(|| integrity("archive custody absent"))?
+            .backup_worker_disposal(job.binding.worker_instance, budget)?;
+        if disposal
+            .as_ref()
+            .is_some_and(|value| value.binding.seal.job != job.receipt)
+        {
+            return Err(integrity(
+                "worker disposal belongs to a different completed job",
+            ));
+        }
+        crate::retention::keys::charge_report(&disposal, budget)?;
+        Ok(disposal)
+    }
+
     /// Read a seal through any authorized owner, including when the worker can no
     /// longer open. The exact retained request and job remain required.
     pub fn read_removal_backup_worker_seal(

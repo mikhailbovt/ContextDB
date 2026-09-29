@@ -6,7 +6,9 @@ use contextdb_storage::{CommitReceipt, ScanPageRequest};
 
 use super::*;
 
+mod budget;
 mod catalog;
+mod disposal;
 mod inventory;
 mod journal;
 mod publication;
@@ -16,6 +18,9 @@ pub use catalog::{
     NativeKeyUseCatalogPage, NativeKeyUseChangesPage, NativeKeyUseOutcome, NativeKeyUseReceipt,
     NativeKeyUseTransaction,
 };
+#[cfg(test)]
+pub(crate) use disposal::{AFTER_DISPOSAL_SYNC, BEFORE_DISPOSAL_SYNC};
+pub use disposal::{NativeBackupWorkerDisposal, NativeBackupWorkerDisposalBinding};
 pub use inventory::{NativeKeyUseAddressInventory, NativeKeyUseInventory, NativeKeyUseTransition};
 pub use sealing::NativeBackupWorkerSeal;
 #[cfg(test)]
@@ -185,6 +190,8 @@ struct InstanceState {
     pending: Option<PendingUse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sealed: Option<NativeBackupWorkerSeal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disposal: Option<NativeBackupWorkerDisposal>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -209,6 +216,10 @@ enum UseOperation {
     Seal {
         previous: LocalMarker,
         job: NativeBackupCleanupJobReceipt,
+    },
+    Disposal {
+        binding: Box<NativeBackupWorkerDisposalBinding>,
+        prepared: Option<UseCheckpoint>,
     },
 }
 

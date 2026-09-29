@@ -9,6 +9,8 @@ use std::{
 };
 use zeroize::Zeroizing;
 
+mod disposal;
+
 #[derive(Debug)]
 struct Authority {
     context: Mutex<AuthenticatedRequestContext>,

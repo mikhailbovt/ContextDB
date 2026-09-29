@@ -17,6 +17,9 @@ use fjall::{
     KeyspaceCreateOptions, PersistMode, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace,
 };
 
+mod closed;
+pub use closed::ClosedFjallDirectory;
+
 /// Physical Fjall keyspace used by this adapter for its monotonic sequence.
 ///
 /// Higher-level formats may use this name when enforcing an exact physical
@@ -79,6 +82,29 @@ impl FjallStorage {
             .manual_journal_persist(true)
             .open()
             .map_err(backend)?;
+        Self::from_database(db)
+    }
+
+    /// Open existing storage for administrative inspection, without creating a
+    /// missing database. None means a database handle or snapshot still holds its
+    /// exclusive backend lock. This does not authorize removal of any directory.
+    pub fn try_open_existing(path: &Path) -> Result<Option<Self>> {
+        closed::require_existing(path)?;
+        let db = match SingleWriterTxDatabase::builder(path)
+            .manual_journal_persist(true)
+            .open()
+        {
+            Ok(db) => db,
+            Err(fjall::Error::Locked) => return Ok(None),
+            Err(error) => return Err(backend(error)),
+        };
+        if !db.keyspace_exists(FJALL_INTERNAL_META_KEYSPACE) {
+            return Err(backend("existing database lacks its ContextDB sequence"));
+        }
+        Self::from_database(db).map(Some)
+    }
+
+    fn from_database(db: SingleWriterTxDatabase) -> Result<Self> {
         let meta = db
             .keyspace(FJALL_INTERNAL_META_KEYSPACE, KeyspaceCreateOptions::default)
             .map_err(backend)?;

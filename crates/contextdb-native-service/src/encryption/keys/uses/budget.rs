@@ -1,4 +1,4 @@
-//! Charge the existing full journal verifier at its storage boundary. Budget
+//! Charge native-use inspection at its storage boundary. Budget
 //! failures keep their service error code instead of becoming storage failures.
 
 use std::cell::RefCell;

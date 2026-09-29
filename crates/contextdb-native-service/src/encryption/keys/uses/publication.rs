@@ -36,6 +36,7 @@ impl UsePublication<'_> {
                 marker: marker.clone(),
                 pending: None,
                 sealed: None,
+                disposal: None,
             },
         )?;
         synchronized(tx.commit(Durability::Sync)?)?;

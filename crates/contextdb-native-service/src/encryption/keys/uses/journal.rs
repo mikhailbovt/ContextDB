@@ -85,6 +85,7 @@ impl NativeCustodyKeys {
                     || state.revision != 1
                     || state.pending.is_some()
                     || state.sealed.is_some()
+                    || state.disposal.is_some()
                     || state.marker.native_sequence != 1
                     || state.marker.usage.is_some()
                 {
@@ -93,6 +94,7 @@ impl NativeCustodyKeys {
             }
             UseOperation::Prepare { preparation } => {
                 if state.sealed.is_some()
+                    || state.disposal.is_some()
                     || state.marker != preparation.previous
                     || state.pending
                         != Some(PendingUse {
@@ -131,6 +133,7 @@ impl NativeCustodyKeys {
                     || outcome != accepted
                     || state.pending.is_some()
                     || state.sealed.is_some()
+                    || state.disposal.is_some()
                     || state.marker != expected
                 {
                     return Err(failure("native key-use completed state differs"));
@@ -144,6 +147,7 @@ impl NativeCustodyKeys {
             UseOperation::Seal { previous, job } => {
                 self.verify_worker_seal_job(snapshot, &job, instance)?;
                 if state.pending.is_some()
+                    || state.disposal.is_some()
                     || state.marker != previous
                     || state.sealed
                         != Some(sealing::receipt(
@@ -156,6 +160,35 @@ impl NativeCustodyKeys {
                     return Err(failure(
                         "native worker seal differs from retained acceptance",
                     ));
+                }
+            }
+            UseOperation::Disposal { binding, prepared } => {
+                let marker = self.verify_disposal_binding(snapshot, &binding)?;
+                let expected = disposal::receipt(
+                    self.authority_id(),
+                    &accepted,
+                    *binding,
+                    prepared.is_some(),
+                )?;
+                if state.pending.is_some()
+                    || state.sealed.as_ref() != Some(&expected.binding.seal)
+                    || state.marker != marker
+                    || state.disposal.as_ref() != Some(&expected)
+                {
+                    return Err(failure("native worker disposal state differs"));
+                }
+                if let Some(prepared) = prepared {
+                    let event = self.use_event(snapshot, prepared.sequence)?;
+                    if event.checkpoint != prepared
+                        || prepared.sequence >= accepted.sequence
+                        || event.change
+                            != (UseOperation::Disposal {
+                                binding: Box::new(expected.binding),
+                                prepared: None,
+                            })
+                    {
+                        return Err(failure("native worker disposal lacks its exact intent"));
+                    }
                 }
             }
         }
@@ -377,6 +410,7 @@ impl NativeCustodyKeys {
                                     },
                                     pending: None,
                                     sealed: None,
+                                    disposal: None,
                                 },
                             )
                             .is_some()
@@ -509,6 +543,38 @@ impl NativeCustodyKeys {
                     )?);
                     // Sealing disables future access; it removes no ciphertext,
                     // acknowledged use, pending-copy history or key obligation.
+                    advance_state(state, &event.checkpoint)?;
+                    references.insert(
+                        instance_key(instance, state.revision),
+                        event.checkpoint.clone(),
+                    );
+                }
+                UseOperation::Disposal { binding, prepared } => {
+                    let instance = binding.seal.worker_instance;
+                    let state = states
+                        .get_mut(&instance)
+                        .ok_or_else(|| failure("native worker disposal has no instance"))?;
+                    if unclaimed_pages != 0
+                        || state.pending.is_some()
+                        || state.sealed.as_ref() != Some(&binding.seal)
+                    {
+                        return Err(failure("native worker disposal requires its exact seal"));
+                    }
+                    match (&state.disposal, &prepared) {
+                        (None, None) => {}
+                        (Some(prior), Some(checkpoint))
+                            if !prior.directory_absent
+                                && prior.binding == *binding
+                                && prior.checkpoint() == *checkpoint => {}
+                        _ => return Err(failure("native worker disposal transition differs")),
+                    }
+                    self.verify_disposal_binding(snapshot, &binding)?;
+                    state.disposal = Some(disposal::receipt(
+                        self.authority_id(),
+                        &event.checkpoint,
+                        *binding,
+                        prepared.is_some(),
+                    )?);
                     advance_state(state, &event.checkpoint)?;
                     references.insert(
                         instance_key(instance, state.revision),

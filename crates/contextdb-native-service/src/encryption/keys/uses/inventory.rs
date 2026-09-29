@@ -6,8 +6,7 @@ use contextdb_service::{ErrorCode, ServiceError, ServiceResult};
 use super::*;
 use journal::UseVisit;
 
-mod budget;
-use budget::BudgetedSnapshot;
+use super::budget::BudgetedSnapshot;
 #[cfg(test)]
 mod tests;
 
