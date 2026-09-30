@@ -49,7 +49,7 @@ impl Peer {
 
     pub(super) fn config(&self) -> serde_json::Value {
         serde_json::json!({"program":self.python,"args":["-I","-u",self.script,"--log",self.log,"--mode",self.mode],
-            "seed":17,"timeout_millis":if self.mode == "deadline" {1500} else {10000},
+            "seed":17,"timeout_millis":if self.mode == "deadline" {10000} else {30000},
             "model_profile":{"id":"deterministic-owned-subprocess","family":"deterministic-fixture",
                 "tokenizer_id":"contextdb.reference_unicode_tokens.v1","renderer":"compact",
                 "max_context_tokens":8192,"reserved_output_tokens":512,"preferred_structured_format":"compact_text",

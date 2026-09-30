@@ -37,7 +37,10 @@ def record(request):
     with open(args.log, "a", encoding="utf-8") as log:
         log.write(json.dumps({"pid": os.getpid(), "request": request}) + "\n")
         log.flush()
-        os.fsync(log.fileno())
+        # Preserve lost-send evidence before an intentional process exit. Token
+        # counts are observed diagnostics, not thousands of durable model sends.
+        if request["op"] == "complete":
+            os.fsync(log.fileno())
 
 
 def count(text):
@@ -68,7 +71,7 @@ try:
             if args.mode == "lost":
                 os._exit(0)
             if args.mode == "deadline":
-                time.sleep(10)
+                time.sleep(30)
             if args.mode == "large":
                 response = {"completed": True, "text": "bridge-private-sentinel-7319" * 100000, "usage": None}
             elif args.mode == "invalid_partial":

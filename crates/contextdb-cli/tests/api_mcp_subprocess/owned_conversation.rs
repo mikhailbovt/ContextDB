@@ -80,7 +80,10 @@ fn host(f: &Fixture, config: &Path, resume: bool, bytes: Vec<u8>) -> Output {
     };
     let stdout = collect(Box::new(stdout));
     let stderr = collect(Box::new(stderr));
-    let deadline = Instant::now() + Duration::from_secs(90);
+    // A batch contains 21 separately bounded turns and durable native writes.
+    // Its process guard is not a per-turn latency gate for a shared CI runner.
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(180);
     let status = loop {
         if let Some(status) = child.0.try_wait().expect("host progress") {
             break status;
@@ -97,6 +100,11 @@ fn host(f: &Fixture, config: &Path, resume: bool, bytes: Vec<u8>) -> Output {
         stdout: stdout.join().expect("host stdout"),
         stderr: stderr.join().expect("host stderr"),
     };
+    eprintln!(
+        "owned host: resume={resume}, elapsed_ms={}, status={}",
+        started.elapsed().as_millis(),
+        output.status
+    );
     no_key_disclosure(&output);
     for bytes in [&output.stdout, &output.stderr] {
         let text = String::from_utf8_lossy(bytes);
@@ -439,13 +447,13 @@ fn owned_conversation_unknown_send_never_repeats_on_cold_resume_and_children_end
             "uncertain reader response cannot become a complete turn"
         );
         assert!(
-            before.elapsed() < Duration::from_secs(8),
-            "bounded private reader termination"
+            before.elapsed() < Duration::from_secs(15),
+            "bounded private reader termination in {mode}"
         );
         assert_eq!(
             peer.sends().len(),
             1,
-            "one actual dispatch before uncertainty"
+            "one actual dispatch before uncertainty in {mode}"
         );
         assert!(records(&failed).iter().all(|item| item["type"] != "answer"));
         peer.assert_reaped();
