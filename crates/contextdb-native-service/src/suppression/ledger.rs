@@ -78,14 +78,27 @@ impl fmt::Debug for NativeSuppressionLedger {
 impl NativeSuppressionLedger {
     /// Create a new authority in a new directory. An existing path is rejected.
     pub fn create(path: impl AsRef<Path>, database_id: &str) -> ServiceResult<Arc<Self>> {
+        Self::create_with_authority(path, database_id, ObservationId::new().as_uuid())
+    }
+
+    /// Create a fresh format-3 authority with an identity pinned by the host.
+    /// The identity does not restore the history of a lost ledger.
+    pub fn create_with_authority(
+        path: impl AsRef<Path>,
+        database_id: &str,
+        authority: Uuid,
+    ) -> ServiceResult<Arc<Self>> {
         validate_identifier(database_id, "suppression database ID")?;
+        if authority.is_nil() {
+            return Err(invalid("suppression authority must not be nil"));
+        }
         std::fs::create_dir(path.as_ref())
             .map_err(|_| integrity("suppression authority requires a new directory"))?;
         let engine = FjallStorage::open(path.as_ref()).map_err(storage_error)?;
         let rows = keyspace("contextdb_suppression")?;
         let identity = Identity {
             version: 3,
-            authority: ObservationId::new().as_uuid(),
+            authority,
             database: digest_bytes(database_id.as_bytes()),
         };
         let mut tx = engine.begin_write().map_err(storage_error)?;
@@ -121,7 +134,9 @@ impl NativeSuppressionLedger {
         if !path.as_ref().is_dir() {
             return Err(integrity("current suppression authority is unavailable"));
         }
-        let engine = FjallStorage::open(path.as_ref()).map_err(storage_error)?;
+        let engine = FjallStorage::try_open_existing(path.as_ref())
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("current suppression authority is already open"))?;
         let rows = keyspace("contextdb_suppression")?;
         let snapshot = engine
             .begin_read(SnapshotSelector::Latest)
@@ -166,6 +181,12 @@ impl NativeSuppressionLedger {
     #[must_use]
     pub fn authority_id(&self) -> Uuid {
         self.identity.authority
+    }
+
+    /// Actual retained authority format, including legacy reopened ledgers.
+    #[must_use]
+    pub fn format_version(&self) -> u16 {
+        self.identity.version
     }
 
     pub(crate) fn require_database(&self, database: &str) -> ServiceResult<()> {

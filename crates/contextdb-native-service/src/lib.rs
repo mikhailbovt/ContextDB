@@ -477,26 +477,54 @@ impl NativeService {
         suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
         keys: Option<std::sync::Arc<NativeCustodyKeys>>,
     ) -> ServiceResult<Self> {
-        validate_identifier(&database_id, "database ID")?;
+        Self::validate_open_bindings(
+            &database_id,
+            &token_key,
+            suppression.as_deref(),
+            keys.as_deref(),
+        )?;
+        let engine = NativeStorage::open(path.as_ref(), keys).map_err(storage_error)?;
+        Self::finish_open(path.as_ref(), database_id, token_key, suppression, engine)
+    }
+
+    fn validate_open_bindings(
+        database_id: &str,
+        token_key: &[u8; 32],
+        suppression: Option<&NativeSuppressionLedger>,
+        keys: Option<&NativeCustodyKeys>,
+    ) -> ServiceResult<()> {
+        validate_identifier(database_id, "database ID")?;
         if token_key.iter().all(|byte| *byte == 0) {
             return Err(invalid("native service token key must not be all zero"));
         }
-        if let Some(ledger) = &suppression {
-            ledger.require_database(&database_id)?;
+        if let Some(ledger) = suppression {
+            ledger.require_database(database_id)?;
         }
-        if let Some(keys) = &keys {
-            keys.require_database(&database_id)?;
+        if let Some(keys) = keys {
+            keys.require_database(database_id)?;
             if suppression.is_none() {
                 return Err(invalid(
                     "encrypted native storage requires current suppression",
                 ));
             }
         }
-        let engine = NativeStorage::open(path.as_ref(), keys).map_err(storage_error)?;
-        Self::finish_open(path.as_ref(), database_id, token_key, suppression, engine)
+        Ok(())
     }
 
     fn finish_open(
+        path: &Path,
+        database_id: String,
+        token_key: [u8; 32],
+        suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
+        engine: NativeStorage,
+    ) -> ServiceResult<Self> {
+        let service = Self::from_native_storage(path, database_id, token_key, suppression, engine)?;
+        service.install_or_verify_manifest()?;
+        service.verify_native(false)?;
+        Ok(service)
+    }
+
+    fn from_native_storage(
         path: &Path,
         database_id: String,
         token_key: [u8; 32],
@@ -525,7 +553,7 @@ impl NativeService {
             ));
         }
         let keyspaces = Keyspaces::new()?;
-        let service = Self {
+        Ok(Self {
             engine,
             path: native_path,
             keyspaces,
@@ -539,10 +567,7 @@ impl NativeService {
             lease_instance: contextdb_core::ObservationId::new().as_uuid(),
             suppression,
             record_write_recovery: Mutex::default(),
-        };
-        service.install_or_verify_manifest()?;
-        service.verify_native(false)?;
-        Ok(service)
+        })
     }
 
     /// Stable native profile name used by status and host capability manifests.

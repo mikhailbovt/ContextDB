@@ -391,7 +391,16 @@ empty-path bypass refusal, independent scheduling and exact preserved originals
 and receipts. Completed controlled disposal can discharge a managed instance's
 current key obligation without rewriting acknowledgements; versioned witnesses
 preserve older conservative decisions. Mixed recovery remains usable after current
-selected-key refusal. CLI/MCP encrypted provisioning, migration and scale remain open.
+selected-key refusal. Explicit CLI provisioning now pins a fresh encrypted native
+profile in the external state head. Normal CLI/MCP reopen requires its retained
+authorities, paths and distinct master key, including before joining a running
+broker; missing artifacts cannot fall back to plaintext. A versioned composite
+backup retains encrypted native bytes and exact custody identities. Real Windows
+subprocess acceptance covers memory capture/recall, cold reopen, pristine restore,
+wrong or missing master/configuration/authority, and plaintext compatibility.
+The separate lifecycle archive/runtime ledger remains plaintext. Interrupted
+initialization recovery, plaintext migration, owned-runtime integration and scale
+remain open.
 Owned and mixed assertion keys can now be retired after fresh native-use and
 complete archive-preservation verification. Mixed selections require classified
 replacement batches in every affected native instance, preserving controls,

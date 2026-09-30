@@ -27,9 +27,11 @@ and release verifier—not the presence of an API name—determine completion.
   and index rebuild; interrupted revocation keeps disclosure closed. Bound native
   restore checks an independently retained current suppression ledger before reads;
   unbound archives containing captures require explicit migration. The optional
-  encrypted Rust profile seals native values and backups using an independently
+  encrypted native profile seals native values and backups using an independently
   retained key inventory and master key. It does not hide record addresses or
-  detect rollback of all authorities. CLI/MCP key provisioning, plaintext
+  detect rollback of all authorities. Explicit CLI provisioning and MCP reopen
+  bind the retained native profile; the separate lifecycle archive/runtime ledger
+  remains plaintext. Interrupted initialization recovery, plaintext
   migration, key reclamation, remote authority custody and physical deletion
   remain open. Explicit source/assertion/chunk pruning supports interrupted
   cleanup and restore, retaining independent assertions and shared blocks.
@@ -77,8 +79,8 @@ and release verifier—not the presence of an API name—determine completion.
   clears that managed instance's current key obligation; historical copy evidence
   remains, and older witnesses retain conservative obligations. Local namespace
   absence does not certify media, master-key or external-copy destruction.
-  CLI/MCP encrypted profile provisioning, migration, measured backlog and scale
-  remain unfinished. Scheduling results describe one request's inventory before
+  Migration, measured backlog and scale remain unfinished. Scheduling results
+  describe one request's inventory before
   each action, not global deletion completion.
   Owned and mixed-key retirement reject unresolved native/archive obligations and
   deny decryption through old snapshots or restored archives. Mixed keys require

@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use contextdb_native_service::{
-    NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NativeService,
+    NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NATIVE_ENCRYPTED_BACKUP_FORMAT,
+    NativeService,
 };
 use contextdb_service::{
     BackupResponse, Capability, CapabilityState, CognitiveMemoryService, CompileContextRequest,
@@ -27,14 +28,17 @@ use contextdb_service::{
     service_capability_manifest_v1,
 };
 
+use crate::native_profile::{self, CustodyIdentity};
 use crate::production::ProductionService;
 use crate::{CliResult, LoadedState, durable_checkpoint_error};
 
 const HYBRID_PROFILE: &str = "codex-local-hybrid-v1";
 pub(crate) const CODEX_BACKUP_FORMAT: &str = "contextdb.codex-composite-backup.v1";
+pub(crate) const CODEX_ENCRYPTED_BACKUP_FORMAT: &str = "contextdb.codex-composite-backup.v2";
 pub(crate) const CODEX_BACKUP_RESTORE_POLICY: &str =
     "lifecycle-exact-match+native-pristine-target-only";
 const CODEX_BACKUP_MAGIC: &[u8] = b"contextdb/codex-composite-backup/v1\0";
+const CODEX_ENCRYPTED_BACKUP_MAGIC: &[u8] = b"contextdb/codex-composite-backup/v2\0";
 const CODEX_BACKUP_SCHEMA_VERSION: u16 = 1;
 const CODEX_BACKUP_FOOTER_BYTES: usize = 32;
 const MAX_LIFECYCLE_COMPONENT_BYTES: usize = 512 * 1024 * 1024;
@@ -68,6 +72,7 @@ const CODEX_AVAILABLE_CAPABILITIES: &[&str] = &[
 pub(crate) struct CodexService {
     native: NativeService,
     lifecycle: Arc<ProductionService>,
+    custody: Option<CustodyIdentity>,
 }
 
 impl std::fmt::Debug for CodexService {
@@ -84,13 +89,109 @@ impl CodexService {
     /// Opens both authorities from one already authenticated CLI state.
     pub(crate) fn open(path: &Path, state: Arc<LoadedState>) -> CliResult<Self> {
         let key = state.key.expose_copy();
+        state
+            .authority
+            .require_native_restore_ready(&key)
+            .map_err(crate::CliError::from)?;
         let (_, identity) = state
             .authority
             .load_verified(&key)
             .map_err(|_| durable_checkpoint_error("authenticated Codex state preflight failed"))?;
-        let native = NativeService::open(native_store_path(path), identity.database_id, key)?;
+        let commitment = state
+            .authority
+            .native_profile_digest(&key)
+            .map_err(crate::CliError::from)?;
+        let profile = native_profile::load(path, &state.key, commitment.as_deref())?;
+        if profile
+            .as_ref()
+            .is_some_and(|profile| profile.identity().database_id != identity.database_id)
+        {
+            return Err(
+                integrity_backup("native profile belongs to another lifecycle database").into(),
+            );
+        }
+        let custody = profile.as_ref().map(|profile| profile.identity().clone());
+        let native = match profile {
+            Some(profile) => profile.open(&state.key, false)?,
+            None => NativeService::open(native_store_path(path), identity.database_id, key)?,
+        };
         let lifecycle = Arc::new(ProductionService::open(path, state)?);
-        Ok(Self { native, lifecycle })
+        Ok(Self {
+            native,
+            lifecycle,
+            custody,
+        })
+    }
+
+    /// The operator may recreate a pristine native materialization only after
+    /// authenticating the retained profile and exact composite/lifecycle binding.
+    pub(crate) fn restore_operator(
+        path: &Path,
+        state: Arc<LoadedState>,
+        request: RestoreBackupRequest,
+    ) -> CliResult<RestoreBackupResponse> {
+        authorize_capability(&request.context, Capability::Admin)?;
+        let envelope = checked_restore_envelope(&request)?;
+        let key = state.key.expose_copy();
+        state
+            .authority
+            .require_native_restore_ready(&key)
+            .map_err(crate::CliError::from)?;
+        let commitment = state
+            .authority
+            .native_profile_digest(&key)
+            .map_err(crate::CliError::from)?;
+        let mut profile = native_profile::load(path, &state.key, commitment.as_deref())?;
+        if envelope.custody.as_ref() != profile.as_ref().map(|profile| profile.identity()) {
+            return Err(incompatible_backup_profile().into());
+        }
+        let lifecycle = ProductionService::open(path, state.clone())?;
+        lifecycle
+            .with_host_archive_current(|current| {
+                require_lifecycle_restore_match(&envelope, current)?;
+                let mut pending = false;
+                let native = match &mut profile {
+                    Some(profile) => {
+                        let target = native_store_path(path);
+                        let create = match std::fs::symlink_metadata(&target) {
+                            Ok(_) => false,
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                            Err(_) => {
+                                return Err(integrity_backup(
+                                    "native restore target is unavailable",
+                                ));
+                            }
+                        };
+                        if create {
+                            let digest = commitment.as_deref().ok_or_else(|| integrity_backup("native custody commitment is absent"))?;
+                            state.authority.begin_native_restore(&key, digest).map_err(|_| integrity_backup("native recovery fence publication failed"))?;
+                            profile.begin_restore(&state.key).map_err(|error| error.0)?;
+                            pending = true;
+                        }
+                        profile.open(&state.key, create).map_err(|error| error.0)?
+                    }
+                    None => NativeService::open(
+                        native_store_path(path),
+                        envelope.database_id.clone(),
+                        key,
+                    )?,
+                };
+                let verify_context = request.context.request.clone();
+                let response = native.restore_backup(RestoreBackupRequest {
+                    context: request.context,
+                    format: envelope.native.format,
+                    bytes: envelope.native.bytes,
+                    digest: envelope.native.digest,
+                })?;
+                if pending {
+                    native.verify(VerifyRequest { context: verify_context, deep: true })?;
+                    drop(native);
+                    profile.as_mut().ok_or_else(|| integrity_backup("native custody profile is absent"))?.finish_restore(&state.key).map_err(|error| error.0)?;
+                    state.authority.finish_native_restore(&key, commitment.as_deref().ok_or_else(|| integrity_backup("native custody commitment is absent"))?).map_err(|_| integrity_backup("native recovery activation failed; explicit operator recovery is required"))?;
+                }
+                Ok(response)
+            })
+            .map_err(crate::CliError::from)
     }
 }
 
@@ -223,6 +324,12 @@ impl CognitiveMemoryService for CodexService {
             memory.profile, lifecycle.profile
         );
         memory.capability_manifest = codex_capability_manifest(&memory.profile);
+        if self.custody.is_some() {
+            memory.capability_manifest.capabilities.insert(
+                "encrypted_custody_domains".to_owned(),
+                CapabilityState::Available,
+            );
+        }
         Ok(memory)
     }
 
@@ -252,7 +359,9 @@ impl CognitiveMemoryService for CodexService {
             let native = self.native.create_backup(request)?;
             if !matches!(
                 native.format.as_str(),
-                NATIVE_BACKUP_FORMAT | NATIVE_CONTINUOUS_BACKUP_FORMAT
+                NATIVE_BACKUP_FORMAT
+                    | NATIVE_CONTINUOUS_BACKUP_FORMAT
+                    | NATIVE_ENCRYPTED_BACKUP_FORMAT
             ) {
                 return Err(integrity_backup("native backup format diverged"));
             }
@@ -261,10 +370,11 @@ impl CognitiveMemoryService for CodexService {
                 database_id: lifecycle_identity.database_id,
                 lifecycle: BackupComponent::from_export(lifecycle.clone()),
                 native: BackupComponent::from_response(native),
+                custody: self.custody.clone(),
             };
             let bytes = encode_codex_backup(&envelope)?;
             Ok(BackupResponse {
-                format: CODEX_BACKUP_FORMAT.to_owned(),
+                format: envelope.format().to_owned(),
                 digest: blake3::hash(&bytes).to_hex().to_string(),
                 bytes,
                 commit_seq: native_commit_seq,
@@ -279,34 +389,14 @@ impl CognitiveMemoryService for CodexService {
         // Authentication precedes all envelope parsing and lifecycle identity
         // comparison. Restore never becomes a content or format oracle.
         authorize_capability(&request.context, Capability::Admin)?;
-        if request.format != CODEX_BACKUP_FORMAT {
-            return Err(ServiceError::new(
-                ErrorCode::FormatIncompatible,
-                "Codex composite backup format is incompatible",
-                false,
-            ));
-        }
-        if request.bytes.len() > MAX_CODEX_BACKUP_BYTES {
-            return Err(ServiceError::new(
-                ErrorCode::ResourceExhausted,
-                "Codex composite backup exceeds its bounded size",
-                false,
-            ));
-        }
-        if request.digest != blake3::hash(&request.bytes).to_hex().to_string() {
-            return Err(integrity_backup("Codex composite backup digest is invalid"));
+        let envelope = checked_restore_envelope(&request)?;
+        if envelope.custody != self.custody {
+            return Err(incompatible_backup_profile());
         }
         let RestoreBackupRequest { context, bytes, .. } = request;
-        let envelope = decode_codex_backup(&bytes)?;
         drop(bytes);
         self.lifecycle.with_host_archive_current(|current| {
-            let current_identity = crate::state_head::inspect_archive(&current.bytes)
-                .map_err(|_| integrity_backup("verified lifecycle archive is invalid"))?;
-            if current_identity.database_id != envelope.database_id
-                || !envelope.lifecycle.matches_export(current)
-            {
-                return Err(lifecycle_restore_mismatch());
-            }
+            require_lifecycle_restore_match(&envelope, current)?;
             self.native.restore_backup(RestoreBackupRequest {
                 context,
                 format: envelope.native.format,
@@ -438,6 +528,65 @@ struct CodexBackupEnvelope {
     database_id: String,
     lifecycle: BackupComponent,
     native: BackupComponent,
+    custody: Option<CustodyIdentity>,
+}
+
+impl CodexBackupEnvelope {
+    fn format(&self) -> &'static str {
+        if self.custody.is_some() {
+            CODEX_ENCRYPTED_BACKUP_FORMAT
+        } else {
+            CODEX_BACKUP_FORMAT
+        }
+    }
+}
+
+pub(crate) fn backup_format(bytes: &[u8]) -> ServiceResult<&'static str> {
+    Ok(decode_codex_backup(bytes)?.format())
+}
+
+fn incompatible_backup_profile() -> ServiceError {
+    ServiceError::new(
+        ErrorCode::FormatIncompatible,
+        "Codex backup and current native custody profile differ; explicit migration is required",
+        false,
+    )
+}
+
+fn checked_restore_envelope(request: &RestoreBackupRequest) -> ServiceResult<CodexBackupEnvelope> {
+    if !matches!(
+        request.format.as_str(),
+        CODEX_BACKUP_FORMAT | CODEX_ENCRYPTED_BACKUP_FORMAT
+    ) {
+        return Err(incompatible_backup_profile());
+    }
+    if request.bytes.len() > MAX_CODEX_BACKUP_BYTES {
+        return Err(ServiceError::new(
+            ErrorCode::ResourceExhausted,
+            "Codex composite backup exceeds its bounded size",
+            false,
+        ));
+    }
+    if request.digest != blake3::hash(&request.bytes).to_hex().to_string() {
+        return Err(integrity_backup("Codex composite backup digest is invalid"));
+    }
+    let envelope = decode_codex_backup(&request.bytes)?;
+    if envelope.format() != request.format {
+        return Err(incompatible_backup_profile());
+    }
+    Ok(envelope)
+}
+
+fn require_lifecycle_restore_match(
+    envelope: &CodexBackupEnvelope,
+    current: &ExportResponse,
+) -> ServiceResult<()> {
+    let identity = crate::state_head::inspect_archive(&current.bytes)
+        .map_err(|_| integrity_backup("verified lifecycle archive is invalid"))?;
+    if identity.database_id != envelope.database_id || !envelope.lifecycle.matches_export(current) {
+        return Err(lifecycle_restore_mismatch());
+    }
+    Ok(())
 }
 
 fn encode_codex_backup(envelope: &CodexBackupEnvelope) -> ServiceResult<Vec<u8>> {
@@ -448,7 +597,11 @@ fn encode_codex_backup(envelope: &CodexBackupEnvelope) -> ServiceResult<Vec<u8>>
     )?;
     validate_codex_component(
         &envelope.native,
-        &[NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT],
+        if envelope.custody.is_some() {
+            &[NATIVE_ENCRYPTED_BACKUP_FORMAT]
+        } else {
+            &[NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT]
+        },
         MAX_NATIVE_COMPONENT_BYTES,
     )?;
     let identity = crate::state_head::inspect_archive(&envelope.lifecycle.bytes)
@@ -463,11 +616,36 @@ fn encode_codex_backup(envelope: &CodexBackupEnvelope) -> ServiceResult<Vec<u8>>
     }
 
     let mut output = Vec::new();
-    push_codex_bytes(&mut output, CODEX_BACKUP_MAGIC)?;
-    push_codex_u16(&mut output, CODEX_BACKUP_SCHEMA_VERSION)?;
-    push_codex_string(&mut output, CODEX_BACKUP_FORMAT)?;
+    push_codex_bytes(
+        &mut output,
+        if envelope.custody.is_some() {
+            CODEX_ENCRYPTED_BACKUP_MAGIC
+        } else {
+            CODEX_BACKUP_MAGIC
+        },
+    )?;
+    push_codex_u16(
+        &mut output,
+        if envelope.custody.is_some() {
+            2
+        } else {
+            CODEX_BACKUP_SCHEMA_VERSION
+        },
+    )?;
+    push_codex_string(&mut output, envelope.format())?;
     push_codex_string(&mut output, CODEX_BACKUP_RESTORE_POLICY)?;
     push_codex_string(&mut output, &envelope.database_id)?;
+    if let Some(custody) = &envelope.custody {
+        if custody.database_id != envelope.database_id
+            || custody.custody_format != 4
+            || custody.suppression_format != 3
+        {
+            return Err(incompatible_backup_profile());
+        }
+        let encoded = serde_json::to_string(custody)
+            .map_err(|_| integrity_backup("Codex custody identity is invalid"))?;
+        push_codex_string(&mut output, &encoded)?;
+    }
     push_codex_component(&mut output, &envelope.lifecycle)?;
     push_codex_component(&mut output, &envelope.native)?;
     let footer = *blake3::hash(&output).as_bytes();
@@ -492,9 +670,21 @@ fn decode_codex_backup(bytes: &[u8]) -> ServiceResult<CodexBackupEnvelope> {
         ));
     }
     let mut reader = CodexBackupReader::new(body);
-    if reader.take(CODEX_BACKUP_MAGIC.len())? != CODEX_BACKUP_MAGIC
-        || reader.read_u16()? != CODEX_BACKUP_SCHEMA_VERSION
-        || reader.read_string(128)? != CODEX_BACKUP_FORMAT
+    let magic = reader.take(CODEX_BACKUP_MAGIC.len())?;
+    let encrypted = magic == CODEX_ENCRYPTED_BACKUP_MAGIC;
+    if (!encrypted && magic != CODEX_BACKUP_MAGIC)
+        || reader.read_u16()?
+            != if encrypted {
+                2
+            } else {
+                CODEX_BACKUP_SCHEMA_VERSION
+            }
+        || reader.read_string(128)?
+            != if encrypted {
+                CODEX_ENCRYPTED_BACKUP_FORMAT
+            } else {
+                CODEX_BACKUP_FORMAT
+            }
         || reader.read_string(128)? != CODEX_BACKUP_RESTORE_POLICY
     {
         return Err(ServiceError::new(
@@ -504,6 +694,14 @@ fn decode_codex_backup(bytes: &[u8]) -> ServiceResult<CodexBackupEnvelope> {
         ));
     }
     let database_id = reader.read_string(1_024)?;
+    let custody = if encrypted {
+        Some(
+            serde_json::from_str::<CustodyIdentity>(&reader.read_string(2048)?)
+                .map_err(|_| integrity_backup("Codex custody identity is invalid"))?,
+        )
+    } else {
+        None
+    };
     let lifecycle = reader.read_component(MAX_LIFECYCLE_COMPONENT_BYTES)?;
     let native = reader.read_component(MAX_NATIVE_COMPONENT_BYTES)?;
     if !reader.is_finished() {
@@ -515,6 +713,7 @@ fn decode_codex_backup(bytes: &[u8]) -> ServiceResult<CodexBackupEnvelope> {
         database_id,
         lifecycle,
         native,
+        custody,
     };
     validate_codex_component(
         &envelope.lifecycle,
@@ -523,7 +722,11 @@ fn decode_codex_backup(bytes: &[u8]) -> ServiceResult<CodexBackupEnvelope> {
     )?;
     validate_codex_component(
         &envelope.native,
-        &[NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT],
+        if encrypted {
+            &[NATIVE_ENCRYPTED_BACKUP_FORMAT]
+        } else {
+            &[NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT]
+        },
         MAX_NATIVE_COMPONENT_BYTES,
     )?;
     let identity = crate::state_head::inspect_archive(&envelope.lifecycle.bytes)

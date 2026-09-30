@@ -81,6 +81,28 @@ impl NativeStorage {
         Ok(storage)
     }
 
+    /// Open physical controls without bootstrapping or reconciling native use.
+    pub(crate) fn open_existing(path: &Path, keys: Arc<NativeCustodyKeys>) -> Result<Self> {
+        let storage = Self {
+            inner: FjallStorage::try_open_existing(path)?
+                .ok_or_else(|| failure("existing native directory is already open"))?,
+            keys: Some(keys.clone()),
+        };
+        let snapshot = storage.inner.begin_read(SnapshotSelector::Latest)?;
+        if snapshot.sequence() == 0 {
+            return Err(failure("existing native store has no committed state"));
+        }
+        if keys.tracks_native_use() {
+            keys.read_local_marker(&snapshot)?;
+        }
+        Ok(storage)
+    }
+
+    /// Raw decoded inspection must precede recovery, which can write custody.
+    pub(crate) fn snapshot_before_recovery(&self) -> Result<NativeSnapshot> {
+        Ok(self.decode_snapshot(self.inner.begin_read(SnapshotSelector::Latest)?))
+    }
+
     pub(crate) fn is_encrypted(&self) -> bool {
         self.keys.is_some()
     }

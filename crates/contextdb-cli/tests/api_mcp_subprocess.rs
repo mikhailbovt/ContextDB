@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+#[path = "api_mcp_subprocess/native_encrypted.rs"]
+mod native_encrypted;
 #[cfg(windows)]
 use std::time::{SystemTime, UNIX_EPOCH};
 

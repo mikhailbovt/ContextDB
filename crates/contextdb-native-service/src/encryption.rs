@@ -3,6 +3,7 @@
 //! Key inventory is incremental. Reads address one descriptor; full inventory
 //! verification is administrative work. No physical key-erasure claim is made.
 
+mod existing;
 mod keys;
 mod storage;
 #[cfg(test)]
