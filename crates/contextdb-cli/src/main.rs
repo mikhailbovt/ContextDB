@@ -6,6 +6,8 @@
 mod codex_service;
 #[cfg(feature = "mcp")]
 mod mcp_broker;
+#[cfg(feature = "mcp")]
+mod native_profile;
 mod production;
 mod state_head;
 
@@ -61,9 +63,7 @@ use serde::Serialize;
 use zeroize::Zeroizing;
 
 #[cfg(feature = "mcp")]
-use crate::codex_service::{
-    CODEX_BACKUP_FORMAT, CODEX_BACKUP_RESTORE_POLICY, CodexService, MAX_CODEX_BACKUP_BYTES,
-};
+use crate::codex_service::{CODEX_BACKUP_RESTORE_POLICY, CodexService, MAX_CODEX_BACKUP_BYTES};
 use crate::production::ProductionService;
 use crate::state_head::StateHeadStore;
 
@@ -146,6 +146,15 @@ enum Command {
         /// Request JSON path, or `-` for stdin.
         #[arg(long)]
         request: PathBuf,
+    },
+    #[cfg(feature = "mcp")]
+    /// Provision encrypted native memory with independently retained authorities.
+    CodexNativeInit {
+        /// Existing authenticated portable lifecycle archive.
+        path: PathBuf,
+        /// New absolute custody root outside the database directory.
+        #[arg(long)]
+        custody_root: PathBuf,
     },
     #[cfg(feature = "mcp")]
     /// Create a bounded composite backup for the local Codex authorities.
@@ -896,6 +905,18 @@ fn run(cli: Cli) -> CliResult<()> {
             dispatch_api(service.as_ref(), operation, &request, format)?;
         }
         #[cfg(feature = "mcp")]
+        Command::CodexNativeInit { path, custody_root } => {
+            require_codex_operator_output(format)?;
+            let state = load_state(&path)?;
+            let lifecycle = ProductionService::open(&path, state.clone())?;
+            lifecycle.verify(VerifyRequest {
+                context: codex_operator_authority(&state.key, "codex-native-init")?.request,
+                deep: true,
+            })?;
+            let receipt = native_profile::initialize(&path, &custody_root, &state)?;
+            emit_json(&receipt, format)?;
+        }
+        #[cfg(feature = "mcp")]
         Command::CodexBackup { path, output } => {
             create_codex_backup(&path, &output, format)?;
         }
@@ -1267,6 +1288,17 @@ fn custody_snapshot_export(path: &Path, output: &Path, format: OutputFormat) -> 
     // supported ContextDB writer. It remains held until the detached snapshot
     // has been verified, exported, and atomically installed.
     let source_authority = StateHeadStore::open(path).map_err(CliError::from)?;
+    if source_authority
+        .native_profile_digest(&key.expose_copy())
+        .map_err(CliError::from)?
+        .is_some()
+    {
+        return Err(
+            "encrypted native custody cannot be omitted from a lifecycle-only custody snapshot"
+                .to_owned()
+                .into(),
+        );
+    }
     let source_archive = source_authority.archive_path().to_path_buf();
     let source_fjall = production::store_path(&source_archive);
     let canonical_source_fjall = canonical_custody_directory(&source_fjall, "production Fjall")?;
@@ -2139,21 +2171,25 @@ fn restore_codex_backup(path: &Path, input: &Path, format: OutputFormat) -> CliR
     // before the untrusted backup file becomes an input or format oracle.
     let state = load_state(path)?;
     let context = codex_operator_authority(&state.key, "codex-restore")?;
-    let service = CodexService::open(path, state)?;
     let bytes = read_codex_backup(input)?;
     let digest = blake3::hash(&bytes).to_hex().to_string();
-    let response = service.restore_backup(RestoreBackupRequest {
-        context,
-        format: CODEX_BACKUP_FORMAT.to_owned(),
-        bytes,
-        digest: digest.clone(),
-    })?;
+    let backup_format = codex_service::backup_format(&bytes)?;
+    let response = CodexService::restore_operator(
+        path,
+        state,
+        RestoreBackupRequest {
+            context,
+            format: backup_format.to_owned(),
+            bytes,
+            digest: digest.clone(),
+        },
+    )?;
     emit_json(
         &CodexRestoreReceipt {
             operation: "codex_backup_restored",
             state_path: path.display().to_string(),
             backup_path: input.display().to_string(),
-            format: CODEX_BACKUP_FORMAT,
+            format: backup_format,
             digest: &digest,
             restore_policy: CODEX_BACKUP_RESTORE_POLICY,
             response,

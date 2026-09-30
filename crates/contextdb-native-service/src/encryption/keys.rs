@@ -114,26 +114,62 @@ impl NativeCustodyKeys {
         database_id: &str,
         master: CustodyMasterKey,
     ) -> contextdb_service::ServiceResult<Arc<Self>> {
-        Self::create_version(path.as_ref(), database_id, master, 4)
+        Self::create_with_authority(
+            path,
+            database_id,
+            contextdb_core::ObservationId::new().as_uuid(),
+            master,
+        )
     }
 
+    /// Create a fresh format-4 authority with an identity pinned by the host.
+    /// This does not recreate the history of a lost authority with that identity.
+    pub fn create_with_authority(
+        path: impl AsRef<Path>,
+        database_id: &str,
+        authority: Uuid,
+        master: CustodyMasterKey,
+    ) -> contextdb_service::ServiceResult<Arc<Self>> {
+        Self::create_version_with_authority(path.as_ref(), database_id, master, 4, authority)
+    }
+
+    #[cfg(test)]
     pub(super) fn create_version(
         path: &Path,
         database_id: &str,
         master: CustodyMasterKey,
         version: u16,
     ) -> contextdb_service::ServiceResult<Arc<Self>> {
+        Self::create_version_with_authority(
+            path,
+            database_id,
+            master,
+            version,
+            contextdb_core::ObservationId::new().as_uuid(),
+        )
+    }
+
+    fn create_version_with_authority(
+        path: &Path,
+        database_id: &str,
+        master: CustodyMasterKey,
+        version: u16,
+        authority: Uuid,
+    ) -> contextdb_service::ServiceResult<Arc<Self>> {
         if !matches!(version, 1..=4) {
             return Err(crate::integrity("unsupported custody authority version"));
         }
         crate::validate_identifier(database_id, "custody database ID")?;
+        if authority.is_nil() {
+            return Err(crate::invalid("custody authority must not be nil"));
+        }
         std::fs::create_dir(path)
             .map_err(|_| crate::integrity("custody authority requires a new directory"))?;
         let engine = FjallStorage::open(path).map_err(crate::storage_error)?;
         let rows = Keyspace::new(KEYSPACE).map_err(crate::storage_error)?;
         let identity = Identity {
             version,
-            authority: contextdb_core::ObservationId::new().as_uuid(),
+            authority,
             database: crate::digest_bytes(database_id.as_bytes()),
         };
         let proof = seal(
@@ -196,7 +232,9 @@ impl NativeCustodyKeys {
                 "current custody key authority is unavailable",
             ));
         }
-        let engine = FjallStorage::open(path.as_ref()).map_err(crate::storage_error)?;
+        let engine = FjallStorage::try_open_existing(path.as_ref())
+            .map_err(crate::storage_error)?
+            .ok_or_else(|| crate::integrity("current custody key authority is already open"))?;
         let rows = Keyspace::new(KEYSPACE).map_err(crate::storage_error)?;
         let snapshot = engine
             .begin_read(SnapshotSelector::Latest)
@@ -248,6 +286,12 @@ impl NativeCustodyKeys {
     #[must_use]
     pub fn authority_id(&self) -> Uuid {
         self.identity.authority
+    }
+
+    /// Actual retained authority format, including legacy reopened inventories.
+    #[must_use]
+    pub fn format_version(&self) -> u16 {
+        self.identity.version
     }
 
     pub(crate) fn require_database(&self, database: &str) -> contextdb_service::ServiceResult<()> {

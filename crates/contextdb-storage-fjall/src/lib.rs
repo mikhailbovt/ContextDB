@@ -85,6 +85,13 @@ impl FjallStorage {
         Self::from_database(db)
     }
 
+    /// Inspect mandatory physical controls without opening data, acquiring its
+    /// lock or creating files. A live owner may hold the lock; this check does
+    /// not authenticate its database identity or grant authority to replace it.
+    pub fn check_existing_controls(path: &Path) -> Result<()> {
+        closed::require_existing(path)
+    }
+
     /// Open existing storage for administrative inspection, without creating a
     /// missing database. None means a database handle or snapshot still holds its
     /// exclusive backend lock. This does not authorize removal of any directory.

@@ -749,8 +749,20 @@ Physical/external-copy dispositions, migration and measured scale remain open.
 Maintenance observations cover one request at a time;
 they do not complete global deletion or reopen disclosure.
 
-These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
-profile. Record addresses, sizes, lexical hashes and archive metadata remain
+The CLI can explicitly provision this native profile for a fresh Codex sidecar
+with `codex-native-init`. A signed descriptor pins the database, independent
+authority identities and canonical paths in the external state head before
+creating native state. MCP authenticates that profile and its master key before
+joining an owner; normal startup only opens existing authorities and native
+state. Missing configuration cannot select plaintext. Operator composite restore
+requires the exact retained custody and lifecycle archive before creating a
+pristine native target. An externally retained restore fence prevents a failed
+restore from exposing a newly created blank target, even after local Ready-profile
+replay. Interrupted initialization or restore remains closed and requires
+explicit operator recovery; plaintext migration is separate. See
+[provisioning and recovery](../operations/backup-restore.md).
+This encrypts native values, not the separate lifecycle archive/runtime ledger.
+Record addresses, sizes, lexical hashes and archive metadata remain
 visible. Values are limited to 16 MiB before encryption; each envelope adds 64
 bytes, counted against scan and backup limits. Inventory growth is incremental;
 key reclamation, key rotation and deletion closure remain open. This profile

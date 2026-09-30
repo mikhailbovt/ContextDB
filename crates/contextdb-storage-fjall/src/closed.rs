@@ -137,15 +137,74 @@ mod tests {
         let root = tempfile::tempdir().expect("root");
         let missing = root.path().join("absent");
         assert!(FjallStorage::try_open_existing(&missing).is_err());
+        assert!(FjallStorage::check_existing_controls(&missing).is_err());
         assert!(ClosedFjallDirectory::try_acquire(&missing).is_err());
         assert!(!missing.exists());
         assert!(FjallStorage::try_open_existing(root.path()).is_err());
+        assert!(FjallStorage::check_existing_controls(root.path()).is_err());
         assert!(ClosedFjallDirectory::try_acquire(root.path()).is_err());
         assert_eq!(
             std::fs::read_dir(root.path())
                 .expect("unchanged empty directory")
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn existing_control_check_admits_busy_owner_without_opening_or_repairing() {
+        let root = tempfile::tempdir().expect("root");
+        let path = root.path().join("database");
+        let db = FjallStorage::open(&path).expect("live owner");
+        let space = Keyspace::new("payload").expect("space");
+        let mut transaction = db.begin_write().expect("write");
+        transaction
+            .put(&space, b"key".to_vec(), b"retained".to_vec())
+            .expect("put");
+        transaction.commit(Durability::Sync).expect("commit");
+        let names = db.physical_keyspace_names();
+        let sequence = db
+            .begin_read(SnapshotSelector::Latest)
+            .expect("snapshot")
+            .sequence();
+        FjallStorage::check_existing_controls(&path).expect("busy controls");
+        assert!(
+            FjallStorage::try_open_existing(&path)
+                .expect("busy database")
+                .is_none()
+        );
+        assert_eq!(db.physical_keyspace_names(), names);
+        assert_eq!(
+            db.begin_read(SnapshotSelector::Latest)
+                .expect("unchanged snapshot")
+                .sequence(),
+            sequence
+        );
+        drop(db);
+        for control in [VERSION, LOCK] {
+            let retained = root.path().join(format!("retained-{control}"));
+            std::fs::rename(path.join(control), &retained).expect("hold fixture control");
+            assert!(FjallStorage::check_existing_controls(&path).is_err());
+            assert!(!path.join(control).exists());
+            std::fs::rename(retained, path.join(control)).expect("restore fixture control");
+        }
+        FjallStorage::check_existing_controls(&path).expect("retained controls");
+        let db = FjallStorage::try_open_existing(&path)
+            .expect("reopen")
+            .expect("closed");
+        assert_eq!(db.physical_keyspace_names(), names);
+        assert_eq!(
+            db.begin_read(SnapshotSelector::Latest)
+                .expect("retained read")
+                .get(&space, b"key")
+                .expect("retained value"),
+            Some(b"retained".to_vec())
+        );
+        assert_eq!(
+            db.begin_read(SnapshotSelector::Latest)
+                .expect("reopened snapshot")
+                .sequence(),
+            sequence
         );
     }
 }

@@ -41,6 +41,7 @@ pub const STATE_HEAD_ID_ENV: &str = "CONTEXTDB_STATE_HEAD_ID";
 pub const MAX_ARCHIVE_BYTES: usize = 512 * 1024 * 1024;
 const MAX_AUTHORITY_BYTES: usize = 16 * 1024;
 const AUTHORITY_SCHEMA_VERSION: u16 = 2;
+const NATIVE_PROFILE_AUTHORITY_SCHEMA_VERSION: u16 = 3;
 const LEGACY_AUTHORITY_SCHEMA_VERSION: u16 = 1;
 const ARCHIVE_FORMAT: &str = "contextdb.logical.v1";
 const HEAD_KEY_CONTEXT: &str = "contextdb/cli-state-head-key/v1";
@@ -94,6 +95,10 @@ struct UnsignedAuthority<'a> {
     authority_binding: &'a str,
     active: &'a Option<HeadRecord>,
     pending: &'a Option<HeadRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_profile_digest: &'a Option<String>,
+    #[serde(skip_serializing_if = "is_false")]
+    native_restore_pending: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -103,8 +108,14 @@ struct AuthorityEnvelope {
     authority_binding: String,
     active: Option<HeadRecord>,
     pending: Option<HeadRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    native_profile_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    native_restore_pending: bool,
     mac: String,
 }
+
+mod profile;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -174,6 +185,10 @@ impl StateHeadStore {
     /// Resolves the platform authority selected by the host environment and
     /// holds its lock until this value (and all clones) are dropped.
     pub fn open(archive_path: &Path) -> HeadResult<Self> {
+        Self::resolve(archive_path, true)
+    }
+
+    fn resolve(archive_path: &Path, acquire_lock: bool) -> HeadResult<Self> {
         let canonical_archive_path = canonical_archive_path(archive_path)?;
         let canonical_path_digest = path_digest(&canonical_archive_path);
         let file_value = std::env::var_os(STATE_HEAD_FILE_ENV);
@@ -194,13 +209,19 @@ impl StateHeadStore {
             let path = PathBuf::from(value);
             let canonical_head_path = validate_unix_authority_path(&canonical_archive_path, &path)?;
             let authority_binding = format!("unix-file:{}", path_digest(&canonical_head_path));
-            let lock = acquire_file_lock(&lock_path_for(&canonical_head_path)?)?;
+            let lock = if acquire_lock {
+                Some(Arc::new(acquire_file_lock(&lock_path_for(
+                    &canonical_head_path,
+                )?)?))
+            } else {
+                None
+            };
             Ok(Self {
                 backend: AuthorityBackend::File(canonical_head_path),
                 canonical_archive_path,
                 canonical_path_digest,
                 authority_binding,
-                _lock: Some(Arc::new(lock)),
+                _lock: lock,
                 #[cfg(test)]
                 fail_next_backend_write: Arc::new(AtomicBool::new(false)),
                 #[cfg(test)]
@@ -225,13 +246,17 @@ impl StateHeadStore {
             let id_digest = blake3::hash(id.as_bytes()).to_hex().to_string();
             let authority_binding = format!("windows-hkcu:{id_digest}");
             let key_path = format!("Software\\ContextDB\\StateHeads\\{id_digest}");
-            let lock = acquire_windows_registry_lock(&id_digest)?;
+            let lock = if acquire_lock {
+                Some(Arc::new(acquire_windows_registry_lock(&id_digest)?))
+            } else {
+                None
+            };
             Ok(Self {
                 backend: AuthorityBackend::Registry { key_path },
                 canonical_archive_path,
                 canonical_path_digest,
                 authority_binding,
-                _lock: Some(Arc::new(lock)),
+                _lock: lock,
                 #[cfg(test)]
                 fail_next_backend_write: Arc::new(AtomicBool::new(false)),
                 #[cfg(test)]
@@ -739,12 +764,58 @@ impl StateHeadStore {
         active: Option<HeadRecord>,
         pending: Option<HeadRecord>,
     ) -> HeadResult<()> {
+        // Ordinary lifecycle publications carry the immutable opt-in forward.
+        // A schema-1 input is possible only during exact legacy migration.
+        let (native_profile_digest, native_restore_pending) =
+            if let Some(bytes) = self.read_backend()? {
+                let schema: serde_json::Value = serde_json::from_slice(&bytes)
+                    .map_err(|error| format!("invalid state-head authority JSON: {error}"))?;
+                if schema
+                    .get("schema_version")
+                    .and_then(serde_json::Value::as_u64)
+                    == Some(u64::from(LEGACY_AUTHORITY_SCHEMA_VERSION))
+                {
+                    self.read_legacy_envelope(key)?;
+                    (None, false)
+                } else {
+                    let current = self.decode_current_envelope(&bytes, key)?;
+                    (
+                        current.native_profile_digest,
+                        current.native_restore_pending,
+                    )
+                }
+            } else {
+                (None, false)
+            };
+        self.write_envelope_with_profile(
+            key,
+            active,
+            pending,
+            native_profile_digest,
+            native_restore_pending,
+        )
+    }
+
+    fn write_envelope_with_profile(
+        &self,
+        key: &[u8; 32],
+        active: Option<HeadRecord>,
+        pending: Option<HeadRecord>,
+        native_profile_digest: Option<String>,
+        native_restore_pending: bool,
+    ) -> HeadResult<()> {
         validate_transition_shape(active.as_ref(), pending.as_ref())?;
         let mut envelope = AuthorityEnvelope {
-            schema_version: AUTHORITY_SCHEMA_VERSION,
+            schema_version: if native_profile_digest.is_some() {
+                NATIVE_PROFILE_AUTHORITY_SCHEMA_VERSION
+            } else {
+                AUTHORITY_SCHEMA_VERSION
+            },
             authority_binding: self.authority_binding.clone(),
             active,
             pending,
+            native_profile_digest,
+            native_restore_pending,
             mac: String::new(),
         };
         envelope.mac = authority_mac(&envelope, key)?;
@@ -757,9 +828,14 @@ impl StateHeadStore {
     }
 
     fn validate_envelope(&self, envelope: &AuthorityEnvelope, key: &[u8; 32]) -> HeadResult<()> {
-        if envelope.schema_version != AUTHORITY_SCHEMA_VERSION
-            || envelope.authority_binding != self.authority_binding
-        {
+        match (envelope.schema_version, &envelope.native_profile_digest) {
+            (AUTHORITY_SCHEMA_VERSION, None) if !envelope.native_restore_pending => {}
+            (NATIVE_PROFILE_AUTHORITY_SCHEMA_VERSION, Some(digest)) => {
+                require_digest(digest, "native profile digest")?;
+            }
+            _ => return Err("state-head native profile binding or schema is invalid".to_owned()),
+        }
+        if envelope.authority_binding != self.authority_binding {
             return Err("state-head authority binding or schema is invalid".to_owned());
         }
         validate_transition_shape(envelope.active.as_ref(), envelope.pending.as_ref())?;
@@ -829,11 +905,17 @@ fn authority_mac(envelope: &AuthorityEnvelope, key: &[u8; 32]) -> HeadResult<Str
         authority_binding: &envelope.authority_binding,
         active: &envelope.active,
         pending: &envelope.pending,
+        native_profile_digest: &envelope.native_profile_digest,
+        native_restore_pending: envelope.native_restore_pending,
     };
     let bytes = serde_json::to_vec(&unsigned)
         .map_err(|error| format!("cannot serialize state-head MAC input: {error}"))?;
     let derived = blake3::derive_key(HEAD_KEY_CONTEXT, key);
     Ok(blake3::keyed_hash(&derived, &bytes).to_hex().to_string())
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 fn legacy_authority_mac(envelope: &LegacyAuthorityEnvelope, key: &[u8; 32]) -> HeadResult<String> {

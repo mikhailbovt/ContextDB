@@ -35,6 +35,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, watch};
 
 use crate::codex_service::CodexService;
+use crate::native_profile::{self, BrokerProfile};
 use crate::{
     CliError, CliResult, DurableService, McpAuthorityConfig, TokenKey, load_state,
     mcp_session_authority, read_external_key, state_head,
@@ -80,6 +81,8 @@ struct BrokerHandshakePayload {
     nonce: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     authority: Option<McpAuthorityConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<BrokerProfile>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -106,6 +109,8 @@ struct BrokerAckPayload {
     operation: BrokerOperation,
     reference: bool,
     broker_pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<BrokerProfile>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -141,6 +146,7 @@ impl NonceCache {
 struct BrokerShared {
     pipe_id: String,
     reference: bool,
+    profile: Option<BrokerProfile>,
     key: Arc<TokenKey>,
     service: Arc<dyn CognitiveMemoryService>,
     request_gate: Arc<Mutex<()>>,
@@ -179,6 +185,11 @@ pub(crate) fn run_broker(path: &Path, reference: bool) -> CliResult<()> {
     #[cfg(unix)]
     let socket_cleanup = UnixSocketGuard::new(&pipe_name).map_err(CliError::from)?;
     let state = load_state(&canonical_path)?;
+    let selected_profile = native_profile::probe(&canonical_path, &state.key, reference)?;
+    let selected_profile = selected_profile
+        .digest
+        .is_some()
+        .then_some(selected_profile);
     let handshake_key = Arc::new(TokenKey::new(state.key.expose_copy())?);
     let service: Arc<dyn CognitiveMemoryService> = if reference {
         Arc::new(DurableService::new(state))
@@ -193,6 +204,7 @@ pub(crate) fn run_broker(path: &Path, reference: bool) -> CliResult<()> {
             pipe_name,
             pipe_id,
             reference,
+            selected_profile,
             handshake_key,
             service.clone(),
         ))
@@ -222,6 +234,8 @@ pub(crate) fn run_proxy(
     let pipe_id = state_head::path_digest(&canonical_path);
     let pipe_name = endpoint_name(&canonical_path, &pipe_id)?;
     let key = read_external_key(&canonical_path)?;
+    let profile = native_profile::probe(&canonical_path, &key, reference)?;
+    let profile = profile.digest.is_some().then_some(profile);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -231,11 +245,12 @@ pub(crate) fn run_proxy(
         &pipe_name,
         Some(|| spawn_hidden_broker(&canonical_path, reference)),
     ))?;
-    let handshake = build_handshake(
+    let handshake = build_profile_handshake(
         &pipe_id,
         BrokerOperation::Session,
         reference,
         Some(authority),
+        profile,
         &key,
     )?;
     runtime.block_on(proxy_session(client, handshake, &key))
@@ -272,7 +287,16 @@ pub(crate) fn stop_broker(path: &Path) -> CliResult<()> {
         Err(_) => runtime.block_on(wait_for_broker(&pipe_name))?,
     };
     let key = read_external_key(&canonical_path)?;
-    let handshake = build_handshake(&pipe_id, BrokerOperation::Shutdown, false, None, &key)?;
+    let profile = native_profile::shutdown_profile(&canonical_path, &key)?;
+    let profile = profile.digest.is_some().then_some(profile);
+    let handshake = build_profile_handshake(
+        &pipe_id,
+        BrokerOperation::Shutdown,
+        false,
+        None,
+        profile,
+        &key,
+    )?;
     runtime.block_on(stop_session(client, handshake, &key))?;
     // Do not return merely because the shutdown acknowledgement was flushed.
     // Successfully taking and releasing the exact state-head lock proves the
@@ -291,10 +315,11 @@ async fn serve_broker(
     pipe_name: String,
     pipe_id: String,
     reference: bool,
+    profile: Option<BrokerProfile>,
     key: Arc<TokenKey>,
     service: Arc<dyn CognitiveMemoryService>,
 ) -> io::Result<()> {
-    let (shared, mut shutdown_receiver) = broker_shared(pipe_id, reference, key, service);
+    let (shared, mut shutdown_receiver) = broker_shared(pipe_id, reference, profile, key, service);
     loop {
         tokio::select! {
             changed = shutdown_receiver.changed() => {
@@ -322,10 +347,11 @@ async fn serve_broker(
     _pipe_name: String,
     pipe_id: String,
     reference: bool,
+    profile: Option<BrokerProfile>,
     key: Arc<TokenKey>,
     service: Arc<dyn CognitiveMemoryService>,
 ) -> io::Result<()> {
-    let (shared, mut shutdown_receiver) = broker_shared(pipe_id, reference, key, service);
+    let (shared, mut shutdown_receiver) = broker_shared(pipe_id, reference, profile, key, service);
     loop {
         tokio::select! {
             changed = shutdown_receiver.changed() => {
@@ -347,6 +373,7 @@ async fn serve_broker(
 fn broker_shared(
     pipe_id: String,
     reference: bool,
+    profile: Option<BrokerProfile>,
     key: Arc<TokenKey>,
     service: Arc<dyn CognitiveMemoryService>,
 ) -> (Arc<BrokerShared>, watch::Receiver<bool>) {
@@ -357,6 +384,7 @@ fn broker_shared(
     let shared = Arc::new(BrokerShared {
         pipe_id,
         reference,
+        profile,
         key,
         service,
         request_gate,
@@ -383,7 +411,13 @@ where
     let Some(handshake) = handshake else {
         return Ok(());
     };
-    if !verify_handshake(&handshake, &shared.pipe_id, shared.reference, &shared.key) {
+    if !verify_profile_handshake(
+        &handshake,
+        &shared.pipe_id,
+        shared.reference,
+        shared.profile.as_ref(),
+        &shared.key,
+    ) {
         return Ok(());
     }
     if !shared
@@ -553,6 +587,7 @@ async fn proxy_session(
     Ok(())
 }
 
+#[cfg(test)]
 fn build_handshake(
     pipe_id: &str,
     operation: BrokerOperation,
@@ -560,28 +595,61 @@ fn build_handshake(
     authority: Option<McpAuthorityConfig>,
     key: &TokenKey,
 ) -> CliResult<BrokerHandshake> {
+    build_profile_handshake(pipe_id, operation, reference, authority, None, key)
+}
+
+fn build_profile_handshake(
+    pipe_id: &str,
+    operation: BrokerOperation,
+    reference: bool,
+    authority: Option<McpAuthorityConfig>,
+    profile: Option<BrokerProfile>,
+    key: &TokenKey,
+) -> CliResult<BrokerHandshake> {
     let mut random = [0_u8; 32];
     getrandom::fill(&mut random)
         .map_err(|_| unavailable("cannot generate an MCP broker session nonce", true))?;
     let payload = BrokerHandshakePayload {
-        schema_version: BROKER_SCHEMA_VERSION,
+        schema_version: if profile.is_some() {
+            2
+        } else {
+            BROKER_SCHEMA_VERSION
+        },
         pipe_id: pipe_id.to_owned(),
         operation,
         reference,
         nonce: blake3::hash(&random).to_hex().to_string(),
         authority,
+        profile,
     };
     let mac = handshake_mac(&payload, key)?;
     Ok(BrokerHandshake { payload, mac })
 }
 
+#[cfg(test)]
 fn verify_handshake(
     handshake: &BrokerHandshake,
     pipe_id: &str,
     reference: bool,
     key: &TokenKey,
 ) -> bool {
-    if handshake.payload.schema_version != BROKER_SCHEMA_VERSION
+    verify_profile_handshake(handshake, pipe_id, reference, None, key)
+}
+
+fn verify_profile_handshake(
+    handshake: &BrokerHandshake,
+    pipe_id: &str,
+    reference: bool,
+    profile: Option<&BrokerProfile>,
+    key: &TokenKey,
+) -> bool {
+    if handshake.payload.schema_version
+        != if profile.is_some() {
+            2
+        } else {
+            BROKER_SCHEMA_VERSION
+        }
+        || handshake.payload.profile.as_ref() != profile
         || handshake.payload.pipe_id != pipe_id
         || handshake.payload.nonce.len() != 64
         || blake3::Hash::from_hex(&handshake.payload.nonce).is_err()
@@ -624,13 +692,14 @@ async fn write_ack<W: AsyncWrite + Unpin>(
     key: &TokenKey,
 ) -> io::Result<()> {
     let payload = BrokerAckPayload {
-        schema_version: BROKER_SCHEMA_VERSION,
+        schema_version: handshake.schema_version,
         accepted,
         handshake_nonce: handshake.nonce.clone(),
         pipe_id: handshake.pipe_id.clone(),
         operation: handshake.operation,
         reference: handshake.reference,
         broker_pid: std::process::id(),
+        profile: handshake.profile.clone(),
     };
     let mac = ack_mac(&payload, key).map_err(|_| io::Error::other("cannot authenticate ACK"))?;
     let ack = BrokerAck { payload, mac };
@@ -651,7 +720,8 @@ fn ack_mac(payload: &BrokerAckPayload, key: &TokenKey) -> CliResult<String> {
 }
 
 fn verify_ack(ack: &BrokerAck, handshake: &BrokerHandshakePayload, key: &TokenKey) -> bool {
-    if ack.payload.schema_version != BROKER_SCHEMA_VERSION
+    if ack.payload.schema_version != handshake.schema_version
+        || ack.payload.profile != handshake.profile
         || ack.payload.handshake_nonce != handshake.nonce
         || ack.payload.pipe_id != handshake.pipe_id
         || ack.payload.operation != handshake.operation
@@ -1518,16 +1588,107 @@ mod tests {
 
     fn signed_ack(handshake: &BrokerHandshakePayload, accepted: bool, key: &TokenKey) -> BrokerAck {
         let payload = BrokerAckPayload {
-            schema_version: BROKER_SCHEMA_VERSION,
+            schema_version: handshake.schema_version,
             accepted,
             handshake_nonce: handshake.nonce.clone(),
             pipe_id: handshake.pipe_id.clone(),
             operation: handshake.operation,
             reference: handshake.reference,
             broker_pid: 42,
+            profile: handshake.profile.clone(),
         };
         let mac = ack_mac(&payload, key).expect("ACK MAC");
         BrokerAck { payload, mac }
+    }
+
+    #[test]
+    fn encrypted_profile_and_schema_are_bound_in_both_directions() {
+        let key = test_key(11);
+        let profile = BrokerProfile {
+            profile: native_profile::ENCRYPTED_PROFILE.to_owned(),
+            digest: Some("21".repeat(32)),
+        };
+        let handshake = build_profile_handshake(
+            "pipe:encrypted",
+            BrokerOperation::Session,
+            false,
+            Some(authority()),
+            Some(profile.clone()),
+            &key,
+        )
+        .expect("encrypted handshake");
+        assert_eq!(handshake.payload.schema_version, 2);
+        assert!(verify_profile_handshake(
+            &handshake,
+            "pipe:encrypted",
+            false,
+            Some(&profile),
+            &key
+        ));
+        assert!(!verify_profile_handshake(
+            &handshake,
+            "pipe:encrypted",
+            false,
+            None,
+            &key
+        ));
+
+        let mut other = profile.clone();
+        other.digest = Some("22".repeat(32));
+        assert!(!verify_profile_handshake(
+            &handshake,
+            "pipe:encrypted",
+            false,
+            Some(&other),
+            &key
+        ));
+        let mut ack = signed_ack(&handshake.payload, true, &key);
+        assert!(verify_ack(&ack, &handshake.payload, &key));
+        ack.payload.profile = Some(other);
+        ack.mac = ack_mac(&ack.payload, &key).expect("valid different-profile MAC");
+        assert!(!verify_ack(&ack, &handshake.payload, &key));
+
+        // Even an authenticated legacy broker cannot admit an encrypted client.
+        ack.payload.schema_version = 1;
+        ack.payload.profile = None;
+        ack.mac = ack_mac(&ack.payload, &key).expect("valid legacy ACK MAC");
+        assert!(!verify_ack(&ack, &handshake.payload, &key));
+        let mut downgrade = handshake;
+        downgrade.payload.schema_version = 1;
+        downgrade.payload.profile = None;
+        downgrade.mac = handshake_mac(&downgrade.payload, &key).expect("valid downgrade MAC");
+        assert!(!verify_profile_handshake(
+            &downgrade,
+            "pipe:encrypted",
+            false,
+            Some(&profile),
+            &key
+        ));
+    }
+
+    #[test]
+    fn plaintext_control_payload_preserves_exact_schema1_bytes() {
+        let key = test_key(12);
+        let handshake =
+            build_handshake("pipe:legacy", BrokerOperation::Shutdown, false, None, &key)
+                .expect("legacy handshake");
+        let expected = format!(
+            r#"{{"schema_version":1,"pipe_id":"pipe:legacy","operation":"shutdown","reference":false,"nonce":"{}"}}"#,
+            handshake.payload.nonce
+        );
+        assert_eq!(
+            serde_json::to_vec(&handshake.payload).expect("wire payload"),
+            expected.as_bytes()
+        );
+        let ack = signed_ack(&handshake.payload, true, &key);
+        let expected = format!(
+            r#"{{"schema_version":1,"accepted":true,"handshake_nonce":"{}","pipe_id":"pipe:legacy","operation":"shutdown","reference":false,"broker_pid":42}}"#,
+            handshake.payload.nonce
+        );
+        assert_eq!(
+            serde_json::to_vec(&ack.payload).expect("wire ACK"),
+            expected.as_bytes()
+        );
     }
 
     #[test]
