@@ -17,12 +17,18 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let directory = tempfile::tempdir().expect("isolated operator fixture");
-        let host = directory.path().join("host");
+        // macOS exposes its temporary root through a system symlink. Custody
+        // admission requires the real owned path, as an operator would supply.
+        let root = directory
+            .path()
+            .canonicalize()
+            .expect("physical fixture root");
+        let host = root.join("host");
         std::fs::create_dir(&host).expect("host directory");
         let fixture = Self {
             authority: TestAuthority::new(&host),
             archive: host.join("encrypted.ctxb"),
-            custody: directory.path().join("custody"),
+            custody: root.join("custody"),
             directory,
         };
         success(&fixture.run(&["--json", "init", path(&fixture.archive)], None));
