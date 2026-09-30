@@ -93,7 +93,7 @@ fn string_range(bytes: &[u8], cursor: &mut usize) -> std::ops::Range<usize> {
     range
 }
 
-fn corrupt_inner_footer(mut bytes: Vec<u8>) -> Vec<u8> {
+pub(super) fn corrupt_inner_footer(mut bytes: Vec<u8>) -> Vec<u8> {
     let magic = b"contextdb/codex-composite-backup/v2\0";
     assert!(bytes.starts_with(magic));
     assert_eq!(&bytes[magic.len()..magic.len() + 2], &[0, 2]);

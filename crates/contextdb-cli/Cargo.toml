@@ -25,7 +25,14 @@ server-v1 = [
     "dep:contextdb-runtime",
     "contextdb-runtime/server-v1",
 ]
-mcp = ["dep:contextdb-mcp", "dep:contextdb-native-service", "dep:tokio"]
+mcp = [
+    "dep:contextdb-agent-runtime",
+    "dep:contextdb-capture",
+    "dep:contextdb-mcp",
+    "dep:contextdb-native-service",
+    "dep:contextdb-recall",
+    "dep:tokio",
+]
 
 [[bin]]
 name = "contextdb"
@@ -40,12 +47,15 @@ required-features = ["mcp"]
 blake3.workspace = true
 chacha20poly1305.workspace = true
 clap.workspace = true
+contextdb-agent-runtime = { workspace = true, optional = true }
+contextdb-capture = { workspace = true, optional = true }
 contextdb-context.workspace = true
 contextdb-continuity.workspace = true
 contextdb-core.workspace = true
 contextdb-mcp = { workspace = true, optional = true }
 contextdb-native-service = { workspace = true, optional = true }
 contextdb-proto.workspace = true
+contextdb-recall = { workspace = true, optional = true }
 contextdb-runtime = { workspace = true, optional = true }
 contextdb-server = { workspace = true, features = ["wire"] }
 contextdb-service.workspace = true

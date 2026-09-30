@@ -88,33 +88,7 @@ impl std::fmt::Debug for CodexService {
 impl CodexService {
     /// Opens both authorities from one already authenticated CLI state.
     pub(crate) fn open(path: &Path, state: Arc<LoadedState>) -> CliResult<Self> {
-        let key = state.key.expose_copy();
-        state
-            .authority
-            .require_native_restore_ready(&key)
-            .map_err(crate::CliError::from)?;
-        let (_, identity) = state
-            .authority
-            .load_verified(&key)
-            .map_err(|_| durable_checkpoint_error("authenticated Codex state preflight failed"))?;
-        let commitment = state
-            .authority
-            .native_profile_digest(&key)
-            .map_err(crate::CliError::from)?;
-        let profile = native_profile::load(path, &state.key, commitment.as_deref())?;
-        if profile
-            .as_ref()
-            .is_some_and(|profile| profile.identity().database_id != identity.database_id)
-        {
-            return Err(
-                integrity_backup("native profile belongs to another lifecycle database").into(),
-            );
-        }
-        let custody = profile.as_ref().map(|profile| profile.identity().clone());
-        let native = match profile {
-            Some(profile) => profile.open(&state.key, false)?,
-            None => NativeService::open(native_store_path(path), identity.database_id, key)?,
-        };
+        let (native, custody) = open_native_owner(path, &state, false)?;
         let lifecycle = Arc::new(ProductionService::open(path, state)?);
         Ok(Self {
             native,
@@ -193,6 +167,51 @@ impl CodexService {
             })
             .map_err(crate::CliError::from)
     }
+}
+
+/// Open the current native owner without reconstructing missing provisioned data.
+/// The owned reference host requires an explicitly pinned encrypted profile.
+pub(crate) fn open_native_owner(
+    path: &Path,
+    state: &Arc<LoadedState>,
+    require_encrypted: bool,
+) -> CliResult<(NativeService, Option<CustodyIdentity>)> {
+    let key = state.key.expose_copy();
+    state
+        .authority
+        .require_native_restore_ready(&key)
+        .map_err(crate::CliError::from)?;
+    let (_, identity) = state
+        .authority
+        .load_verified(&key)
+        .map_err(|_| durable_checkpoint_error("authenticated native state preflight failed"))?;
+    let commitment = state
+        .authority
+        .native_profile_digest(&key)
+        .map_err(crate::CliError::from)?;
+    let profile = native_profile::load(path, &state.key, commitment.as_deref())?;
+    if profile
+        .as_ref()
+        .is_some_and(|profile| profile.identity().database_id != identity.database_id)
+    {
+        return Err(
+            integrity_backup("native profile belongs to another lifecycle database").into(),
+        );
+    }
+    if require_encrypted && profile.is_none() {
+        return Err(ServiceError::new(
+            ErrorCode::Unsupported,
+            "owned conversation requires a provisioned encrypted native profile",
+            false,
+        )
+        .into());
+    }
+    let custody = profile.as_ref().map(|profile| profile.identity().clone());
+    let native = match profile {
+        Some(profile) => profile.open(&state.key, false)?,
+        None => NativeService::open(native_store_path(path), identity.database_id, key)?,
+    };
+    Ok((native, custody))
 }
 
 impl CognitiveMemoryService for CodexService {

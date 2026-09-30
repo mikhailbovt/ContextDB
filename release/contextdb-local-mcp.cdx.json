@@ -826,6 +826,56 @@
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
+      "bom-ref": "pkg:cargo/contextdb-agent-runtime@0.2.0-alpha.3",
+      "description": "Owned conversational lifecycle and captured rolling context",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "contextdb-agent-runtime",
+      "purl": "pkg:cargo/contextdb-agent-runtime@0.2.0-alpha.3",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.0-alpha.3"
+    },
+    {
+      "author": "Mikhail Bovt and ContextDB contributors",
+      "bom-ref": "pkg:cargo/contextdb-capture@0.2.0-alpha.3",
+      "description": "Native original capture adapters for tools, artifacts and model requests",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "contextdb-capture",
+      "purl": "pkg:cargo/contextdb-capture@0.2.0-alpha.3",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.0-alpha.3"
+    },
+    {
+      "author": "Mikhail Bovt and ContextDB contributors",
       "bom-ref": "pkg:cargo/contextdb-context@0.2.0-alpha.3",
       "description": "Deterministic model-neutral ContextPack compiler and renderers for ContextDB",
       "externalReferences": [
@@ -4535,14 +4585,42 @@
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
+        "pkg:cargo/contextdb-capture@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-context@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-continuity@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-service@0.2.0-alpha.3",
+        "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
+        "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151"
+      ],
+      "ref": "pkg:cargo/contextdb-agent-runtime@0.2.0-alpha.3"
+    },
+    {
+      "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-service@0.2.0-alpha.3",
+        "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
+        "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
+        "registry+https://github.com/rust-lang/crates.io-index#uuid@1.24.0"
+      ],
+      "ref": "pkg:cargo/contextdb-capture@0.2.0-alpha.3"
+    },
+    {
+      "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
         "registry+https://github.com/rust-lang/crates.io-index#chacha20poly1305@0.11.0",
         "registry+https://github.com/rust-lang/crates.io-index#clap@4.6.6",
+        "pkg:cargo/contextdb-agent-runtime@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-capture@0.2.0-alpha.3",
         "pkg:cargo/contextdb-context@0.2.0-alpha.3",
         "pkg:cargo/contextdb-continuity@0.2.0-alpha.3",
         "pkg:cargo/contextdb-core@0.2.0-alpha.3",
         "pkg:cargo/contextdb-mcp@0.2.0-alpha.3",
         "pkg:cargo/contextdb-native-service@0.2.0-alpha.3",
         "pkg:cargo/contextdb-proto@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
         "pkg:cargo/contextdb-server@0.2.0-alpha.3",
         "pkg:cargo/contextdb-service@0.2.0-alpha.3",
         "pkg:cargo/contextdb-storage@0.2.0-alpha.3",
@@ -5405,7 +5483,7 @@
         },
         {
           "name": "contextdb:dependency-graph-sha256",
-          "value": "14e896c31c6fa75e1113a3a9eaa1b6364fce17cfa4d24ef6a5002e867af14d7a"
+          "value": "2bd05c2eb222cfae3b3fb50dbc3a195ea64cf8feda58a884e20113ceecce1f71"
         }
       ],
       "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.3",
