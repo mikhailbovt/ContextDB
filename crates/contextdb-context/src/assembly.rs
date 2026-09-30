@@ -275,6 +275,21 @@ pub struct CompiledAssembly {
     pub selection_evaluations: u32,
     /// Monotonic time inside scorer calls only; excludes discovery and packing.
     pub scorer_micros: u64,
+    /// A positive optional raw closure fits memory but needs less hot history.
+    /// Transient feedback only; it is absent from the canonical pack and wire.
+    pub raw_recall_pressure: Option<RawRecallPressure>,
+}
+
+/// Content-free prices of a positive raw closure that exceeded only the outgoing
+/// ceiling. These are not completeness claims or model usage measurements.
+#[derive(Clone, Debug)]
+pub struct RawRecallPressure {
+    pub baseline_input_tokens: u32,
+    pub candidate_input_tokens: u32,
+    pub memory_tokens: u32,
+    pub raw_evidence_tokens: u32,
+    pub history_tokens: u32,
+    pub conflict_tokens: u32,
 }
 
 pub(crate) fn charge(budget: &mut QueryBudget, work: u64, bytes: u64) -> Result<()> {

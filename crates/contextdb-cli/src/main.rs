@@ -8,6 +8,8 @@ mod codex_service;
 mod mcp_broker;
 #[cfg(feature = "mcp")]
 mod native_profile;
+#[cfg(feature = "mcp")]
+mod owned_conversation;
 mod production;
 mod state_head;
 
@@ -155,6 +157,21 @@ enum Command {
         /// New absolute custody root outside the database directory.
         #[arg(long)]
         custody_root: PathBuf,
+    },
+    #[cfg(feature = "mcp")]
+    /// Run the bounded owned-conversation reference host over JSON Lines.
+    OwnedConversation {
+        /// Existing authenticated encrypted-native lifecycle archive.
+        path: PathBuf,
+        /// Trusted host configuration, never selected by conversation input.
+        #[arg(long)]
+        config: PathBuf,
+        /// Explicitly create the configured run.
+        #[arg(long, conflicts_with = "resume", required_unless_present = "resume")]
+        start: bool,
+        /// Explicitly rehydrate the configured run without repeating unknown calls.
+        #[arg(long, conflicts_with = "start", required_unless_present = "start")]
+        resume: bool,
     },
     #[cfg(feature = "mcp")]
     /// Create a bounded composite backup for the local Codex authorities.
@@ -915,6 +932,16 @@ fn run(cli: Cli) -> CliResult<()> {
             })?;
             let receipt = native_profile::initialize(&path, &custody_root, &state)?;
             emit_json(&receipt, format)?;
+        }
+        #[cfg(feature = "mcp")]
+        Command::OwnedConversation {
+            path,
+            config,
+            start,
+            resume: _,
+        } => {
+            require_codex_operator_output(format)?;
+            owned_conversation::run(&path, &config, start)?;
         }
         #[cfg(feature = "mcp")]
         Command::CodexBackup { path, output } => {

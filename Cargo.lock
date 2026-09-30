@@ -509,6 +509,8 @@ dependencies = [
  "blake3",
  "chacha20poly1305",
  "clap",
+ "contextdb-agent-runtime",
+ "contextdb-capture",
  "contextdb-context",
  "contextdb-continuity",
  "contextdb-core",

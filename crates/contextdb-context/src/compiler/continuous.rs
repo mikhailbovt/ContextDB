@@ -9,7 +9,7 @@ use crate::{
     AssemblyProvider, AssemblyReadSet, CompileAssemblyRequest, CompiledAssembly, ContextScorer,
     EncodedOutgoing, EvidenceDependencies, OUTGOING_LAYOUT, OutgoingAssemblyManifest,
     OutgoingEncoder, OutgoingMessage, OutgoingOccurrence, OutgoingRole, OutgoingZone,
-    RequestCountKind, ScoringUnit, VisibleOriginal,
+    RawRecallPressure, RequestCountKind, ScoringUnit, VisibleOriginal,
 };
 use contextdb_core::{ContentDigest, OriginalSourceSpan};
 use contextdb_recall::QueryBudget;
@@ -25,6 +25,18 @@ struct Trial {
     messages: Vec<OutgoingMessage>,
     outgoing: EncodedOutgoing,
     added_bytes: u64,
+    outgoing_overflow: bool,
+}
+
+impl Trial {
+    fn require_outgoing_fit(self) -> Result<Self> {
+        if self.outgoing_overflow {
+            return Err(ContextError::BudgetExceeded(
+                "complete outgoing request exceeds declared profile".into(),
+            ));
+        }
+        Ok(self)
+    }
 }
 
 struct SelectionWinner {
@@ -33,6 +45,7 @@ struct SelectionWinner {
     seeds: BTreeSet<BlockId>,
     selected: BTreeSet<BlockId>,
     trial: Trial,
+    adds_raw_original: bool,
 }
 
 impl ContextCompiler {
@@ -303,9 +316,12 @@ impl ContextCompiler {
             tokenizer,
             encoder,
             budget,
-        )?;
+        )?
+        .require_outgoing_fit()?;
         let mut optional_seeds = BTreeSet::new();
         let mut scorer_duration = std::time::Duration::ZERO;
+        let mut raw_recall_pressure: Option<RawRecallPressure> = None;
+        let mut selected_raw_original = false;
         loop {
             let mut units_to_score: BTreeSet<BTreeSet<BlockId>> = BTreeSet::new();
             let mut pairs = 0;
@@ -385,6 +401,27 @@ impl ContextCompiler {
                 if value == 0 {
                     continue;
                 }
+                let adds_raw_original = unit.raw_only && unit.adds_original_bytes;
+                if trial.outgoing_overflow {
+                    // All closure/category/serialization limits have passed, and
+                    // the real scorer priced the actual encoded marginal cost.
+                    if adds_raw_original
+                        && raw_recall_pressure.as_ref().is_none_or(|old| {
+                            trial.outgoing.input_tokens < old.candidate_input_tokens
+                        })
+                    {
+                        let usage = trial.fit.pack.compilation.usage;
+                        raw_recall_pressure = Some(RawRecallPressure {
+                            baseline_input_tokens: best.outgoing.input_tokens,
+                            candidate_input_tokens: trial.outgoing.input_tokens,
+                            memory_tokens: usage.rendered_tokens,
+                            raw_evidence_tokens: usage.raw_evidence_tokens,
+                            history_tokens: usage.history_tokens,
+                            conflict_tokens: usage.conflict_tokens,
+                        });
+                    }
+                    continue;
+                }
                 let cost = marginal.max(1);
                 let replace = winner.as_ref().is_none_or(|old| {
                     u128::from(value) * u128::from(old.cost)
@@ -400,6 +437,7 @@ impl ContextCompiler {
                         seeds,
                         selected: trial_ids,
                         trial,
+                        adds_raw_original,
                     });
                 }
             }
@@ -408,6 +446,7 @@ impl ContextCompiler {
             };
             selected = winner.selected;
             optional_seeds.extend(winner.seeds);
+            selected_raw_original |= winner.adds_raw_original;
             best = winner.trial;
             if evaluations >= context.budgets.max_selection_evaluations
                 || best.fit.pack.compilation.usage.rendered_tokens >= context.budgets.soft_tokens
@@ -427,7 +466,8 @@ impl ContextCompiler {
             tokenizer,
             encoder,
             budget,
-        )?;
+        )?
+        .require_outgoing_fit()?;
         let mut originals: Vec<_> = best
             .fit
             .pack
@@ -495,6 +535,11 @@ impl ContextCompiler {
             optional_seeds,
             selection_evaluations: evaluations,
             scorer_micros: u64::try_from(scorer_duration.as_micros()).unwrap_or(u64::MAX),
+            raw_recall_pressure: if selected_raw_original {
+                None
+            } else {
+                raw_recall_pressure
+            },
         })
     }
 }
@@ -704,13 +749,8 @@ fn trial(
             "encoder result is not bound to the declared protocol/tokenizer".into(),
         ));
     }
-    if outgoing.wire.len() > request.budget.max_wire_bytes as usize
-        || outgoing.input_tokens > request.budget.max_input_tokens
-    {
-        return Err(ContextError::BudgetExceeded(
-            "complete outgoing request exceeds declared profile".into(),
-        ));
-    }
+    let outgoing_overflow = outgoing.wire.len() > request.budget.max_wire_bytes as usize
+        || outgoing.input_tokens > request.budget.max_input_tokens;
     // Price additional context in the actual provider protocol. Serializing the
     // intermediate OutgoingMessage envelope here can charge metadata that this
     // adapter never sends, suppressing originals despite available reader space.
@@ -747,6 +787,7 @@ fn trial(
         messages,
         outgoing,
         added_bytes,
+        outgoing_overflow,
     })
 }
 

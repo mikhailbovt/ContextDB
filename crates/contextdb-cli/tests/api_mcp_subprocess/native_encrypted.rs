@@ -3,6 +3,9 @@ use super::*;
 #[path = "native_encrypted/fail_closed.rs"]
 mod fail_closed;
 
+#[path = "owned_conversation.rs"]
+mod owned_conversation;
+
 const MASTER: &str = "5959595959595959595959595959595959595959595959595959595959595959";
 const WRONG_MASTER: &str = "6161616161616161616161616161616161616161616161616161616161616161";
 const SECRET: &str = "encrypted-native-private-bluebird-7319";

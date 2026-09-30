@@ -384,6 +384,127 @@ fn stop_keeps_mandatory_closure_and_counts_the_complete_request() {
     ));
 }
 
+fn raw_candidate(id: &str, evidence: &str) -> ProviderCandidate {
+    let mut raw = fact(id, evidence, false);
+    raw.candidate.kind = PackBlockKind::RawObservation;
+    raw.candidate.claim_ids.clear();
+    raw.candidate.interpretation = InterpretationRule::HistoricalData;
+    raw
+}
+
+#[test]
+fn raw_recall_pressure_prices_actual_wire_and_respects_stop_memory_and_visible_sources() {
+    let original = source(
+        "early",
+        claim(1),
+        "An incidental launch note named satellite BLUEBIRD-7319.",
+    );
+    let filler = source(
+        "hot",
+        claim(1),
+        &"A recent unrelated exchange fills the active window. ".repeat(100),
+    );
+    let source_span = original.evidence.original_span.clone().expect("span");
+    let mut input = input();
+    input
+        .base
+        .hot
+        .push(message("hot", &filler.evidence, OutgoingRole::User));
+    let fixture = fixture(
+        vec![situation_candidate(), raw_candidate("raw", "early")],
+        vec![original.clone(), filler],
+    );
+    let baseline = must(compile(&input, &fixture, &Stop));
+    let full = must(compile(&input, &fixture, &R0Scorer));
+    assert!(full.manifest.read_set.originals.contains(&source_span));
+    assert!(full.outgoing.input_tokens > baseline.outgoing.input_tokens + 1);
+    input.budget.max_input_tokens = baseline.outgoing.input_tokens + 1;
+    let limited = must(compile(&input, &fixture, &R0Scorer));
+    assert!(!limited.manifest.read_set.originals.contains(&source_span));
+    let prices = limited.raw_recall_pressure.expect("positive raw pressure");
+    assert_eq!(prices.candidate_input_tokens, full.outgoing.input_tokens);
+    assert_eq!(prices.baseline_input_tokens, limited.outgoing.input_tokens);
+    assert_eq!(
+        prices.memory_tokens,
+        full.context.pack.compilation.usage.rendered_tokens
+    );
+    assert!(limited.outgoing.input_tokens <= input.budget.max_input_tokens);
+    assert!(
+        must(compile(&input, &fixture, &Stop))
+            .raw_recall_pressure
+            .is_none()
+    );
+
+    // A memory/category failure cannot be repaired by shrinking H*.
+    let memory_budget = input.context.budgets;
+    input.context.budgets.hard_tokens = baseline.context.pack.compilation.usage.rendered_tokens + 1;
+    input.context.budgets.soft_tokens = input.context.budgets.hard_tokens;
+    assert!(
+        must(compile(&input, &fixture, &R0Scorer))
+            .raw_recall_pressure
+            .is_none()
+    );
+    input.context.budgets = memory_budget;
+
+    // Exact resident coverage preserves R0 STOP even if its metadata would overflow.
+    input.base.hot.push(message(
+        "early-visible",
+        &original.evidence,
+        OutgoingRole::User,
+    ));
+    input.budget.max_input_tokens = 27000;
+    input.budget.max_input_tokens =
+        must(compile(&input, &fixture, &Stop)).outgoing.input_tokens + 1;
+    assert!(
+        must(compile(&input, &fixture, &R0Scorer))
+            .raw_recall_pressure
+            .is_none()
+    );
+
+    // Eviction recomputes the source union and admits the same exact original.
+    input.base.hot.clear();
+    let recovered = must(compile(&input, &fixture, &R0Scorer));
+    assert!(recovered.raw_recall_pressure.is_none());
+    assert!(recovered.manifest.read_set.originals.contains(&source_span));
+}
+
+#[test]
+fn raw_recall_pressure_stops_after_one_useful_original_is_selected() {
+    let short = source("short", claim(1), "One useful original.");
+    let long = source(
+        "long",
+        claim(1),
+        &"Another distinct original requires much more room. ".repeat(35),
+    );
+    let short_fixture = fixture(
+        vec![situation_candidate(), raw_candidate("short-raw", "short")],
+        vec![short.clone()],
+    );
+    let mut input = input();
+    let short_fit = must(compile(&input, &short_fixture, &R0Scorer));
+    input.budget.max_input_tokens = short_fit.outgoing.input_tokens + 1;
+    let fixture = fixture(
+        vec![
+            situation_candidate(),
+            raw_candidate("short-raw", "short"),
+            raw_candidate("long-raw", "long"),
+        ],
+        vec![short, long],
+    );
+    let compiled = must(compile(&input, &fixture, &R0Scorer));
+    assert!(
+        compiled
+            .optional_seeds
+            .contains(&must(BlockId::new("short-raw")))
+    );
+    assert!(
+        !compiled
+            .optional_seeds
+            .contains(&must(BlockId::new("long-raw")))
+    );
+    assert!(compiled.raw_recall_pressure.is_none());
+}
+
 #[test]
 fn exact_hot_coverage_is_recomputed_after_eviction_and_rejects_wrong_versions() {
     let original = source(

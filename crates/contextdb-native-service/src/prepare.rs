@@ -455,6 +455,7 @@ impl PrepareContextPort for NativeService {
             continuation: None,
         };
         let external_processing = context.model_profile.external_processing;
+        let history_can_shrink = removable_hot_history(&request.base);
         let compiled = ContextCompiler::new(*self.token_key)
             .map_err(service_error)?
             .compile_assembly(
@@ -470,6 +471,27 @@ impl PrepareContextPort for NativeService {
                 budget,
             )
             .map_err(service_error)?;
+        if let Some(prices) = compiled
+            .raw_recall_pressure
+            .as_ref()
+            .filter(|_| history_can_shrink)
+        {
+            // The bounded runtime can retry after evicting complete exchanges.
+            // Do this before sealing/capture/admission; no oversized wire escapes.
+            return Err(ServiceError::new(
+                contextdb_service::ErrorCode::BudgetExhausted,
+                format!(
+                    "positive original recall needs hot-history space: baseline_input={}, candidate_input={}, memory={}, raw={}, history={}, conflict={}",
+                    prices.baseline_input_tokens,
+                    prices.candidate_input_tokens,
+                    prices.memory_tokens,
+                    prices.raw_evidence_tokens,
+                    prices.history_tokens,
+                    prices.conflict_tokens,
+                ),
+                true,
+            ));
+        }
         Ok(PreparedContext {
             scorer_micros: compiled.scorer_micros,
             admission_token: self.seal_preparation(
@@ -493,6 +515,34 @@ impl PrepareContextPort for NativeService {
             unrendered_sources,
         })
     }
+}
+
+/// At least two closed user-led exchanges leave a removable prefix while keeping
+/// one recent exchange. Provider continuation and pending tool calls are retained.
+fn removable_hot_history(base: &OutgoingBase) -> bool {
+    let mut complete = 0;
+    let mut user_led = false;
+    let mut previous: Option<&OutgoingMessage> = None;
+    for message in &base.hot {
+        if message.zone != OutgoingZone::HotHistory {
+            return false;
+        }
+        if message.role == OutgoingRole::User {
+            if user_led && previous.is_some_and(closes_exchange) {
+                complete += 1;
+            }
+            user_led = true;
+        }
+        previous = Some(message);
+    }
+    if user_led && previous.is_some_and(closes_exchange) {
+        complete += 1;
+    }
+    complete > 1
+}
+
+fn closes_exchange(message: &OutgoingMessage) -> bool {
+    message.role == OutgoingRole::Assistant && message.tool_calls.is_empty()
 }
 
 impl NativeService {
