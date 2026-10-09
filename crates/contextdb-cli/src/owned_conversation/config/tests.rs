@@ -271,4 +271,32 @@ fn cold_configuration_profile_refusal(profile: RouterTraceProfile) {
             .receipt,
         accepted.receipt
     );
+    // The actual retained binding refuses a learned opt-in before any worker
+    // constructor, launch or private semantic callback is reached.
+    let worker_directory = tempfile::tempdir().expect("owned worker pins");
+    let worker_root =
+        std::fs::canonicalize(worker_directory.path()).expect("canonical worker pins");
+    let program = worker_root.join("interpreter");
+    std::fs::write(&program, b"never executed").expect("owned dummy interpreter");
+    let worker = crate::owned_conversation::kev::tests::fixture_config(&worker_root, program);
+    let mut changed = config(Some(profile));
+    changed.development_kev = Some(worker);
+    if profile.is_off() {
+        assert!(
+            changed.validate().is_err(),
+            "Off has no processed-frontier custody"
+        );
+    } else {
+        changed
+            .validate()
+            .expect("explicit bounded development config");
+        let digest = changed.digest().expect("worker code/weights/policy bound");
+        assert_ne!(digest, original_digest);
+        let changed_context = authority(&key, &identity, &digest).expect("new trusted binding");
+        let error =
+            binding::require_binding(&reopened, &changed_context, &identity, &digest, false)
+                .err()
+                .expect("worker opt-in cannot replace a cold accepted binding");
+        assert_eq!(error.0.code, contextdb_service::ErrorCode::InvalidArgument);
+    }
 }

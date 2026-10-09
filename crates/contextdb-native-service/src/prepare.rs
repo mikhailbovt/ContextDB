@@ -27,7 +27,9 @@ use super::{
 
 pub(super) const PREPARE_DOMAIN: &[u8] = b"contextdb/prepared-context/v1";
 
+mod natural;
 mod raw;
+pub(super) mod scorer;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -157,6 +159,15 @@ impl PrepareContextPort for NativeService {
     ) -> ServiceResult<PreparedContext> {
         let trace_profile = request.router_trace_profile;
         let traced = !trace_profile.is_off();
+        if let Some(scorer) = &self.preparation_scorer {
+            scorer.check_stable()?;
+            if !traced {
+                return Err(invalid(
+                    "learned preparation requires a protected trace profile",
+                ));
+            }
+            require_capability(&request.context, Capability::ModelProcessing)?;
+        }
         if request.memory_query.is_some() && !traced {
             return Err(invalid(
                 "generic preparation requires the protected trace profile",
@@ -415,11 +426,14 @@ impl PrepareContextPort for NativeService {
                                 &request.context.request.scopes,
                                 true,
                             )?;
-                            candidate.representations[0].fields.insert(
-                                "original".into(),
-                                serde_json::to_string(&omission)
-                                    .map_err(|_| invalid("original omission encoding failed"))?,
-                            );
+                            if self.preparation_scorer.is_none() {
+                                candidate.representations[0].fields.insert(
+                                    "original".into(),
+                                    serde_json::to_string(&omission).map_err(|_| {
+                                        invalid("original omission encoding failed")
+                                    })?,
+                                );
+                            }
                             if traced {
                                 let mut controls = RouterTraceControls::default();
                                 controls.originals.insert(omission.source.event_id);
@@ -540,6 +554,24 @@ impl PrepareContextPort for NativeService {
             for origin in evidence_origins.values() {
                 controls.union_checked(origin)?;
             }
+            if self.preparation_scorer.is_some() {
+                for message in request
+                    .base
+                    .working
+                    .iter()
+                    .chain(&request.base.hot)
+                    .chain(&request.base.current)
+                {
+                    for original in &message.originals {
+                        budget
+                            .charge(1, size_of::<contextdb_core::ObservationId>() as u64)
+                            .map_err(budget_error)?;
+                        controls.originals.insert(original.span.event_id);
+                    }
+                }
+                controls.validate()?;
+                natural::validate_candidates(&candidates, budget)?;
+            }
             Some(controls)
         } else {
             None
@@ -627,6 +659,22 @@ impl PrepareContextPort for NativeService {
             base: request.base,
             budget: request.outgoing_budget,
         };
+        let current_scorer = self.preparation_scorer.as_ref().map(|installed| {
+            scorer::CurrentScorer::new(
+                self,
+                &request.context,
+                &provider.fence,
+                provider
+                    .trace_controls
+                    .as_ref()
+                    .expect("learned preparation has protected controls"),
+                installed,
+            )
+        });
+        let selected_scorer = current_scorer
+            .as_ref()
+            .map(|scorer| scorer as &dyn ContextScorer)
+            .unwrap_or(&R0Scorer);
         let (compiled, mut router_trace) = if traced {
             let routed = match trace_profile {
                 RouterTraceProfile::Required => compiler.compile_assembly_with_router(
@@ -634,7 +682,7 @@ impl PrepareContextPort for NativeService {
                     &provider,
                     tokenizer,
                     encoder,
-                    &R0Scorer,
+                    selected_scorer,
                     budget,
                 ),
                 RouterTraceProfile::RequiredReplayV2 => compiler
@@ -643,19 +691,38 @@ impl PrepareContextPort for NativeService {
                         &provider,
                         tokenizer,
                         encoder,
-                        &R0Scorer,
+                        selected_scorer,
                         budget,
                     ),
                 RouterTraceProfile::Off => {
                     unreachable!("traced preparation has an explicit profile")
                 }
             }
-            .map_err(|error| match error {
-                ContextError::BudgetExceeded(_) => {
-                    super::exhausted("protected router preparation exceeded its shared profile")
-                }
-                other => service_error(other),
+            .map_err(|error| {
+                current_scorer
+                    .as_ref()
+                    .and_then(|scorer| scorer.take_failure())
+                    .unwrap_or_else(|| match error {
+                        ContextError::BudgetExceeded(_) => super::exhausted(
+                            "protected router preparation exceeded its shared profile",
+                        ),
+                        other => service_error(other),
+                    })
             })?;
+            if current_scorer.is_some() {
+                let frontier = provider
+                    .trace_controls
+                    .as_ref()
+                    .expect("learned preparation frontier");
+                budget
+                    .charge(
+                        1,
+                        ((retrieval_origins.byte_length()? + frontier.byte_length()?) as u64)
+                            .saturating_mul(4),
+                    )
+                    .map_err(budget_error)?;
+                retrieval_origins.union_checked(frontier)?;
+            }
             let mut origins = BTreeMap::new();
             for unit in &routed.request.units {
                 let origin = if let Some(origin) = unit_origins.remove(&unit.id) {
@@ -774,7 +841,7 @@ impl PrepareContextPort for NativeService {
                         &provider,
                         tokenizer,
                         encoder,
-                        &R0Scorer,
+                        selected_scorer,
                         budget,
                     )
                     .map_err(service_error)?,
@@ -869,22 +936,32 @@ impl NativeService {
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         budget.charge(1, 0).map_err(budget_error)?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        self.check_prepare_fence_in(&snapshot, context, fence, budget)
+    }
+
+    fn check_prepare_fence_in<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        fence: &PrepareFence,
+        _budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
         if fence.principal != context.authorization_binding_digest()?
             || wall_time()? >= fence.valid_until
         {
             return Err(stale("prepared principal or temporal validity changed"));
         }
-        let snapshot = self
-            .engine
-            .begin_read(SnapshotSelector::Latest)
-            .map_err(storage_error)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
-        if fence.authorization_epoch != self.raw_authorization_epoch(&snapshot, &workspace)? {
+        if fence.authorization_epoch != self.raw_authorization_epoch(snapshot, &workspace)? {
             return Err(stale("source authorization changed during preparation"));
         }
-        self.require_suppression_current(&snapshot, &workspace)?;
+        self.require_suppression_current(snapshot, &workspace)?;
         for (scope, epoch) in &fence.scopes {
-            if self.scope_epoch(&snapshot, &workspace, *scope)? != *epoch {
+            if self.scope_epoch(snapshot, &workspace, *scope)? != *epoch {
                 return Err(stale("scope changed during preparation"));
             }
         }
@@ -960,11 +1037,13 @@ impl NativeService {
             };
             candidate.representations[0].summary =
                 "Applicable state resolved under the explicit source authority policy.".into();
-            candidate.representations[0].fields.insert(
-                "resolution".into(),
-                serde_json::to_string(&view.resolution.state)
-                    .map_err(|_| invalid("state encoding failed"))?,
-            );
+            if self.preparation_scorer.is_none() {
+                candidate.representations[0].fields.insert(
+                    "resolution".into(),
+                    serde_json::to_string(&view.resolution.state)
+                        .map_err(|_| invalid("state encoding failed"))?,
+                );
+            }
             if candidate.kind == PackBlockKind::Conflict {
                 let bytes = blake3::hash(id.as_bytes());
                 let mut uuid_bytes = [0_u8; 16];
@@ -1008,20 +1087,24 @@ impl NativeService {
                 },
             );
         }
-        candidate.representations[0].fields.insert(
-            "key".into(),
-            serde_json::to_string(&key).map_err(|_| invalid("state key encoding failed"))?,
-        );
-        candidate.facets.insert(id);
-        candidate.representations[0].fields.insert(
-            "time_mode".into(),
-            if request.known_at.is_some() || request.valid_at.is_some() {
-                "historical"
-            } else {
-                "current"
-            }
-            .into(),
-        );
+        if self.preparation_scorer.is_some() {
+            natural::state(&mut candidate, &view.resolution.state, usable, budget)?;
+        } else {
+            candidate.representations[0].fields.insert(
+                "key".into(),
+                serde_json::to_string(&key).map_err(|_| invalid("state key encoding failed"))?,
+            );
+            candidate.facets.insert(id);
+            candidate.representations[0].fields.insert(
+                "time_mode".into(),
+                if request.known_at.is_some() || request.valid_at.is_some() {
+                    "historical"
+                } else {
+                    "current"
+                }
+                .into(),
+            );
+        }
         candidates.push(ProviderCandidate {
             access: sealed_access(&request.context),
             use_policy,

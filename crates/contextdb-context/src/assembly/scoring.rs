@@ -116,6 +116,38 @@ pub struct SemanticScoringUnit<'a> {
 }
 
 impl SemanticScoringUnit<'_> {
+    /// Reborrow the same trial after a trusted adapter spends time or work on
+    /// admission. Only remaining allowances can decrease; source views, costs
+    /// and fit observations stay fixed. Serialized allowance counters reflect
+    /// this later boundary and are not stable semantic feature identities.
+    pub fn with_reduced_allowance(
+        &self,
+        allowance: SemanticScoringBudget,
+    ) -> SemanticScoringUnit<'_> {
+        let mut budget = self.budget;
+        budget.remaining_work = budget.remaining_work.min(allowance.remaining_work);
+        budget.remaining_bytes = budget.remaining_bytes.min(allowance.remaining_bytes);
+        budget.remaining_timeout_micros = budget
+            .remaining_timeout_micros
+            .min(allowance.remaining_timeout_micros);
+        budget.remaining_scorer_work = budget
+            .remaining_scorer_work
+            .min(allowance.remaining_scorer_work);
+        budget.remaining_scorer_micros = budget
+            .remaining_scorer_micros
+            .min(allowance.remaining_scorer_micros);
+        budget.remaining_evaluations = budget
+            .remaining_evaluations
+            .min(allowance.remaining_evaluations);
+        SemanticScoringUnit {
+            base: self.base,
+            selected: self.selected,
+            trial: self.trial,
+            identity: self.identity,
+            budget,
+        }
+    }
+
     /// Strict bounded model features. IDs, digests, priors, report JSON and scorer
     /// observations remain outside this projection; associations use local slots.
     pub fn model_input_json(&self, budget: &mut QueryBudget) -> Result<Vec<u8>> {

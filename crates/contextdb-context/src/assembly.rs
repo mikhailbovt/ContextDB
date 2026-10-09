@@ -143,7 +143,21 @@ pub struct ScoringUnit {
     pub raw_only: bool,
 }
 
+/// Whether an observed scorer failure permits the legacy R0 retry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScorerFailurePolicy {
+    /// Keep the existing observed R0 fallback within the same shared allowance.
+    R0Fallback,
+    /// Return the scorer failure without a replacement scorer or hidden retry.
+    Refuse,
+}
+
 pub trait ContextScorer: std::fmt::Debug + Send + Sync {
+    /// Legacy callers keep their existing retry; trusted owners can require an
+    /// explicit refusal under their retained scorer configuration.
+    fn failure_policy(&self) -> ScorerFailurePolicy {
+        ScorerFailurePolicy::R0Fallback
+    }
     fn id(&self) -> &str;
     /// Immutable implementation/weights revision used by opt-in router bindings.
     fn revision(&self) -> &str {

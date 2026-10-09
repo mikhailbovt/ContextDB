@@ -462,10 +462,22 @@ fn spawn_memory_mcp(binary: &str, authority: &TestAuthority, archive: &Path) -> 
 
 fn send_one_mcp_request(mut child: Child, request: &serde_json::Value) -> Output {
     let mut stdin = child.stdin.take().expect("brokered MCP stdin");
-    serde_json::to_writer(&mut stdin, request).expect("brokered MCP JSON");
-    stdin.write_all(b"\n").expect("brokered MCP newline");
+    let bytes = serde_json::to_vec(request).expect("brokered MCP JSON");
+    let sent = stdin
+        .write_all(&bytes)
+        .and_then(|()| stdin.write_all(b"\n"));
     drop(stdin);
-    child.wait_with_output().expect("brokered MCP output")
+    let output = child.wait_with_output().expect("brokered MCP output");
+    if let Err(error) = sent {
+        // Native admission may refuse before the proxy begins reading stdin.
+        // Collect that real failure; a successful child cannot hide a lost request.
+        assert!(
+            error.kind() == std::io::ErrorKind::BrokenPipe && !output.status.success(),
+            "unexpected MCP input failure: {error}; child status {}",
+            output.status
+        );
+    }
+    output
 }
 
 fn decoded_mcp_output(output: &Output) -> serde_json::Value {

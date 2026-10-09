@@ -267,6 +267,7 @@ impl ContextCompiler {
             }
             Err(ContextError::RouterScore(_))
                 if scorer.id() != crate::R0Scorer.id()
+                    && scorer.failure_policy() == crate::ScorerFailurePolicy::R0Fallback
                     && budget.check().is_ok()
                     && budget.remaining_work() > 0
                     && budget.remaining_bytes() > 0 =>
@@ -1064,9 +1065,14 @@ fn select_prepared(
                         || scorer_work
                             > u64::from(context.budgets.max_selection_evaluations) * 1024)
                 {
-                    return Err(ContextError::RouterScore(
-                        "scorer work or cooperative subdeadline exceeded".into(),
-                    ));
+                    let message = "scorer work or cooperative subdeadline exceeded".into();
+                    return Err(
+                        if scorer.failure_policy() == crate::ScorerFailurePolicy::Refuse {
+                            ContextError::BudgetExceeded(message)
+                        } else {
+                            ContextError::RouterScore(message)
+                        },
+                    );
                 }
                 value
             };

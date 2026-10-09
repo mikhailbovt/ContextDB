@@ -691,6 +691,21 @@ fn every_binding_dimension_and_score_trial_are_revalidated_on_application() {
 #[derive(Debug)]
 struct FloatingUtility(f64, AtomicUsize);
 
+#[derive(Debug)]
+struct RefusingUtility(FloatingUtility);
+
+impl FiniteContextScorer for RefusingUtility {
+    fn id(&self) -> &str {
+        "test-refusing-finite-utility"
+    }
+    fn failure_policy(&self) -> ScorerFailurePolicy {
+        ScorerFailurePolicy::Refuse
+    }
+    fn score(&self, unit: &ScoringUnit, budget: &mut QueryBudget) -> Result<Option<f64>> {
+        self.0.score(unit, budget)
+    }
+}
+
 impl FiniteContextScorer for FloatingUtility {
     fn id(&self) -> &str {
         "test-finite-utility"
@@ -705,6 +720,15 @@ impl FiniteContextScorer for FloatingUtility {
 fn nonfinite_adapter_input_cannot_enter_compiler_selection() {
     let provider = shared_fixture(false);
     let direct = must(compile(&input(), &provider, &R0Scorer));
+    let refusing = FiniteScoreAdapter(RefusingUtility(FloatingUtility(
+        f64::NAN,
+        AtomicUsize::new(0),
+    )));
+    assert!(matches!(
+        routed(&input(), &provider, &refusing),
+        Err(ContextError::RouterScore(_))
+    ));
+    assert_eq!(refusing.0.0.1.load(Ordering::SeqCst), 1);
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e13] {
         let scorer = FiniteScoreAdapter(FloatingUtility(value, AtomicUsize::new(0)));
         let fallback = must(routed(&input(), &provider, &scorer));

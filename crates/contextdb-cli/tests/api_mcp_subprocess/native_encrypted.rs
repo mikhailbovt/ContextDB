@@ -86,6 +86,10 @@ impl Fixture {
         master: Option<&str>,
         reference: bool,
     ) -> Output {
+        send_one_mcp_request(self.spawn_mcp(master, reference), request)
+    }
+
+    fn spawn_mcp(&self, master: Option<&str>, reference: bool) -> Child {
         let mut command = self.command(
             &[
                 "mcp",
@@ -128,7 +132,7 @@ impl Fixture {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        send_one_mcp_request(command.spawn().expect("normal MCP subprocess"), request)
+        command.spawn().expect("normal MCP subprocess")
     }
 
     fn call(&self, name: &str, arguments: serde_json::Value) -> serde_json::Value {
@@ -486,10 +490,22 @@ fn encrypted_native_profile_and_authority_loss_never_bootstrap_plaintext() {
     let held_native = f.directory.path().join("held-native");
     std::fs::rename(f.profile(), &held_profile).expect("preserve profile");
     std::fs::rename(f.native(), &held_native).expect("preserve native fixture");
-    refused(&f.mcp(
-        &rpc("contextdb_session", serde_json::json!({})),
-        Some(MASTER),
-    ));
+    // Force the early-refusal schedule while stdin is still open. The sender
+    // must collect the real refusal even when the child closes its pipe first.
+    let mut child = f.spawn_mcp(Some(MASTER), false);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while child.try_wait().expect("early profile refusal").is_none() {
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("missing pinned profile must refuse before reading stdin");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let output = send_one_mcp_request(child, &rpc("contextdb_session", serde_json::json!({})));
+    refused(&output);
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("native profile is unavailable"));
     assert!(
         !f.profile().exists() && !f.native().exists(),
         "external pin must reject loss of both local artifacts"

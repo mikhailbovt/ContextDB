@@ -447,6 +447,7 @@ pub struct NativeService {
     lease_instance: uuid::Uuid,
     suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
     record_write_recovery: Mutex<record_sources::writes::RecoveryCache>,
+    preparation_scorer: Option<prepare::scorer::InstalledScorer>,
 }
 
 impl fmt::Debug for NativeService {
@@ -568,6 +569,7 @@ impl NativeService {
             lease_instance: contextdb_core::ObservationId::new().as_uuid(),
             suppression,
             record_write_recovery: Mutex::default(),
+            preparation_scorer: None,
         })
     }
 
