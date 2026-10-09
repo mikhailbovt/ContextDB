@@ -12,8 +12,10 @@ use contextdb_context::{
 };
 use contextdb_continuity::OwnedRunIdentity;
 use contextdb_core::{
-    ActorId, AgentId, AgentRunId, MemorySubjectId, RawFilter, ScopeId, SessionId, WorkspaceId,
+    ActorId, AgentId, AgentRunId, MAX_ROUTER_TRACE_BYTES, MAX_ROUTER_TRACE_PAGE_BYTES,
+    MAX_ROUTER_TRACE_PAGES, MemorySubjectId, RawFilter, ScopeId, SessionId, WorkspaceId,
 };
+use contextdb_service::RouterTraceProfile;
 use serde::{Deserialize, Serialize};
 
 use super::invalid;
@@ -22,6 +24,35 @@ use super::reader::LocalReaderConfig;
 use crate::CliResult;
 
 const MAX_CONFIG_BYTES: u64 = 128 * 1024;
+
+#[cfg(test)]
+mod tests;
+
+/// Fixed native trace profile; conversation frames cannot override these bounds.
+#[derive(Serialize)]
+struct TraceSettingsBinding {
+    profile: RouterTraceProfile,
+    version: u16,
+    max_trace_bytes: usize,
+    max_pages: usize,
+    max_page_bytes: usize,
+    max_native_row_bytes: usize,
+    max_inline_novel_bytes: usize,
+}
+
+impl TraceSettingsBinding {
+    fn required() -> Self {
+        Self {
+            profile: RouterTraceProfile::Required,
+            version: 1,
+            max_trace_bytes: MAX_ROUTER_TRACE_BYTES,
+            max_pages: MAX_ROUTER_TRACE_PAGES,
+            max_page_bytes: MAX_ROUTER_TRACE_PAGE_BYTES,
+            max_native_row_bytes: 8 * 1024 * 1024,
+            max_inline_novel_bytes: 256 * 1024,
+        }
+    }
+}
 
 #[derive(Serialize)]
 struct SettingsBinding<'a> {
@@ -36,6 +67,8 @@ struct SettingsBinding<'a> {
     tools: &'static str,
     preparation: &'static str,
     raw_projection_limits: (u32, u8),
+    #[serde(skip_serializing_if = "Option::is_none")]
+    router_trace: Option<TraceSettingsBinding>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -72,6 +105,8 @@ pub(super) struct HostConfig {
     control: String,
     input_tokens: u32,
     pub(super) reader: LocalReaderConfig,
+    #[serde(default, skip_serializing_if = "RouterTraceProfile::is_off")]
+    router_trace_profile: RouterTraceProfile,
 }
 
 impl HostConfig {
@@ -137,6 +172,10 @@ impl HostConfig {
 
     /// Canonical parsed values bind defaults and every reader/settings field.
     pub(super) fn digest(&self) -> CliResult<String> {
+        Ok(blake3::hash(&self.binding_bytes()?).to_hex().to_string())
+    }
+
+    fn binding_bytes(&self) -> CliResult<Vec<u8>> {
         let settings = self.settings()?;
         let binding = SettingsBinding {
             profile: "contextdb.cli-owned-host-settings.v1",
@@ -156,10 +195,11 @@ impl HostConfig {
             tools: "no-external-tools",
             preparation: preparation::PROFILE,
             raw_projection_limits: (preparation::BATCH_EVENTS, preparation::MAX_BATCHES),
+            router_trace: (!self.router_trace_profile.is_off())
+                .then(TraceSettingsBinding::required),
         };
-        let bytes = serde_json::to_vec(&(self, binding))
-            .map_err(|_| invalid("conversation configuration cannot be bound"))?;
-        Ok(blake3::hash(&bytes).to_hex().to_string())
+        serde_json::to_vec(&(self, binding))
+            .map_err(|_| invalid("conversation configuration cannot be bound"))
     }
 
     pub(super) fn settings(&self) -> CliResult<RuntimeSettings> {
@@ -202,6 +242,7 @@ impl HostConfig {
             },
             cache_residency: None,
             automatic_recall_filter: RawFilter::default(),
+            router_trace_profile: self.router_trace_profile,
         })
     }
 }

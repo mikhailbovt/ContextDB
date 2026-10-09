@@ -80,6 +80,7 @@ fn shared_original_reaches_earlier_owners_and_descendants_but_retains_independen
     });
     call.event.payload = EventPayload::Assembly {
         manifest: ModelRequestManifest {
+            router_trace: None,
             model_call_id: call_id,
             renderer: "test/v1".into(),
             wire_digest: digest(wire),

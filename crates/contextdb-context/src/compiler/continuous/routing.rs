@@ -5,8 +5,8 @@ use super::*;
 use crate::router::{
     DESCRIPTOR_SCHEMA, FEATURE_SCHEMA, MANIFEST_FORMAT, MAX_RECORD_BYTES, MAX_SCORES, MemoryUnit,
     PLAN_FORMAT, REQUEST_FORMAT, RouterBinding, RouterChoice, RouterDecision, RouterManifest,
-    RouterRenderRole, RouterStopReason, RoutingDescriptor, SupportAlternative, canonical_digest,
-    normalize_spans,
+    RouterPreparedMaterial, RouterRenderRole, RouterStopReason, RoutingDescriptor,
+    SupportAlternative, canonical_digest, normalize_spans,
 };
 
 #[allow(
@@ -369,12 +369,68 @@ pub(super) fn finish(
         compilation_bytes_processed: 0,
         compilation_micros: 0,
     };
-    router::canonical_bytes(&manifest, budget)?;
+    let prepared_material = prepared_material(&record, &plan, &manifest, budget)?;
     Ok(RoutedAssembly {
         assembly,
         request: record.request,
         plan,
         manifest,
+        prepared_material,
+    })
+}
+
+fn prepared_material(
+    record: &RouterRecord,
+    plan: &RouterSelectionPlan,
+    manifest: &RouterManifest,
+    budget: &mut QueryBudget,
+) -> Result<RouterPreparedMaterial> {
+    #[derive(serde::Serialize)]
+    struct MaterialView<'a> {
+        candidates: Vec<&'a PackCandidate>,
+        evidence: Vec<&'a PackEvidence>,
+    }
+    let candidates: Vec<_> = record
+        .prepared_units
+        .values()
+        .map(|unit| &unit.variants[0].candidate)
+        .collect();
+    if candidates.iter().map(|candidate| &candidate.id).ne(record
+        .request
+        .units
+        .iter()
+        .map(|unit| &unit.id))
+    {
+        return Err(router::invalid(
+            "prepared material differs from the authorized inventory",
+        ));
+    }
+    let mut evidence = BTreeMap::new();
+    for unit in record.prepared_units.values() {
+        for variant in &unit.variants {
+            charge(budget, variant.evidence.len() as u64 + 1, 0)?;
+            for item in &variant.evidence {
+                if evidence
+                    .insert(&item.id, item)
+                    .is_some_and(|existing| existing != item)
+                {
+                    return Err(ContextError::Provider(
+                        "prepared support identity disagrees".into(),
+                    ));
+                }
+            }
+        }
+    }
+    let material = MaterialView {
+        candidates,
+        evidence: evidence.into_values().collect(),
+    };
+    // Borrow actual prepared values while checking the complete envelope. No
+    // extra candidate/evidence payload is cloned before this bounded check.
+    router::canonical_bytes(&(&record.request, plan, manifest, &material), budget)?;
+    Ok(RouterPreparedMaterial {
+        candidates: material.candidates.into_iter().cloned().collect(),
+        evidence: material.evidence.into_iter().cloned().collect(),
     })
 }
 

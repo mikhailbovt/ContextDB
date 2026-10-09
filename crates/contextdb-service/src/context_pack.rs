@@ -506,7 +506,7 @@ fn validate_plan(request: &CompileContextRequest) -> ServiceResult<()> {
     Ok(())
 }
 
-fn deterministic_request(
+pub(crate) fn deterministic_request(
     request: &CompileContextRequest,
     continuation: Option<RecallContinuationToken>,
 ) -> ServiceResult<DeterministicRecallRequest> {

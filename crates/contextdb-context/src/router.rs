@@ -270,12 +270,31 @@ pub enum ScoreProvenance {
     ObservedR0Fallback,
 }
 
+/// Exact prepared compiler material, including generated mandatory markers and
+/// every authorized support alternative. These values are not custody grants.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterPreparedMaterial {
+    pub candidates: Vec<crate::PackCandidate>,
+    pub evidence: Vec<crate::PackEvidence>,
+}
+
+impl std::fmt::Debug for RouterPreparedMaterial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RouterPreparedMaterial")
+            .field("candidate_count", &self.candidates.len())
+            .field("evidence_count", &self.evidence.len())
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RoutedAssembly {
     pub assembly: CompiledAssembly,
     pub request: AuthorizedRouterRequest,
     pub plan: RouterSelectionPlan,
     pub manifest: RouterManifest,
+    pub prepared_material: RouterPreparedMaterial,
 }
 
 /// A bounded floating-point scorer port; it receives the same authorized closure

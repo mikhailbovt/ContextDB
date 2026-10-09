@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use contextdb_context::OutgoingAssemblyManifest;
 use contextdb_continuity::PendingToolInvocation;
 use contextdb_core::{
-    ContentDigest, ModelCallId, ObservationId, OriginalSourceSpan, TimestampMicros,
+    ContentDigest, EventPayload, ModelCallId, ObservationId, OriginalSourceSpan, TimestampMicros,
 };
 use contextdb_recall::QueryBudget;
 use contextdb_service::{
@@ -38,6 +38,10 @@ pub(super) struct PreparationSeal {
     external: bool,
     pending_interpretation: bool,
     capability_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trace_digest: Option<ContentDigest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin_digest: Option<ContentDigest>,
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +59,7 @@ struct LeaseRecord {
     originals: Vec<OriginalSourceSpan>,
     bytes: u64,
     model: Option<ModelAdmission>,
+    trace_controls: Option<router_trace::controls::RouterTraceControls>,
 }
 
 #[derive(Debug, Default)]
@@ -83,6 +88,7 @@ impl NativeService {
         pending_interpretation: bool,
         wire_bytes: u64,
         capability_digest: String,
+        trace: Option<&contextdb_service::PreparedRouterTrace>,
     ) -> ServiceResult<String> {
         self.seal_private_cursor(
             SEAL_DOMAIN,
@@ -98,8 +104,171 @@ impl NativeService {
                 external,
                 pending_interpretation,
                 capability_digest,
+                trace_digest: trace.map(|trace| trace.trace_digest),
+                origin_digest: trace.map(|trace| trace.origin_closure_digest),
             },
         )
+    }
+
+    fn lease_record_from_prepared(
+        &self,
+        context: &AuthenticatedRequestContext,
+        prepared: &PreparedContext,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<LeaseRecord> {
+        require_capability(context, Capability::Runtime)?;
+        budget
+            .charge(1, prepared.outgoing.wire.len() as u64)
+            .map_err(budget_error)?;
+        if prepared.outgoing.wire.len() > 16 * 1024 * 1024
+            || prepared.assembly.read_set.originals.len() > 2048
+        {
+            return Err(exhausted("lease exceeds the bounded assembly profile"));
+        }
+        let seal: PreparationSeal =
+            self.open_private_cursor(SEAL_DOMAIN, &prepared.admission_token)?;
+        let binding = &prepared.assembly.read_set.binding;
+        let fence: PrepareFence =
+            self.open_private_cursor(prepare::PREPARE_DOMAIN, &binding.snapshot)?;
+        let assembly_bytes = encode(&prepared.assembly)?;
+        budget
+            .charge(1, assembly_bytes.len() as u64)
+            .map_err(budget_error)?;
+        if canonical_digest(&fence)? != seal.fence_digest
+            || digest_bytes(&assembly_bytes) != seal.assembly_digest
+            || binding.snapshot != binding.authorization
+            || binding.snapshot != binding.state
+            || binding.valid_until != Some(fence.valid_until)
+            || prepared.assembly.wire_digest != seal.wire_digest
+            || prepared.outgoing.wire.len() as u64 != seal.wire_bytes
+            || ContentDigest::from_bytes(*blake3::hash(&prepared.outgoing.wire).as_bytes())
+                != seal.wire_digest
+            || prepared.assembly.read_set.scopes != context.request.scopes
+            || fence
+                .scopes
+                .keys()
+                .map(ToString::to_string)
+                .collect::<BTreeSet<_>>()
+                != context.request.scopes
+        {
+            return Err(invalid(
+                "prepared assembly differs from its native admission seal",
+            ));
+        }
+        let mut trace_bytes = 0;
+        let trace_controls = match &prepared.router_trace {
+            Some(trace) => {
+                if seal.trace_digest != Some(trace.trace_digest)
+                    || seal.origin_digest != Some(trace.origin_closure_digest)
+                    || trace.seal != prepared.admission_token
+                    || trace.wire_digest != seal.wire_digest
+                    || trace.wire_byte_length != seal.wire_bytes
+                {
+                    return Err(invalid(
+                        "prepared trace differs from its native admission seal",
+                    ));
+                }
+                let envelope = router_trace::prepared_envelope(trace, budget)?;
+                if envelope.native_view != fence || envelope.manifest.assembly != prepared.assembly
+                {
+                    return Err(invalid("prepared trace belongs to another native view"));
+                }
+                trace_bytes = trace.canonical_json.len() as u64;
+                Some(envelope.origins)
+            }
+            None if seal.trace_digest.is_none() && seal.origin_digest.is_none() => None,
+            None => {
+                return Err(invalid(
+                    "prepared trace was stripped from its sealed assembly",
+                ));
+            }
+        };
+        let record = LeaseRecord {
+            seal,
+            fence,
+            originals: prepared.assembly.read_set.originals.clone(),
+            bytes: assembly_bytes.len() as u64 + trace_bytes,
+            model: None,
+            trace_controls,
+        };
+        self.check_lease_principal(context, &record)?;
+        Ok(record)
+    }
+
+    pub(super) fn validate_prepared_capture<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        request: &contextdb_service::CaptureRequest,
+        prepared: &PreparedContext,
+        checkpoint: Option<&CaptureReceipt>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        let trace = prepared
+            .router_trace
+            .as_ref()
+            .ok_or_else(|| invalid("prepared capture requires a protected trace"))?;
+        let record = self.lease_record_from_prepared(&request.context, prepared, budget)?;
+        self.check_lease_clock(&record)?;
+        self.check_lease_policy(snapshot, &request.context, &record, budget)?;
+        if !self.lease_scopes_current(snapshot, &request.context, &record, budget)? {
+            return Err(changed("scope changed before prepared capture"));
+        }
+        self.verify_router_trace_controls(
+            snapshot,
+            record
+                .trace_controls
+                .as_ref()
+                .ok_or_else(|| invalid("prepared controls absent"))?,
+            budget,
+        )?;
+        let state = self.current_owned_checkpoint(
+            snapshot,
+            &request.context,
+            checkpoint
+                .ok_or_else(|| invalid("prepared capture requires the current owned checkpoint"))?,
+        )?;
+        let pending = state
+            .pending_model
+            .as_ref()
+            .ok_or_else(|| invalid("run has no pending model request"))?;
+        if prepared.assembly.model_profile_digest
+            != contextdb_context::router::canonical_digest(&state.model_profile, budget)
+                .map_err(router_trace::trace_error)?
+            || record.seal.external != state.model_profile.external_processing
+        {
+            return Err(invalid(
+                "prepared reader profile differs from the owned run",
+            ));
+        }
+        let EventPayload::Assembly { manifest } = &request.event.payload else {
+            return Err(invalid(
+                "prepared capture requires a model request manifest",
+            ));
+        };
+        if request.event.kind != contextdb_core::EventKind::ModelRequested
+            || request.event.role != contextdb_core::EventRole::Host
+            || request.event.run_id != Some(state.identity.run_id)
+            || request.event.session_id != Some(state.identity.session_id)
+            || request.event.scope_ids != state.identity.scopes
+            || request.event.producer_sequence != state.next_sequence
+            || request.event.producer_id != state.producer_id
+            || request.event.event_id != pending.request_event
+            || manifest.model_call_id != pending.call_id
+            || pending.wire_digest.is_some()
+            || pending.interrupted_output.is_some()
+            || manifest.wire_digest != record.seal.wire_digest
+            || manifest.byte_length != record.seal.wire_bytes
+            || manifest
+                .parts
+                .iter()
+                .any(|part| matches!(part, contextdb_core::RequestPart::StoredNovel { .. }))
+            || manifest.router_trace.as_deref() != Some(&trace.attach(pending.call_id, budget)?)
+        {
+            return Err(invalid(
+                "prepared capture differs from the owned intent and native seal",
+            ));
+        }
+        Ok(())
     }
 
     fn check_lease_clock(&self, record: &LeaseRecord) -> ServiceResult<()> {
@@ -173,6 +342,9 @@ impl NativeService {
                 budget,
             )?;
         }
+        if let Some(controls) = &record.trace_controls {
+            self.authorize_router_trace_controls(snapshot, context, controls, budget)?;
+        }
         Ok(())
     }
 
@@ -207,52 +379,7 @@ impl ContextLeasePort for NativeService {
         prepared: &PreparedContext,
         budget: &mut QueryBudget,
     ) -> ServiceResult<ContextLease> {
-        require_capability(context, Capability::Runtime)?;
-        budget
-            .charge(1, prepared.outgoing.wire.len() as u64)
-            .map_err(budget_error)?;
-        if prepared.outgoing.wire.len() > 16 * 1024 * 1024
-            || prepared.assembly.read_set.originals.len() > 2048
-        {
-            return Err(exhausted("lease exceeds the bounded assembly profile"));
-        }
-        let seal: PreparationSeal =
-            self.open_private_cursor(SEAL_DOMAIN, &prepared.admission_token)?;
-        let binding = &prepared.assembly.read_set.binding;
-        let fence: PrepareFence =
-            self.open_private_cursor(prepare::PREPARE_DOMAIN, &binding.snapshot)?;
-        let assembly_bytes = encode(&prepared.assembly)?;
-        budget
-            .charge(1, assembly_bytes.len() as u64)
-            .map_err(budget_error)?;
-        if canonical_digest(&fence)? != seal.fence_digest
-            || digest_bytes(&assembly_bytes) != seal.assembly_digest
-            || binding.snapshot != binding.authorization
-            || binding.snapshot != binding.state
-            || binding.valid_until != Some(fence.valid_until)
-            || prepared.assembly.wire_digest != seal.wire_digest
-            || prepared.outgoing.wire.len() as u64 != seal.wire_bytes
-            || ContentDigest::from_bytes(*blake3::hash(&prepared.outgoing.wire).as_bytes())
-                != seal.wire_digest
-            || prepared.assembly.read_set.scopes != context.request.scopes
-            || fence
-                .scopes
-                .keys()
-                .map(ToString::to_string)
-                .collect::<BTreeSet<_>>()
-                != context.request.scopes
-        {
-            return Err(invalid(
-                "prepared assembly differs from its native admission seal",
-            ));
-        }
-        let record = LeaseRecord {
-            seal,
-            fence,
-            originals: prepared.assembly.read_set.originals.clone(),
-            bytes: assembly_bytes.len() as u64,
-            model: None,
-        };
+        let record = self.lease_record_from_prepared(context, prepared, budget)?;
         self.check_lease_principal(context, &record)?;
         // Every semantic/capture/policy writer uses this same owner lock. The
         // subscription exists before any later relevant epoch can be published.

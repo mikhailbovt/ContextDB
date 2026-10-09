@@ -364,6 +364,11 @@ impl Validate for EventEnvelope {
                 "assembly requires a complete model request occurrence",
             ));
         }
+        if let EventPayload::Assembly { manifest } = &self.payload
+            && let Some(trace) = &manifest.router_trace
+        {
+            trace.validate_for_model_request(manifest)?;
+        }
         match &self.provenance {
             Some(crate::EventProvenance::ModelOutput {
                 request_event_id,

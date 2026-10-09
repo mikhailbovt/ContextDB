@@ -9,7 +9,7 @@ use super::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct StateBinding {
+pub(crate) struct StateBinding {
     pub principal: String,
     pub key: StateKey,
     pub known_at: u64,
@@ -325,7 +325,7 @@ fn wall_time() -> ServiceResult<TimestampMicros> {
 
 /// The semantic envelope can narrow original access, never broaden it. Consent
 /// uses current wall time even for a historical valid-time query.
-fn envelope_allows(
+pub(crate) fn envelope_allows(
     context: &AuthenticatedRequestContext,
     envelope: &SemanticEnvelope,
     now: TimestampMicros,

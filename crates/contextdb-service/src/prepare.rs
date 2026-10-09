@@ -1,14 +1,59 @@
 //! Complete outgoing-context preparation for an authenticated owned runtime.
 
-use crate::{AuthenticatedRequestContext, CaptureReceipt, ServiceResult};
+use crate::{
+    AuthenticatedRequestContext, CaptureAcceptance, CaptureReceipt, CaptureRequest, ErrorCode,
+    ServiceError, ServiceResult,
+};
 use contextdb_context::{
     ContextBudgets, ContextPack, EncodedOutgoing, ModelProfile, OutgoingAssemblyManifest,
     OutgoingBase, OutgoingBudget, OutgoingEncoder, OutgoingMessage, PackFacetRequirement,
     PackPurpose, TokenCounter,
 };
-use contextdb_core::{ContextPackId, RawSource, TimestampMicros};
-use contextdb_recall::{IndexedCompletion, IndexedQuery, QueryBudget};
+use contextdb_core::{
+    ContentDigest, ContextPackId, MAX_ROUTER_TRACE_BYTES, ModelCallId, RawSource, RecallIntent,
+    RouterTraceAttachment, TimestampMicros,
+};
+use contextdb_recall::{
+    IndexedCompletion, IndexedQuery, QueryBudget, RecallLimits, RecallMode, SuppliedVector,
+};
 use serde::{Deserialize, Serialize};
+
+mod recall;
+pub use recall::deterministic_prepare_recall;
+
+/// Explicit protected trace mode. Required never falls back to an omitted trace.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouterTraceProfile {
+    /// Existing wire-only capture behavior.
+    #[default]
+    Off,
+    /// Retain a complete bounded query-time trace through native owner admission.
+    Required,
+}
+
+impl RouterTraceProfile {
+    /// Whether the legacy omitted profile applies.
+    pub const fn is_off(&self) -> bool {
+        matches!(self, Self::Off)
+    }
+}
+
+/// Bounded generic memory discovery cue, under the enclosing preparation authority.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrepareRecallQuery {
+    /// Actual current query, with no second authority or snapshot configuration.
+    pub query: String,
+    /// Typed discovery and temporal intent.
+    pub intent: RecallIntent,
+    /// Existing deterministic recall gate.
+    pub mode: RecallMode,
+    /// Bounded route/graph/evidence work.
+    pub limits: RecallLimits,
+    /// Optional exact host vector in an explicitly named space.
+    pub query_vector: Option<SuppliedVector>,
+}
 
 /// The host supplies H* and a bounded discovery frontier. Mandatory applicable
 /// state is enumerated by the publication owner, not selected by the model.
@@ -29,6 +74,9 @@ pub struct PrepareContextRequest {
     pub after_receipt: Option<CaptureReceipt>,
     /// At most eight indexed discovery routes; their closure shares one budget.
     pub raw_queries: Vec<IndexedQuery>,
+    /// Optional generic discovery through the same owner and shared allowance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_query: Option<PrepareRecallQuery>,
     /// Task facets, in addition to owner-enumerated mandatory current state.
     pub required_facets: Vec<PackFacetRequirement>,
     /// Maximum additional memory allocation.
@@ -41,6 +89,9 @@ pub struct PrepareContextRequest {
     pub outgoing_budget: OutgoingBudget,
     /// Whether the user explicitly requested disclosure of stored memory.
     pub explicit_memory_request: bool,
+    /// Protected trace mode, bound into the owner-prepared assembly.
+    #[serde(default, skip_serializing_if = "RouterTraceProfile::is_off")]
+    pub router_trace_profile: RouterTraceProfile,
 }
 
 /// The exact rendered request and its disclosure dependencies. Dispatch requires
@@ -70,6 +121,113 @@ pub struct PreparedContext {
     /// Authorized discovery hits requiring a different range or media adapter.
     /// These also appear as mandatory unknown markers in the outgoing request.
     pub unrendered_sources: Vec<UnrenderedSource>,
+    /// Bounded sealed native routing envelope, without a final model-call ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub router_trace: Option<PreparedRouterTrace>,
+}
+
+/// Owner-prepared routing material. Public fields and hashes alone grant no
+/// permission; the native owner verifies the seal, envelope and origin controls.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedRouterTrace {
+    /// Exact prepared pack identity.
+    pub pack_id: ContextPackId,
+    /// Exact model wire digest.
+    pub wire_digest: ContentDigest,
+    /// Exact model wire length.
+    pub wire_byte_length: u64,
+    /// Authorized request commitment.
+    pub router_request_digest: ContentDigest,
+    /// Accepted plan commitment.
+    pub router_plan_digest: ContentDigest,
+    /// Accepted compiler manifest commitment.
+    pub router_manifest_digest: ContentDigest,
+    /// Complete owner-resolved origin/control commitment.
+    pub origin_closure_digest: ContentDigest,
+    /// BLAKE3 of the complete canonical envelope bytes.
+    pub trace_digest: ContentDigest,
+    /// Sensitive native envelope, outside model input and owned checkpoints.
+    pub canonical_json: String,
+    /// Opaque native commitment to this preparation, not a transferable grant.
+    pub seal: String,
+}
+
+impl std::fmt::Debug for PreparedRouterTrace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedRouterTrace")
+            .field("byte_length", &self.canonical_json.len())
+            .field("trace_digest", &self.trace_digest)
+            .field("origin_closure_digest", &self.origin_closure_digest)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PreparedRouterTrace {
+    /// Check bounded local consistency; this does not validate native authority.
+    pub fn validate(&self) -> ServiceResult<()> {
+        if self.canonical_json.is_empty()
+            || self.canonical_json.len() > MAX_ROUTER_TRACE_BYTES
+            || self.wire_byte_length == 0
+            || self.seal.is_empty()
+            || self.seal.len() > 16384
+            || self.seal.chars().any(char::is_control)
+            || self.trace_digest
+                != ContentDigest::from_bytes(
+                    *blake3::hash(self.canonical_json.as_bytes()).as_bytes(),
+                )
+        {
+            return Err(ServiceError::new(
+                ErrorCode::IntegrityFailure,
+                "prepared router trace is invalid or excessive",
+                false,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Bind the checkpointed pending call and page this exact native envelope.
+    pub fn attach(
+        &self,
+        model_call_id: ModelCallId,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<RouterTraceAttachment> {
+        if self.canonical_json.len() > MAX_ROUTER_TRACE_BYTES {
+            return Err(ServiceError::new(
+                ErrorCode::ResourceExhausted,
+                "prepared router trace exceeds its byte ceiling",
+                false,
+            ));
+        }
+        budget
+            .charge(1, self.canonical_json.len() as u64 * 6)
+            .map_err(|_| {
+                ServiceError::new(
+                    ErrorCode::ResourceExhausted,
+                    "router trace allowance exhausted",
+                    false,
+                )
+            })?;
+        self.validate()?;
+        RouterTraceAttachment::new(
+            model_call_id,
+            self.pack_id,
+            self.wire_digest,
+            self.wire_byte_length,
+            self.router_request_digest,
+            self.router_plan_digest,
+            self.router_manifest_digest,
+            self.origin_closure_digest,
+            &self.canonical_json,
+        )
+        .map_err(|_| {
+            ServiceError::new(
+                ErrorCode::ResourceExhausted,
+                "router trace paging refused",
+                false,
+            )
+        })
+    }
 }
 
 /// A retained original that this bounded text renderer could not materialize.
@@ -105,4 +263,20 @@ pub trait PrepareContextPort: Send + Sync {
         encoder: &dyn OutgoingEncoder,
         budget: &mut QueryBudget,
     ) -> ServiceResult<PreparedContext>;
+
+    /// Accept a trace-bearing request through the prepared owner's atomic capture
+    /// boundary. Ordinary append cannot substitute for this admission path.
+    fn capture_prepared_model_request(
+        &self,
+        _request: CaptureRequest,
+        _prepared: &PreparedContext,
+        _current_checkpoint: Option<&CaptureReceipt>,
+        _budget: &mut QueryBudget,
+    ) -> ServiceResult<CaptureAcceptance> {
+        Err(ServiceError::new(
+            ErrorCode::Unsupported,
+            "prepared model request capture is unavailable in this service profile",
+            false,
+        ))
+    }
 }

@@ -11,14 +11,16 @@ use contextdb_recall::{
 };
 use contextdb_service::{
     AssertionPort, AuthenticatedRequestContext, Capability, CapturePort, PrepareContextPort,
-    PrepareContextRequest, PreparedContext, ResolveStateRequest, ServiceError, ServiceResult,
-    StateView,
+    PrepareContextRequest, PreparedContext, ResolveStateRequest, RouterTraceProfile, ServiceError,
+    ServiceResult, StateView,
 };
 use contextdb_storage::{ReadSnapshot, SnapshotSelector, StorageEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::raw_index::budget_error;
+use super::router_trace::controls::RouterTraceControls;
+use super::router_trace::{NativeControlKind, RouterEnvelope, UnitOrigin};
 use super::{
     NativeService, canonical_digest, digest_bytes, invalid, require_capability, storage_error,
 };
@@ -27,7 +29,7 @@ pub(super) const PREPARE_DOMAIN: &[u8] = b"contextdb/prepared-context/v1";
 
 mod raw;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PrepareFence {
     pub principal: String,
@@ -45,6 +47,7 @@ struct NativeAssemblyProvider<'a> {
     dependencies: BTreeMap<BlockId, EvidenceDependencies>,
     binding: AssemblyBinding,
     fence: PrepareFence,
+    trace_controls: Option<RouterTraceControls>,
 }
 
 impl ContextProvider for NativeAssemblyProvider<'_> {
@@ -119,11 +122,32 @@ impl AssemblyProvider for NativeAssemblyProvider<'_> {
         }
         self.service
             .check_prepare_fence(self.context, &self.fence, budget)
-            .map_err(context_error)
+            .map_err(context_error)?;
+        if let Some(controls) = &self.trace_controls {
+            let snapshot = self
+                .service
+                .engine
+                .begin_read(SnapshotSelector::Latest)
+                .map_err(context_error)?;
+            self.service
+                .authorize_router_trace_controls(&snapshot, self.context, controls, budget)
+                .map_err(context_error)?;
+        }
+        Ok(())
     }
 }
 
 impl PrepareContextPort for NativeService {
+    fn capture_prepared_model_request(
+        &self,
+        request: contextdb_service::CaptureRequest,
+        prepared: &PreparedContext,
+        current_checkpoint: Option<&contextdb_service::CaptureReceipt>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<contextdb_service::CaptureAcceptance> {
+        self.append_prepared_capture(request, prepared, current_checkpoint, budget)
+    }
+
     fn prepare_context(
         &self,
         request: PrepareContextRequest,
@@ -131,6 +155,12 @@ impl PrepareContextPort for NativeService {
         encoder: &dyn OutgoingEncoder,
         budget: &mut QueryBudget,
     ) -> ServiceResult<PreparedContext> {
+        let traced = request.router_trace_profile == RouterTraceProfile::Required;
+        if request.memory_query.is_some() && !traced {
+            return Err(invalid(
+                "generic preparation requires the protected trace profile",
+            ));
+        }
         for capability in [
             Capability::Runtime,
             Capability::Recall,
@@ -198,6 +228,16 @@ impl PrepareContextPort for NativeService {
         let now = wall_time()?;
         let issued_tick = self.lease_tick()?;
         let valid_at = request.valid_at.unwrap_or(now);
+        if let Some(query) = &request.memory_query {
+            contextdb_service::deterministic_prepare_recall(&request, query, known, valid_at)?;
+        }
+        let trace_base = if traced {
+            router::canonical_bytes(&request.base, budget).map_err(service_error)?;
+            Some(request.base.clone())
+        } else {
+            None
+        };
+        let generic_query = request.memory_query.clone();
         let mut fence = PrepareFence {
             principal: request.context.authorization_binding_digest()?,
             known_at: known,
@@ -223,6 +263,19 @@ impl PrepareContextPort for NativeService {
         }];
         let mut dependencies = BTreeMap::new();
         let mut evidence = BTreeMap::<EvidenceHandle, ProviderEvidence>::new();
+        let mut unit_origins = BTreeMap::new();
+        let mut evidence_origins = BTreeMap::new();
+        let mut retrieval_origins = RouterTraceControls::default();
+        let mut generic_discovery = None;
+        if traced {
+            unit_origins.insert(
+                BlockId::new("contextdb:situation").map_err(service_error)?,
+                UnitOrigin {
+                    controls: RouterTraceControls::default(),
+                    native_control: Some(NativeControlKind::Situation),
+                },
+            );
+        }
         let mut pending_interpretation = false;
         for scope in scopes {
             let epoch = self.scope_epoch(&snapshot, &workspace, scope)?;
@@ -242,6 +295,20 @@ impl PrepareContextPort for NativeService {
                     candidate: diagnostic(&format!("contextdb:pending:{scope}"), PackBlockKind::Unknown,
                         "Relevant original interpretation or capture is incomplete; applicable state and constraints are not established.",
                         &BTreeSet::from([scope.to_string()]), true)? });
+                if traced {
+                    unit_origins.insert(
+                        candidates
+                            .last()
+                            .ok_or_else(|| invalid("pending marker absent"))?
+                            .candidate
+                            .id
+                            .clone(),
+                        UnitOrigin {
+                            controls: RouterTraceControls::default(),
+                            native_control: Some(NativeControlKind::PendingInterpretation),
+                        },
+                    );
+                }
             }
             for key in self.scoped_state_keys(&snapshot, &request.context, scope, known, budget)? {
                 if candidates.len() >= 256 {
@@ -259,6 +326,31 @@ impl PrepareContextPort for NativeService {
                     },
                     budget,
                 )?;
+                if traced {
+                    let control = self.router_state_control(
+                        &snapshot,
+                        &request.context,
+                        &key,
+                        &view,
+                        budget,
+                    )?;
+                    let mut controls = RouterTraceControls::default();
+                    controls.originals.extend(
+                        control
+                            .mutations
+                            .iter()
+                            .flat_map(|mutation| &mutation.sources),
+                    );
+                    controls.states.push(control);
+                    unit_origins.insert(
+                        BlockId::new(format!("state:{}", canonical_digest(&key)?))
+                            .map_err(service_error)?,
+                        UnitOrigin {
+                            controls,
+                            native_control: None,
+                        },
+                    );
+                }
                 if request.valid_at.is_none()
                     && let Some(until) = view.resolution.valid_until
                 {
@@ -327,6 +419,17 @@ impl PrepareContextPort for NativeService {
                                 serde_json::to_string(&omission)
                                     .map_err(|_| invalid("original omission encoding failed"))?,
                             );
+                            if traced {
+                                let mut controls = RouterTraceControls::default();
+                                controls.originals.insert(omission.source.event_id);
+                                unit_origins.insert(
+                                    candidate.id.clone(),
+                                    UnitOrigin {
+                                        controls,
+                                        native_control: None,
+                                    },
+                                );
+                            }
                             candidates.push(ProviderCandidate {
                                 access: access.clone(),
                                 use_policy: ordinary_use(),
@@ -365,6 +468,17 @@ impl PrepareContextPort for NativeService {
                     );
                     candidate.evidence_handles = handles.clone();
                     candidate.source_class = source_class(hit.source.role);
+                    if traced {
+                        let mut controls = RouterTraceControls::default();
+                        controls.originals.insert(hit.source.event_id);
+                        unit_origins.insert(
+                            candidate.id.clone(),
+                            UnitOrigin {
+                                controls,
+                                native_control: None,
+                            },
+                        );
+                    }
                     dependencies.insert(
                         candidate.id.clone(),
                         EvidenceDependencies {
@@ -380,6 +494,55 @@ impl PrepareContextPort for NativeService {
                 }
             }
         }
+        if let Some(query) = &request.memory_query {
+            let deterministic =
+                contextdb_service::deterministic_prepare_recall(&request, query, known, valid_at)?;
+            let frontier = super::router_trace::material::generic_frontier(
+                self,
+                &snapshot,
+                &request,
+                &deterministic,
+                budget,
+            )?;
+            candidates.extend(frontier.candidates);
+            evidence.extend(frontier.evidence);
+            dependencies.extend(frontier.dependencies);
+            unit_origins.extend(frontier.unit_origins.into_iter().map(|(id, controls)| {
+                (
+                    id,
+                    UnitOrigin {
+                        controls,
+                        native_control: None,
+                    },
+                )
+            }));
+            evidence_origins.extend(frontier.evidence_origins);
+            retrieval_origins = frontier.inspected_origins;
+            generic_discovery = Some(frontier.discovery);
+        }
+        if traced {
+            for (id, item) in &evidence {
+                if !evidence_origins.contains_key(id) {
+                    let mut controls = RouterTraceControls::default();
+                    if let Some(span) = &item.evidence.original_span {
+                        controls.originals.insert(span.event_id);
+                    }
+                    evidence_origins.insert(id.clone(), controls);
+                }
+            }
+        }
+        let trace_controls = if traced {
+            let mut controls = retrieval_origins.clone();
+            for origin in unit_origins.values() {
+                controls.union_checked(&origin.controls)?;
+            }
+            for origin in evidence_origins.values() {
+                controls.union_checked(origin)?;
+            }
+            Some(controls)
+        } else {
+            None
+        };
         self.check_prepare_fence(&request.context, &fence, budget)?;
         let token = self.seal_private_cursor(PREPARE_DOMAIN, &fence)?;
         let binding = AssemblyBinding {
@@ -414,6 +577,7 @@ impl PrepareContextPort for NativeService {
             dependencies,
             binding,
             fence,
+            trace_controls,
         };
         let principal = RecallPrincipal {
             subject: request.context.request.subject_id.clone(),
@@ -456,21 +620,114 @@ impl PrepareContextPort for NativeService {
         };
         let external_processing = context.model_profile.external_processing;
         let history_can_shrink = removable_hot_history(&request.base);
-        let compiled = ContextCompiler::new(*self.token_key)
-            .map_err(service_error)?
-            .compile_assembly(
-                &CompileAssemblyRequest {
-                    context,
-                    base: request.base,
-                    budget: request.outgoing_budget,
-                },
-                &provider,
-                tokenizer,
-                encoder,
-                &R0Scorer,
+        let compiler = ContextCompiler::new(*self.token_key).map_err(service_error)?;
+        let compile_request = CompileAssemblyRequest {
+            context,
+            base: request.base,
+            budget: request.outgoing_budget,
+        };
+        let (compiled, mut router_trace) = if traced {
+            let routed = compiler
+                .compile_assembly_with_router(
+                    &compile_request,
+                    &provider,
+                    tokenizer,
+                    encoder,
+                    &R0Scorer,
+                    budget,
+                )
+                .map_err(|error| match error {
+                    ContextError::BudgetExceeded(_) => {
+                        super::exhausted("protected router preparation exceeded its shared profile")
+                    }
+                    other => service_error(other),
+                })?;
+            let mut origins = BTreeMap::new();
+            for unit in &routed.request.units {
+                let origin = if let Some(origin) = unit_origins.remove(&unit.id) {
+                    origin
+                } else if unit.kind == PackBlockKind::Unknown
+                    && unit.id.as_str().starts_with("unknown:")
+                    && unit
+                        .unknown
+                        .as_ref()
+                        .is_some_and(|unknown| unknown.blocking)
+                    && routed.prepared_material.candidates.iter().any(|candidate| {
+                        candidate.id == unit.id
+                            && candidate.representations.iter().any(|representation| {
+                                representation
+                                    .fields
+                                    .get("missing_facet")
+                                    .is_some_and(|name| {
+                                        routed
+                                            .request
+                                            .context
+                                            .required_facets
+                                            .iter()
+                                            .any(|facet| facet.name == *name)
+                                            && unit.id.as_str()
+                                                == format!(
+                                                    "unknown:{}",
+                                                    &blake3::hash(name.as_bytes())
+                                                        .to_hex()
+                                                        .to_string()[..16]
+                                                )
+                                    })
+                            })
+                    })
+                {
+                    UnitOrigin {
+                        controls: RouterTraceControls::default(),
+                        native_control: Some(NativeControlKind::RequiredFacet),
+                    }
+                } else {
+                    return Err(super::integrity(
+                        "prepared router unit has no registered origin",
+                    ));
+                };
+                origins.insert(unit.id.clone(), origin);
+            }
+            let handles: BTreeSet<_> = routed
+                .request
+                .units
+                .iter()
+                .flat_map(|unit| &unit.support_alternatives)
+                .flat_map(|alternative| &alternative.evidence_handles)
+                .cloned()
+                .collect();
+            evidence_origins.retain(|id, _| handles.contains(id));
+            let envelope = RouterEnvelope::new(
+                routed.request,
+                routed.plan,
+                routed.manifest,
+                provider.fence.clone(),
+                trace_base.ok_or_else(|| invalid("prepared trace base absent"))?,
+                origins,
+                evidence_origins,
+                routed.prepared_material,
+                discovery.clone(),
+                retrieval_origins,
+                generic_query,
+                generic_discovery,
                 budget,
+            )?;
+            let trace = self.prepare_router_envelope(&envelope, &routed.assembly, budget)?;
+            (routed.assembly, Some(trace))
+        } else {
+            (
+                compiler
+                    .compile_assembly(
+                        &compile_request,
+                        &provider,
+                        tokenizer,
+                        encoder,
+                        &R0Scorer,
+                        budget,
+                    )
+                    .map_err(service_error)?,
+                None,
             )
-            .map_err(service_error)?;
+        };
         if let Some(prices) = compiled
             .raw_recall_pressure
             .as_ref()
@@ -492,19 +749,25 @@ impl PrepareContextPort for NativeService {
                 true,
             ));
         }
+        let admission_token = self.seal_preparation(
+            &compiled.manifest,
+            &provider.fence,
+            issued_tick,
+            now,
+            request.known_at.is_none() && request.valid_at.is_none(),
+            external_processing,
+            pending_interpretation,
+            compiled.outgoing.wire.len() as u64,
+            canonical_digest(&request.context.capability_grants)?,
+            router_trace.as_ref(),
+        )?;
+        if let Some(trace) = &mut router_trace {
+            trace.seal = admission_token.clone();
+        }
         Ok(PreparedContext {
             scorer_micros: compiled.scorer_micros,
-            admission_token: self.seal_preparation(
-                &compiled.manifest,
-                &provider.fence,
-                issued_tick,
-                now,
-                request.known_at.is_none() && request.valid_at.is_none(),
-                external_processing,
-                pending_interpretation,
-                compiled.outgoing.wire.len() as u64,
-                canonical_digest(&request.context.capability_grants)?,
-            )?,
+            admission_token,
+            router_trace,
             context_pack: compiled.context.pack,
             canonical_bytes: compiled.context.canonical_protobuf,
             messages: compiled.messages,

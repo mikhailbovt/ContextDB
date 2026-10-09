@@ -153,6 +153,28 @@ impl NativeService {
         request: &NativeRemovalRequestReceipt,
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeBackupPruningCounts> {
+        let source_manifest: Manifest = decode(
+            &before
+                .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("replacement source manifest absent"))?,
+            "source manifest",
+        )?;
+        let target_manifest: Manifest = decode(
+            &after
+                .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("replacement target manifest absent"))?,
+            "target manifest",
+        )?;
+        if !source_manifest
+            .features
+            .is_subset(&target_manifest.features)
+        {
+            return Err(integrity(
+                "replacement removed an accepted native format feature",
+            ));
+        }
         let workspace = digest_bytes(lineage.workspace_id.as_bytes());
         let expected = RemovalCheckpoint {
             sequence: request.sequence,
@@ -234,6 +256,8 @@ impl NativeService {
         for (space, prefix) in [
             (&self.keyspaces.idempotency, b"".as_slice()),
             (&self.keyspaces.continuous, b"payload/header/".as_slice()),
+            (&self.keyspaces.continuous, b"receipt/".as_slice()),
+            (&self.keyspaces.continuous, b"outbox/".as_slice()),
         ] {
             for row in before.scan_prefix(space, prefix).map_err(storage_error)? {
                 budget

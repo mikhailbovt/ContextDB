@@ -36,6 +36,12 @@ pub const CAPTURE_MAX_INLINE_BYTES: usize = 256 * 1024;
 pub const CAPTURE_MAX_PRODUCER_GAPS: usize = 128;
 const MAX_CAPTURE_RETRIES: usize = 4;
 
+struct PreparedCapture<'a> {
+    prepared: &'a contextdb_service::PreparedContext,
+    checkpoint: Option<&'a CaptureReceipt>,
+    budget: &'a mut contextdb_recall::QueryBudget,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CaptureRecord {
@@ -256,6 +262,40 @@ impl NativeService {
         request: CaptureRequest,
         checkpoint: Option<&SaveRunCheckpointRequest>,
     ) -> ServiceResult<CaptureAcceptance> {
+        self.append_capture(request, checkpoint, None)
+    }
+
+    pub(super) fn append_prepared_capture(
+        &self,
+        request: CaptureRequest,
+        prepared: &contextdb_service::PreparedContext,
+        checkpoint: Option<&CaptureReceipt>,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<CaptureAcceptance> {
+        self.append_capture(
+            request,
+            None,
+            Some(PreparedCapture {
+                prepared,
+                checkpoint,
+                budget,
+            }),
+        )
+    }
+
+    fn append_capture(
+        &self,
+        request: CaptureRequest,
+        checkpoint: Option<&SaveRunCheckpointRequest>,
+        mut prepared: Option<PreparedCapture<'_>>,
+    ) -> ServiceResult<CaptureAcceptance> {
+        let traced = matches!(&request.event.payload, EventPayload::Assembly { manifest }
+            if manifest.router_trace.is_some());
+        if traced != prepared.is_some() {
+            return Err(invalid(
+                "trace-bearing model requests require prepared owner capture",
+            ));
+        }
         require_capability(&request.context, Capability::Observe)?;
         if host_request_echo(&request.event)
             || checkpoint.is_some()
@@ -305,6 +345,16 @@ impl NativeService {
             return Err(permission_denied());
         }
         validate_payload(&request.event)?;
+        if traced {
+            bounded_event_size(&request.event)?;
+            let row_bytes = bounded_capture_row(&request)?;
+            if let Some(admission) = prepared.as_mut() {
+                admission
+                    .budget
+                    .charge(1, row_bytes as u64)
+                    .map_err(super::raw_index::budget_error)?;
+            }
+        }
         let producer = producer_key(&request.context, request.event.producer_id)?;
         let idempotency =
             canonical_digest(&(NATIVE_CAPTURE_DOMAIN, &producer, &request.idempotency_key))?;
@@ -314,7 +364,11 @@ impl NativeService {
             &request.context.actor_id,
             &request.context.agent_id,
         ))?;
-        let _guard = self.lock_writes()?;
+        let _guard = if let Some(admission) = prepared.as_mut() {
+            self.lock_index_publication(admission.budget)?
+        } else {
+            self.lock_writes()?
+        };
         for _ in 0..MAX_CAPTURE_RETRIES {
             if let Some(receipt) = self.append_capture_attempt(
                 &request,
@@ -322,6 +376,7 @@ impl NativeService {
                 &idempotency,
                 &request_digest,
                 checkpoint,
+                prepared.as_mut(),
             )? {
                 return Ok(receipt);
             }
@@ -391,6 +446,7 @@ impl NativeService {
         idempotency: &str,
         request_digest: &str,
         checkpoint: Option<&SaveRunCheckpointRequest>,
+        prepared: Option<&mut PreparedCapture<'_>>,
     ) -> ServiceResult<Option<CaptureAcceptance>> {
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(receipt) = self.replay::<CaptureReceipt, _>(
@@ -408,6 +464,22 @@ impl NativeService {
         }
         if let Some(checkpoint) = checkpoint {
             self.validate_checkpoint_publication(&transaction, checkpoint)?;
+        }
+        if let Some(admission) = prepared {
+            if self.engine.keys.is_none() {
+                return Err(ServiceError::new(
+                    ErrorCode::Unsupported,
+                    "protected router capture requires encrypted native custody",
+                    false,
+                ));
+            }
+            self.validate_prepared_capture(
+                &transaction,
+                request,
+                admission.prepared,
+                admission.checkpoint,
+                admission.budget,
+            )?;
         }
         let event = &request.event;
         self.require_unsuppressed_identity(
@@ -459,6 +531,10 @@ impl NativeService {
             self.enable_source_format(&mut transaction)?;
         }
         self.enable_capture_format(&mut transaction)?;
+        if matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.router_trace.is_some())
+        {
+            self.enable_capture_extension(&mut transaction, super::router_trace::TRACE_FEATURE)?;
+        }
         if matches!(event.provenance, Some(EventProvenance::ModelOutput { .. })) {
             self.enable_capture_extension(
                 &mut transaction,
@@ -510,17 +586,22 @@ impl NativeService {
                 encode(&policy)?,
             )
             .map_err(storage_error)?;
+        let stored_content = StoredObservationContent {
+            schema_version: SCHEMA_VERSION,
+            observation_id,
+            metadata,
+            content,
+            digest: content_digest,
+        };
+        if matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.router_trace.is_some())
+        {
+            bounded_event_size(&stored_content)?;
+        }
         transaction
             .put(
                 &self.keyspaces.observations_content,
                 event_digest.as_bytes().to_vec(),
-                encode(&StoredObservationContent {
-                    schema_version: SCHEMA_VERSION,
-                    observation_id,
-                    metadata,
-                    content,
-                    digest: content_digest,
-                })?,
+                encode(&stored_content)?,
             )
             .map_err(storage_error)?;
         #[cfg(test)]
@@ -547,7 +628,7 @@ impl NativeService {
             producer_key: producer.into(),
             producer_sequence: event.producer_sequence,
             idempotency_digest: idempotency.into(),
-            dependencies: capture_dependencies(&event.payload),
+            dependencies: capture_dependencies(event)?,
             affects_scope: (!affects_scope).then_some(false),
             custody_version: Some(super::custody::CUSTODY_VERSION),
             recovery: Some(CaptureRecovery::from_event(event)?),
@@ -755,7 +836,7 @@ impl NativeService {
             .validate()
             .map_err(|_| integrity("captured envelope invariant failed"))?;
         validate_payload(&event).map_err(|_| integrity("captured original digest is invalid"))?;
-        if record.dependencies != capture_dependencies(&event.payload) {
+        if record.dependencies != capture_dependencies(&event)? {
             return Err(integrity(
                 "capture source dependencies differ from its original",
             ));
@@ -816,12 +897,6 @@ impl NativeService {
                     && !entry.key.starts_with(b"removal/")
             })
             .collect::<Vec<_>>();
-        if entries.is_empty() {
-            if recovery_activation.is_some() {
-                return Err(integrity("capture recovery format lacks accepted captures"));
-            }
-            return Ok(());
-        }
         let manifest: Manifest = decode(
             &snapshot
                 .get(&self.keyspaces.meta, META_MANIFEST_KEY)
@@ -829,6 +904,20 @@ impl NativeService {
                 .ok_or_else(|| integrity("native manifest is absent"))?,
             "native manifest",
         )?;
+        if entries.is_empty() {
+            if manifest
+                .features
+                .contains(super::router_trace::TRACE_FEATURE)
+            {
+                return Err(integrity(
+                    "router trace format lacks an accepted protected capture",
+                ));
+            }
+            if recovery_activation.is_some() {
+                return Err(integrity("capture recovery format lacks accepted captures"));
+            }
+            return Ok(());
+        }
         if !manifest.features.contains(CAPTURE_FEATURE)
             && !manifest
                 .features
@@ -845,6 +934,11 @@ impl NativeService {
                 let record: CaptureRecord = decode(&entry.value, "capture record")?;
                 let control =
                     self.verified_capture_control(snapshot, record.receipt.event_id, &mut budget)?;
+                if control.recovery.router_trace.is_some() && record.custody_version.is_none() {
+                    return Err(integrity(
+                        "protected router capture requires its custody marker",
+                    ));
+                }
                 if let Some(version) = record.custody_version {
                     if version != super::custody::CUSTODY_VERSION
                         || !manifest.features.contains(super::custody::CUSTODY_FEATURE)
@@ -933,6 +1027,17 @@ impl NativeService {
             } else {
                 return Err(integrity("unknown continuous capture record family"));
             }
+        }
+        if manifest
+            .features
+            .contains(super::router_trace::TRACE_FEATURE)
+            && !accepted
+                .iter()
+                .any(|(_, recovery)| recovery.router_trace.is_some())
+        {
+            return Err(integrity(
+                "router trace format lacks an accepted protected capture",
+            ));
         }
         // Deep verification reconstructs every derived capture row from accepted
         // originals. It is deliberately separate from the bounded append/read path.
@@ -1071,8 +1176,8 @@ impl NativeService {
     }
 }
 
-fn capture_dependencies(payload: &EventPayload) -> Vec<CaptureDependency> {
-    match payload {
+fn capture_dependencies(event: &EventEnvelope) -> ServiceResult<Vec<CaptureDependency>> {
+    let mut dependencies = match &event.payload {
         EventPayload::Staged { reference, .. } => vec![CaptureDependency::Payload {
             reference: reference.clone(),
         }],
@@ -1092,6 +1197,72 @@ fn capture_dependencies(payload: &EventPayload) -> Vec<CaptureDependency> {
             })
             .collect(),
         _ => Vec::new(),
+    };
+    if let Some(controls) = super::router_trace::trace_controls(event)? {
+        for event_id in controls.originals {
+            if !dependencies.contains(&CaptureDependency::Source { event_id }) {
+                dependencies.push(CaptureDependency::Source { event_id });
+            }
+        }
+    }
+    Ok(dependencies)
+}
+
+fn bounded_event_size(value: &impl Serialize) -> ServiceResult<()> {
+    let mut counter = CaptureSize(0);
+    serde_json::to_writer(&mut counter, value)
+        .map_err(|_| exhausted("protected captured row exceeds eight MiB"))
+}
+
+// This borrowed shape has the exact serialized size of StoredObservationContent;
+// every actual content digest is a 64-byte lowercase hexadecimal string. Check
+// it before any format/key/value write, then check the actual row again below.
+fn bounded_capture_row(request: &CaptureRequest) -> ServiceResult<usize> {
+    #[derive(Serialize)]
+    struct Row<'a> {
+        schema_version: u16,
+        observation_id: String,
+        metadata: BTreeMap<String, serde_json::Value>,
+        content: &'a EventEnvelope,
+        digest: &'static str,
+    }
+    let row = Row {
+        schema_version: SCHEMA_VERSION,
+        observation_id: request.event.event_id.to_string(),
+        metadata: BTreeMap::from([
+            (
+                "capture_format".into(),
+                serde_json::json!(NATIVE_CAPTURE_DOMAIN),
+            ),
+            (
+                "actor_id".into(),
+                serde_json::json!(request.context.actor_id),
+            ),
+            (
+                "agent_id".into(),
+                serde_json::json!(request.context.agent_id),
+            ),
+        ]),
+        content: &request.event,
+        digest: "0000000000000000000000000000000000000000000000000000000000000000",
+    };
+    let mut counter = CaptureSize(0);
+    serde_json::to_writer(&mut counter, &row)
+        .map_err(|_| exhausted("protected captured row exceeds eight MiB"))?;
+    Ok(counter.0)
+}
+
+struct CaptureSize(usize);
+impl std::io::Write for CaptureSize {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self.0.saturating_add(bytes.len());
+        if self.0 > 8 * 1024 * 1024 {
+            return Err(std::io::Error::other("captured row ceiling"));
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 

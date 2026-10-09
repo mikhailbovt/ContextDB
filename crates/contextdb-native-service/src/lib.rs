@@ -36,6 +36,7 @@ mod publication;
 mod raw;
 mod raw_index;
 mod record_journal;
+mod router_trace;
 pub use record_journal::NativeRecordControlPreparationReceipt;
 pub use record_journal::controls::witness::pruning::NativeRecordPruningReceipt;
 pub use record_journal::controls::witness::{
@@ -3455,6 +3456,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != capture::IMPACT_FEATURE
                 && feature != capture::RECOVERY_FEATURE
                 && feature != custody::CUSTODY_FEATURE
+                && feature != router_trace::TRACE_FEATURE
                 && feature != owned::OWNED_FEATURE
                 && feature != payload::SOURCE_FEATURE
                 && feature != payload::MODEL_PROTOCOL_FEATURE
@@ -3482,6 +3484,12 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
         })
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
             != manifest.suppression_authority.is_some()
+        || (manifest.features.contains(router_trace::TRACE_FEATURE)
+            && (!manifest.features.contains(custody::CUSTODY_FEATURE)
+                || !manifest.features.contains(capture::RECOVERY_FEATURE)
+                || !manifest.features.contains(payload::SOURCE_FEATURE)
+                || !manifest.features.contains(encryption::ENCRYPTION_FEATURE)
+                || !manifest.features.contains(capture::CAPTURE_FEATURE)))
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
         || ((manifest.features.contains(record_journal::CONTROL_FEATURE)
             || manifest

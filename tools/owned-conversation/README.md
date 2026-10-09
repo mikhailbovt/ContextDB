@@ -117,6 +117,18 @@ The input ceiling includes attribution and mandatory state as well as originals.
 Optional recalled data can remain omitted if it cannot fit beside the retained
 recent group. Size the profile with the actual tokenizer and workload.
 
+To retain a protected query-time routing trace, add
+`"router_trace_profile": "required"` to the trusted configuration before starting
+a new run. Omission keeps the existing Off profile and configuration binding.
+Required binds its version and limits to that run; changing the profile on resume
+refuses before the reader starts. The trace stays outside the reader wire and
+inherits current permissions for selected and inspected source material. Its
+initial encrypted native profile allows 2 MiB across at most eight 256 KiB pages,
+8 MiB native rows and at most 256 KiB of inline Novel request material; exceeding
+a bound refuses without an Off fallback. Larger staged authority support remains
+open. This opt-in observes the existing R0 path; Kev inference, training and
+whole-history semantic recall are separate later stages.
+
 ## Start, pause and resume
 
 Input and output are UTF-8 JSON Lines. Conversation frames contain text/control

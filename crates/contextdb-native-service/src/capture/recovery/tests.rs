@@ -55,6 +55,7 @@ fn encrypted_witnesses_preserve_inputs_without_copying_originals_and_restore_exa
     assembly.event.kind = EventKind::ModelRequested;
     assembly.event.payload = EventPayload::Assembly {
         manifest: ModelRequestManifest {
+            router_trace: None,
             model_call_id: ModelCallId::new(),
             renderer: "renderer_sentinel_79210".into(),
             wire_digest: digest(&wire),

@@ -1,10 +1,10 @@
 //! Native assertion publication. Originals, policies, and semantics share one writer.
 
 mod catalog;
-mod query;
+pub(crate) mod query;
 pub(crate) mod retention;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 mod verify;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -87,23 +87,23 @@ struct AcceptedAssertions {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StoredAuthority {
-    commit: u64,
-    access: contextdb_service::AccessPolicy,
-    policy: AuthorityPolicy,
+pub(crate) struct StoredAuthority {
+    pub(crate) commit: u64,
+    pub(crate) access: contextdb_service::AccessPolicy,
+    pub(crate) policy: AuthorityPolicy,
 }
 
 /// Only dependency IDs and version binding are read before source authorization.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct MutationLabel {
-    commit: u64,
-    sources: BTreeSet<ObservationId>,
-    body_key: Vec<u8>,
-    body_digest: String,
-    envelope: Option<contextdb_core::SemanticEnvelope>,
+pub(crate) struct MutationLabel {
+    pub(crate) commit: u64,
+    pub(crate) sources: BTreeSet<ObservationId>,
+    pub(crate) body_key: Vec<u8>,
+    pub(crate) body_digest: String,
+    pub(crate) envelope: Option<contextdb_core::SemanticEnvelope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pruned_at: Option<u64>,
+    pub(crate) pruned_at: Option<u64>,
 }
 
 impl AssertionPort for NativeService {
@@ -621,7 +621,7 @@ impl NativeService {
         ))
     }
 
-    fn authority_at<S: ReadSnapshot>(
+    pub(crate) fn authority_at<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -739,7 +739,7 @@ impl NativeService {
         Ok(())
     }
 
-    fn authorize_state_label<S: ReadSnapshot>(
+    pub(crate) fn authorize_state_label<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         context: &AuthenticatedRequestContext,
@@ -795,7 +795,7 @@ impl NativeService {
         Ok(())
     }
 
-    fn read_state_mutation<S: ReadSnapshot>(
+    pub(crate) fn read_state_mutation<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         label: &MutationLabel,

@@ -144,6 +144,16 @@ fn r0_bridge_preserves_shared_support_union_and_complete_protocol_cost() {
     assert!(captured.plan.behavior_propensity.is_none());
     assert_eq!(captured.assembly.context.pack.evidence.len(), 1);
     assert_eq!(
+        captured
+            .prepared_material
+            .evidence
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alternative", "shared"],
+        "unselected sufficient support is retained from the same prepared units"
+    );
+    assert_eq!(
         captured.assembly.context.pack.evidence[0].id.as_str(),
         "shared"
     );
@@ -436,6 +446,54 @@ fn stop_keeps_exact_mandatory_closure_and_no_discretionary_seeds() {
     assert!(captured.plan.seed_ids.is_empty());
     assert_eq!(captured.plan.selected_ids, captured.request.mandatory_ids);
     must(apply(&input(), &empty, &Stop, &captured.plan));
+
+    let mut missing = input();
+    missing.context.required_facets.push(PackFacetRequirement {
+        name: "unestablished-current-decision".into(),
+        minimum_confidence_micros: 1_000_000,
+        require_evidence: true,
+    });
+    let generated = must(routed(&missing, &empty, &Stop));
+    assert_eq!(
+        generated
+            .prepared_material
+            .candidates
+            .iter()
+            .map(|item| &item.id)
+            .collect::<Vec<_>>(),
+        generated
+            .request
+            .units
+            .iter()
+            .map(|unit| &unit.id)
+            .collect::<Vec<_>>()
+    );
+    let marker = generated
+        .prepared_material
+        .candidates
+        .iter()
+        .find(|candidate| candidate.kind == PackBlockKind::Unknown)
+        .expect("compiler-generated missing facet material");
+    assert!(marker.mandatory);
+    assert_eq!(
+        marker.representations[0].fields["missing_facet"],
+        "unestablished-current-decision"
+    );
+    assert_eq!(
+        marker.epistemic.basis,
+        EpistemicBasis::DeterministicDerivation
+    );
+    assert!(generated.request.mandatory_ids.contains(&marker.id));
+    let accepted_marker = generated
+        .assembly
+        .context
+        .pack
+        .sections
+        .iter()
+        .find(|block| block.id == marker.id)
+        .expect("same generated mandatory marker in actual assembly");
+    assert_eq!(accepted_marker.unknown, marker.unknown);
+    assert!(generated.prepared_material.evidence.is_empty());
 
     let provider = shared_fixture(true);
     let captured = must(routed(&input(), &provider, &Stop));
