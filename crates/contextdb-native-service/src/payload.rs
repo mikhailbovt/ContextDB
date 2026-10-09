@@ -6,6 +6,7 @@ use contextdb_core::{
     ContentBlockId, ContentDigest, EventEnvelope, EventKind, EventPayload, OriginalPayloadRef,
     OriginalSourceSpan, RequestPart,
 };
+use contextdb_recall::QueryBudget as PayloadBudget;
 use contextdb_service::{
     AccessPolicy, AuthenticatedRequestContext, Capability, CaptureDurability, ErrorCode,
     PayloadPort, PayloadReceipt, ServiceError, ServiceResult, StagePayloadRequest,
@@ -370,11 +371,24 @@ impl NativeService {
         context: &AuthenticatedRequestContext,
         reference: &OriginalPayloadRef,
     ) -> ServiceResult<PayloadHeader> {
+        self.authorized_payload_header_inner(snapshot, context, reference, None)
+    }
+
+    fn authorized_payload_header_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        reference: &OriginalPayloadRef,
+        mut budget: Option<&mut PayloadBudget>,
+    ) -> ServiceResult<PayloadHeader> {
+        payload_charge(&mut budget, 1, 0)?;
         self.require_suppression_current(
             snapshot,
             &super::digest_bytes(context.request.workspace_id.as_bytes()),
         )?;
-        let header = self.payload_header(snapshot, reference.block_id)?;
+        let header =
+            self.payload_header_inner(snapshot, reference.block_id, budget.as_deref_mut())?;
+        payload_charge(&mut budget, 1, 0)?;
         self.require_payload_unpruned(snapshot, reference.block_id)?;
         if !policy_allows(&context.request, &header.access) {
             return Err(permission_denied());
@@ -392,13 +406,25 @@ impl NativeService {
         snapshot: &S,
         id: ContentBlockId,
     ) -> ServiceResult<PayloadHeader> {
-        let header: PayloadHeader = decode(
-            &snapshot
-                .get(&self.keyspaces.continuous, &header_key(id))
-                .map_err(storage_error)?
-                .ok_or_else(not_found)?,
-            "payload header",
-        )?;
+        self.payload_header_inner(snapshot, id, None)
+    }
+
+    fn payload_header_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ContentBlockId,
+        mut budget: Option<&mut PayloadBudget>,
+    ) -> ServiceResult<PayloadHeader> {
+        payload_charge(&mut budget, 1, 0)?;
+        let bytes = snapshot
+            .get(&self.keyspaces.continuous, &header_key(id))
+            .map_err(storage_error)?
+            .ok_or_else(not_found)?;
+        if budget.is_some() && bytes.len() > 1024 * 1024 {
+            return Err(integrity("payload header exceeds its metadata bound"));
+        }
+        payload_charge(&mut budget, 1, (bytes.len() as u64).saturating_mul(2))?;
+        let header: PayloadHeader = decode(&bytes, "payload header")?;
         validate_access(&header.access)?;
         let length = usize::try_from(header.reference.byte_length)
             .map_err(|_| integrity("payload length overflow"))?;
@@ -422,11 +448,23 @@ impl NativeService {
         snapshot: &S,
         header: &PayloadHeader,
     ) -> ServiceResult<Vec<u8>> {
+        self.payload_bytes_inner(snapshot, header, None)
+    }
+
+    fn payload_bytes_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        header: &PayloadHeader,
+        mut budget: Option<&mut PayloadBudget>,
+    ) -> ServiceResult<Vec<u8>> {
+        payload_charge(&mut budget, 1, 0)?;
         self.require_payload_unpruned(snapshot, header.reference.block_id)?;
         let length = usize::try_from(header.reference.byte_length)
             .map_err(|_| integrity("payload length overflow"))?;
+        payload_charge(&mut budget, 1, length as u64)?;
         let mut bytes = Vec::with_capacity(length);
         for index in 0..header.chunks {
+            payload_charge(&mut budget, 1, CHUNK_BYTES.min(length - bytes.len()) as u64)?;
             let chunk = snapshot
                 .get(
                     &self.keyspaces.continuous,
@@ -446,6 +484,7 @@ impl NativeService {
         if raw_digest(&bytes) != header.reference.digest {
             return Err(integrity("staged original digest is invalid"));
         }
+        payload_charge(&mut budget, 0, 0)?;
         Ok(bytes)
     }
 
@@ -456,15 +495,30 @@ impl NativeService {
         start: u64,
         end: u64,
     ) -> ServiceResult<Vec<u8>> {
+        self.payload_range_inner(snapshot, header, start, end, None)
+    }
+
+    fn payload_range_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        header: &PayloadHeader,
+        start: u64,
+        end: u64,
+        mut budget: Option<&mut PayloadBudget>,
+    ) -> ServiceResult<Vec<u8>> {
+        payload_charge(&mut budget, 1, 0)?;
         self.require_payload_unpruned(snapshot, header.reference.block_id)?;
         let length = usize::try_from(header.reference.byte_length)
             .map_err(|_| integrity("payload length overflow"))?;
         let range = source_range(start, end, length)?;
+        payload_charge(&mut budget, 1, range.len() as u64)?;
         let mut bytes = Vec::with_capacity(range.len());
         if range.is_empty() {
             return Ok(bytes);
         }
         for index in (range.start / CHUNK_BYTES)..range.end.div_ceil(CHUNK_BYTES) {
+            let offset = index * CHUNK_BYTES;
+            payload_charge(&mut budget, 1, CHUNK_BYTES.min(length - offset) as u64)?;
             let chunk = snapshot
                 .get(
                     &self.keyspaces.continuous,
@@ -475,7 +529,6 @@ impl NativeService {
                 )
                 .map_err(storage_error)?
                 .ok_or_else(|| integrity("source chunk is absent"))?;
-            let offset = index * CHUNK_BYTES;
             if chunk.len() != CHUNK_BYTES.min(length - offset)
                 || raw_digest(&chunk) != header.chunk_digests[index]
             {
@@ -485,6 +538,7 @@ impl NativeService {
                 &chunk[range.start.saturating_sub(offset)..(range.end - offset).min(chunk.len())],
             );
         }
+        payload_charge(&mut budget, 0, 0)?;
         Ok(bytes)
     }
 
@@ -495,11 +549,50 @@ impl NativeService {
         span: &OriginalSourceSpan,
         independent_root: bool,
     ) -> ServiceResult<Vec<u8>> {
+        self.source_span_inner(snapshot, context, span, independent_root, None)
+    }
+
+    fn source_span_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: Option<&AuthenticatedRequestContext>,
+        span: &OriginalSourceSpan,
+        independent_root: bool,
+        mut budget: Option<&mut PayloadBudget>,
+    ) -> ServiceResult<Vec<u8>> {
+        payload_charge(&mut budget, 1, 0)?;
         if let Some(context) = context {
-            self.authorized_capture_policy(snapshot, context, span.event_id)?;
-            self.authorize_capture_dependencies(snapshot, context, span.event_id)?;
+            if let Some(shared) = budget.as_deref_mut() {
+                self.authorized_capture_policy_with_budget(
+                    snapshot,
+                    context,
+                    span.event_id,
+                    shared,
+                )?;
+                self.authorize_derived_custody_with_budget(
+                    snapshot,
+                    context,
+                    span.event_id,
+                    shared,
+                )?;
+            } else {
+                self.authorized_capture_policy(snapshot, context, span.event_id)?;
+                self.authorize_capture_dependencies(snapshot, context, span.event_id)?;
+            }
         }
-        let original = self.load_captured_original(snapshot, span.event_id)?;
+        let span_length = if budget.is_some() {
+            span.end
+                .checked_sub(span.start)
+                .ok_or_else(|| invalid("source range is reversed"))?
+        } else {
+            0
+        };
+        payload_charge(&mut budget, 1, span_length)?;
+        let original = if let Some(shared) = budget.as_deref_mut() {
+            self.load_captured_original_with_budget(snapshot, span.event_id, shared)?
+        } else {
+            self.load_captured_original(snapshot, span.event_id)?
+        };
         if independent_root
             && (original.event.kind == EventKind::ModelRequested
                 || matches!(original.event.payload, EventPayload::Assembly { .. }))
@@ -526,11 +619,27 @@ impl NativeService {
                 bytes[source_range(span.start, span.end, bytes.len())?].to_vec()
             }
             EventPayload::Staged { reference, .. } => {
-                let header = self.checked_payload_header(snapshot, context, reference)?;
-                self.payload_range(snapshot, &header, span.start, span.end)?
+                let header = self.checked_payload_header_inner(
+                    snapshot,
+                    context,
+                    reference,
+                    budget.as_deref_mut(),
+                )?;
+                self.payload_range_inner(
+                    snapshot,
+                    &header,
+                    span.start,
+                    span.end,
+                    budget.as_deref_mut(),
+                )?
             }
             EventPayload::Assembly { manifest } => {
-                let bytes = self.assemble_request(snapshot, context, manifest)?;
+                let bytes = self.assemble_request_inner(
+                    snapshot,
+                    context,
+                    manifest,
+                    budget.as_deref_mut(),
+                )?;
                 bytes[source_range(span.start, span.end, bytes.len())?].to_vec()
             }
             EventPayload::Omitted { .. } => {
@@ -544,6 +653,7 @@ impl NativeService {
         if raw_digest(&selected) != span.span_digest {
             return Err(invalid("source span digest mismatch"));
         }
+        payload_charge(&mut budget, 0, 0)?;
         Ok(selected)
     }
 
@@ -553,15 +663,38 @@ impl NativeService {
         context: Option<&AuthenticatedRequestContext>,
         manifest: &contextdb_core::ModelRequestManifest,
     ) -> ServiceResult<Vec<u8>> {
+        self.assemble_request_inner(snapshot, context, manifest, None)
+    }
+
+    pub(super) fn assemble_request_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        manifest: &contextdb_core::ModelRequestManifest,
+        budget: &mut PayloadBudget,
+    ) -> ServiceResult<Vec<u8>> {
+        self.assemble_request_inner(snapshot, Some(context), manifest, Some(budget))
+    }
+
+    fn assemble_request_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: Option<&AuthenticatedRequestContext>,
+        manifest: &contextdb_core::ModelRequestManifest,
+        mut budget: Option<&mut PayloadBudget>,
+    ) -> ServiceResult<Vec<u8>> {
+        payload_charge(&mut budget, 1, 0)?;
         validate_identifier(&manifest.renderer, "request renderer")?;
         let length = usize::try_from(manifest.byte_length)
             .map_err(|_| exhausted("request length overflow"))?;
         if length > CAPTURE_MAX_PAYLOAD_BYTES || manifest.parts.len() > CAPTURE_MAX_REQUEST_PARTS {
             return Err(exhausted("request replay budget exceeded"));
         }
+        payload_charge(&mut budget, 1, length as u64)?;
         let mut bytes = Vec::with_capacity(length);
         let mut inline_bytes = 0_usize;
         for part in &manifest.parts {
+            payload_charge(&mut budget, 1, 0)?;
             let part_length = match part {
                 RequestPart::Source { span } => span
                     .end
@@ -593,13 +726,33 @@ impl NativeService {
                 return Err(invalid("request parts exceed the declared wire length"));
             }
             let part_bytes = match part {
-                RequestPart::Source { span } => self.source_span(snapshot, context, span, true)?,
+                RequestPart::Source { span } => {
+                    self.source_span_inner(snapshot, context, span, true, budget.as_deref_mut())?
+                }
                 RequestPart::JsonStringSource {
                     span,
                     byte_length,
                     digest,
                 } => {
-                    let original = self.source_span(snapshot, context, span, true)?;
+                    let input_length = span
+                        .end
+                        .checked_sub(span.start)
+                        .ok_or_else(|| invalid("source range is reversed"))?;
+                    // Worst-case JSON escaping plus the exact contents copy is
+                    // admitted before source/transform allocation, not after it.
+                    let transform_bytes = input_length
+                        .checked_mul(6)
+                        .and_then(|value| value.checked_add(2))
+                        .and_then(|value| value.checked_add(*byte_length))
+                        .ok_or_else(|| exhausted("JSON source allocation overflow"))?;
+                    payload_charge(&mut budget, 1, transform_bytes)?;
+                    let original = self.source_span_inner(
+                        snapshot,
+                        context,
+                        span,
+                        true,
+                        budget.as_deref_mut(),
+                    )?;
                     let text = std::str::from_utf8(&original)
                         .map_err(|_| invalid("JSON source transform requires exact UTF-8"))?;
                     let encoded = serde_json::to_vec(text)
@@ -619,11 +772,17 @@ impl NativeService {
                     if inline_bytes > super::CAPTURE_MAX_INLINE_BYTES {
                         return Err(exhausted("large novel wire bytes require durable staging"));
                     }
+                    payload_charge(&mut budget, 1, bytes.len() as u64)?;
                     bytes.clone()
                 }
                 RequestPart::StoredNovel { payload } => {
-                    let header = self.checked_payload_header(snapshot, context, payload)?;
-                    self.payload_bytes(snapshot, &header)?
+                    let header = self.checked_payload_header_inner(
+                        snapshot,
+                        context,
+                        payload,
+                        budget.as_deref_mut(),
+                    )?;
+                    self.payload_bytes_inner(snapshot, &header, budget.as_deref_mut())?
                 }
             };
             if part_bytes.len() > length.saturating_sub(bytes.len()) {
@@ -634,6 +793,7 @@ impl NativeService {
         if bytes.len() != length || raw_digest(&bytes) != manifest.wire_digest {
             return Err(invalid("request replay does not match its wire binding"));
         }
+        payload_charge(&mut budget, 0, 0)?;
         Ok(bytes)
     }
 
@@ -644,9 +804,21 @@ impl NativeService {
         context: Option<&AuthenticatedRequestContext>,
         reference: &OriginalPayloadRef,
     ) -> ServiceResult<PayloadHeader> {
+        self.checked_payload_header_inner(snapshot, context, reference, None)
+    }
+
+    fn checked_payload_header_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: Option<&AuthenticatedRequestContext>,
+        reference: &OriginalPayloadRef,
+        budget: Option<&mut PayloadBudget>,
+    ) -> ServiceResult<PayloadHeader> {
         let header = match context {
-            Some(context) => self.authorized_payload_header(snapshot, context, reference)?,
-            None => self.payload_header(snapshot, reference.block_id)?,
+            Some(context) => {
+                self.authorized_payload_header_inner(snapshot, context, reference, budget)?
+            }
+            None => self.payload_header_inner(snapshot, reference.block_id, budget)?,
         };
         if &header.reference != reference {
             return Err(integrity("stored payload reference binding differs"));
@@ -800,6 +972,18 @@ fn source_range(start: u64, end: u64, length: usize) -> ServiceResult<std::ops::
 
 fn header_key(id: ContentBlockId) -> Vec<u8> {
     format!("payload/header/{id}").into_bytes()
+}
+fn payload_charge(
+    budget: &mut Option<&mut PayloadBudget>,
+    work: u64,
+    bytes: u64,
+) -> ServiceResult<()> {
+    if let Some(shared) = budget.as_deref_mut() {
+        shared
+            .charge(work, bytes)
+            .map_err(crate::raw_index::budget_error)?;
+    }
+    Ok(())
 }
 fn chunk_key(id: ContentBlockId, index: u32) -> Vec<u8> {
     let mut key = format!("payload/chunk/{id}/").into_bytes();

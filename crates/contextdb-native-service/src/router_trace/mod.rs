@@ -20,6 +20,7 @@ use contextdb_service::{
 pub(crate) mod controls;
 pub(crate) mod material;
 mod read;
+mod source_wire;
 #[cfg(test)]
 mod tests;
 pub(super) const TRACE_FEATURE: &str = "continuous-router-trace-v1";

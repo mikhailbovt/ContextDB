@@ -3,11 +3,11 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use contextdb_context::OutgoingBase;
 use contextdb_context::router::{
     AuthorizedRouterRequest, RouterManifest, RouterMaterialVerification, RouterPreparedMaterial,
-    RouterSelectionPlan,
+    RouterReplayUnavailableReason, RouterSelectionPlan,
 };
+use contextdb_context::{OutgoingBase, OutgoingEncoder, TokenCounter};
 use contextdb_core::{ContentDigest, ObservationId, RouterTraceHeader};
 use contextdb_recall::QueryBudget;
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,7 @@ pub struct AcceptedRouterTraceLineage {
 /// The native owner authorized all dependencies at this call's latest snapshot.
 /// This result is not a lease, cached grant, export admission or training approval.
 /// Its accepted wire commitment does not establish a new source-wire materialization
-/// or tokenizer/renderer replay; those are separate consumers of the original read port.
+/// or tokenizer/renderer replay; use the separate source-wire verification port.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcceptedRouterTraceRead {
@@ -133,4 +133,112 @@ pub trait AcceptedRouterTracePort: Send + Sync {
         request: ReadAcceptedRouterTraceRequest,
         budget: &mut QueryBudget,
     ) -> ServiceResult<AcceptedRouterTraceReadResult>;
+}
+
+/// Trusted host runtime for an optional detached historical replay.
+/// This borrowed integration is never supplied by serialized model input.
+#[derive(Clone, Copy, Debug)]
+pub struct RouterSourceWireRuntime<'a> {
+    /// Exact tokenizer revision expected by the retained compiler profile.
+    pub tokenizer: &'a dyn TokenCounter,
+    /// Complete outgoing protocol encoder, including non-text charges.
+    pub encoder: &'a dyn OutgoingEncoder,
+}
+
+/// Independent outcomes for current source bytes and historical computation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", content = "reason", rename_all = "snake_case")]
+pub enum CurrentSourceWireStatus {
+    /// This call performed and passed the corresponding check.
+    Verified,
+    /// The operation lacks supported inputs for this independent check.
+    Unavailable(CurrentSourceWireUnavailableReason),
+}
+
+/// Missing or unsupported historical computation; current denial is an error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "reason", rename_all = "snake_case")]
+pub enum CurrentSourceWireUnavailableReason {
+    /// No trusted tokenizer/encoder was supplied.
+    MissingRuntime,
+    /// The accepted trace does not retain full prepared selector state.
+    MissingReplayPreparation,
+    /// The detached compiler reports an unsupported replay profile.
+    Replay(RouterReplayUnavailableReason),
+    /// The reproduced protocol count is a conservative bound.
+    NonExactRequestCount,
+}
+
+/// Read-only proof for one accepted request in one current native snapshot.
+///
+/// Every retained trace origin is currently authorized. Only the accepted wire's
+/// source spans and stored novel parts are materialized and checked against the
+/// actual capture manifest. This does not establish all discarded candidate
+/// bytes, a dispatch lease, export rights or permission to train a model.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CurrentSourceWireVerification {
+    /// Exact native acceptance checked by this call.
+    pub receipt: CaptureReceipt,
+    /// Accepted compiler/page/wire commitments.
+    pub header: RouterTraceHeader,
+    /// Digest of the newly reconstructed complete request.
+    pub wire_digest: ContentDigest,
+    /// Actual reconstructed byte length.
+    pub wire_byte_length: u64,
+    /// Opaque commitment to this call's current authority, snapshot and custody.
+    pub current_authority_binding: ContentDigest,
+    /// Current authorization of every retained origin, including discards.
+    pub current_custody: CurrentSourceWireStatus,
+    /// Exact reconstruction of accepted source spans and stored parts.
+    pub source_wire: CurrentSourceWireStatus,
+    /// Actual detached replay of retained selection behavior.
+    pub historical_selection: CurrentSourceWireStatus,
+    /// Exact complete-protocol count, distinct from a conservative bound.
+    pub trusted_token_count: CurrentSourceWireStatus,
+    /// Present only after an exact complete-protocol count was reproduced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_input_tokens: Option<u32>,
+}
+
+impl fmt::Debug for CurrentSourceWireVerification {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CurrentSourceWireVerification")
+            .field("event_id", &self.receipt.event_id)
+            .field("wire_digest", &self.wire_digest)
+            .field("wire_byte_length", &self.wire_byte_length)
+            .field("source_wire", &self.source_wire)
+            .field("historical_selection", &self.historical_selection)
+            .field("trusted_token_count", &self.trusted_token_count)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Complete current proof or authorized absence of accepted trace material.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "status",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum CurrentSourceWireVerificationResult {
+    /// Inspect the independent verification columns.
+    Complete(Box<CurrentSourceWireVerification>),
+    /// The exact accepted occurrence has no usable protected trace.
+    Unavailable(AcceptedRouterTraceUnavailable),
+}
+
+/// Embedded verification port; it returns commitments, never request plaintext.
+pub trait AcceptedRouterSourceWirePort: Send + Sync {
+    /// Authorize the exact receipt and whole custody before protected reads,
+    /// then reconstruct its actual capture wire under the same shared budget.
+    /// An optional trusted runtime additionally requires ModelProcessing and
+    /// may replay v2's historical R0 selection and complete protocol count.
+    fn verify_accepted_router_source_wire(
+        &self,
+        request: ReadAcceptedRouterTraceRequest,
+        runtime: Option<RouterSourceWireRuntime<'_>>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<CurrentSourceWireVerificationResult>;
 }
