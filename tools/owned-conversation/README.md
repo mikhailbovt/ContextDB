@@ -113,6 +113,16 @@ work stays retained for a later `continue`; stale generations require explicit
 maintenance. Interpretation remains conservative; this profile does not establish
 semantic completeness.
 
+The runtime rebuilds lexical cues before each new model call, including the call
+after a captured tool result. Current user, tool and assistant text and open
+source-backed obligations share eight routes, with separate allowances so a large
+tool response cannot displace every other channel. Cue inspection uses at most
+16 KiB per channel and 4 KiB per message (head/tail windows); incomplete words at
+crop boundaries are ignored. Step measurements report inspected and omitted
+bytes. Omitted bytes remain archived, and resident text still reaches the reader.
+These cues are a bounded lexical heuristic; they do not establish complete
+semantic recall over the archive or turn observations into authoritative state.
+
 The input ceiling includes attribution and mandatory state as well as originals.
 Optional recalled data can remain omitted if it cannot fit beside the retained
 recent group. Size the profile with the actual tokenizer and workload.

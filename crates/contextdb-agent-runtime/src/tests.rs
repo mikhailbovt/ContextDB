@@ -19,6 +19,7 @@ use super::*;
 mod economy;
 mod fences;
 mod partial;
+mod recall;
 mod tools;
 
 fn budget() -> QueryBudget {

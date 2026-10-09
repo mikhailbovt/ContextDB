@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{cmp::Reverse, collections::BTreeSet};
 
 use contextdb_context::{
     BlockId, OutgoingBase, OutgoingEncoder, OutgoingMessage, OutgoingRole, OutgoingZone,
@@ -194,6 +194,146 @@ pub fn conversation_routes(base: &OutgoingBase) -> Vec<IndexedQuery> {
             selection: IndexedSelection::TopK { limit: 8 },
         })
         .collect()
+}
+
+pub(crate) struct StepRecallCues {
+    pub routes: Vec<IndexedQuery>,
+    pub inspected_bytes: u64,
+    pub omitted_bytes: u64,
+}
+
+// Search cues are observations, not instructions or assertions of fact. Each
+// channel gets its own allowance so a large tool response cannot crowd out the
+// user's request or an open obligation. Originals are never modified here.
+pub(crate) fn current_step_routes(
+    base: &OutgoingBase,
+    budget: &mut QueryBudget,
+) -> ServiceResult<StepRecallCues> {
+    let mut inspected = 0_u64;
+    let mut omitted = 0_u64;
+    charge(budget, 1, 4 * size_of::<Vec<String>>() as u64)?;
+    let mut channels = Vec::new();
+    for (messages, role) in [
+        (&base.current, Some(OutgoingRole::User)),
+        (&base.current, Some(OutgoingRole::Tool)),
+        (&base.working, None),
+        (&base.current, Some(OutgoingRole::Assistant)),
+    ] {
+        let mut remaining = 16 * 1024;
+        let mut terms = BTreeSet::new();
+        for message in messages
+            .iter()
+            .rev()
+            .filter(|message| role.is_none_or(|expected| message.role == expected))
+        {
+            charge(budget, 1, 0)?;
+            let text = &message.text;
+            let allowance = remaining.min(4096).min(text.len());
+            let mut used = 0;
+            if allowance == text.len() {
+                collect_cues(text, 0, text.len(), &mut terms, budget)?;
+                used = text.len();
+            } else if allowance != 0 {
+                let mut head_end = allowance / 2;
+                while !text.is_char_boundary(head_end) {
+                    head_end -= 1;
+                }
+                let mut tail_start = text.len() - (allowance - head_end);
+                while !text.is_char_boundary(tail_start) {
+                    tail_start += 1;
+                }
+                collect_cues(text, 0, head_end, &mut terms, budget)?;
+                collect_cues(text, tail_start, text.len(), &mut terms, budget)?;
+                used = head_end + text.len() - tail_start;
+            }
+            remaining -= used;
+            inspected += used as u64;
+            omitted += (text.len() - used) as u64;
+        }
+        charge(budget, 1, (terms.len() * size_of::<String>()) as u64)?;
+        channels.push(terms.into_iter().map(|(_, term)| term).collect::<Vec<_>>());
+    }
+    charge(budget, 1, 8 * size_of::<String>() as u64)?;
+    let mut chosen = Vec::new();
+    for (terms, quota) in channels.iter().zip([3, 2, 2, 1]) {
+        for term in terms.iter().take(quota) {
+            if !chosen.contains(term) {
+                charge(budget, 1, term.len() as u64)?;
+                chosen.push(term.clone());
+            }
+        }
+    }
+    // Empty/duplicate channels release their slots to the remaining channels.
+    for offset in 0..128 {
+        for terms in &channels {
+            if chosen.len() == 8 {
+                break;
+            }
+            if let Some(term) = terms.get(offset)
+                && !chosen.contains(term)
+            {
+                charge(budget, 1, term.len() as u64)?;
+                chosen.push(term.clone());
+            }
+        }
+        if chosen.len() == 8 {
+            break;
+        }
+    }
+    charge(budget, 1, (chosen.len() * size_of::<IndexedQuery>()) as u64)?;
+    Ok(StepRecallCues {
+        routes: chosen
+            .into_iter()
+            .map(|term| IndexedQuery {
+                filter: RawFilter::default(),
+                text: Some(RawTextQuery::AllTerms(term)),
+                neighbor_of: None,
+                selection: IndexedSelection::TopK { limit: 8 },
+            })
+            .collect(),
+        inspected_bytes: inspected,
+        omitted_bytes: omitted,
+    })
+}
+
+fn cue_character(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+fn collect_cues(
+    source: &str,
+    start: usize,
+    end: usize,
+    terms: &mut BTreeSet<(Reverse<usize>, String)>,
+    budget: &mut QueryBudget,
+) -> ServiceResult<()> {
+    charge(budget, (end - start) as u64, (end - start) as u64)?;
+    let fragment = &source[start..end];
+    let skip_first = start != 0
+        && source[..start]
+            .chars()
+            .next_back()
+            .is_some_and(cue_character);
+    let skip_last = end != source.len() && source[end..].chars().next().is_some_and(cue_character);
+    let mut pieces = fragment.split(|c| !cue_character(c)).peekable();
+    let mut first = true;
+    while let Some(term) = pieces.next() {
+        let clipped = (first && skip_first) || (pieces.peek().is_none() && skip_last);
+        first = false;
+        if clipped || term.len() > 256 || term.chars().count() < 3 {
+            continue;
+        }
+        // Unicode lowercase may expand; reserve before creating the string.
+        charge(budget, 1, (term.len() * 3 + 64) as u64)?;
+        let term = term.to_lowercase();
+        if term.len() <= 256 {
+            terms.insert((Reverse(term.chars().count()), term));
+            if terms.len() > 128 {
+                terms.pop_last();
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn rotate<S: PayloadPort + ?Sized>(

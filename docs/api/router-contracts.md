@@ -32,7 +32,7 @@ Live entries receive the host's provider, tokenizer, outgoing encoder and
 | `RoutingDescriptor` | Authorized compact features, explicit missing-feature mask and separate confidence and prior utility. |
 | `MemoryUnit` | Existing block identity, scope, temporal and epistemic roles, source references, dependencies and representations. |
 | `SupportAlternative` | One verified sufficient support bundle, original spans and material/representation commitments. |
-| `RouterScore` | Actual selected-base and trial commitments, exact marginal protocol cost, utility and fit result. |
+| `RouterScore` | Actual selected-base and trial commitments, marginal protocol estimate, utility and fit result. |
 | `RouterSelectionPlan` | Proposed seeds, complete selected closure, support choices, score path and reported final wire/counts. |
 | `RouterManifest` | Accepted assembly and record commitments, score provenance, measured compilation work and timing. |
 
@@ -79,6 +79,30 @@ Manifest `compilation_*` fields measure compilation before the final envelope
 integrity check. That check also consumes the same budget. Caller-replayed scores
 have zero observed scorer timing; observed R0 fallback is marked separately.
 Nullable training/model fields remain empty in this profile.
+
+## Semantic scorer input
+
+An embedded scorer can opt in to `RenderedClosureV1` through `semantic_profile`.
+The compiler then calls `score_semantic` at the existing selection boundary, after
+dependency closure, support/representation choice, source union and complete
+protocol encoding. Its borrowed view contains the actual current/control/working/
+hot base, the already selected assembly and the proposed trial, including chosen
+variants and remaining shared allowances. Mandatory state survives a STOP score.
+
+`model_input_json` streams an explicit text/semantic allowlist under the same
+budget and a joint 2 MiB ceiling. Host correspondence IDs, digests, prior utility,
+compilation reports and scorer outcomes stay outside the projection; support and
+tool associations use local slots. Text remains attributed data. The scorer must
+apply its own token admission and cooperate with cancellation and deadlines.
+`exact_marginal_input_tokens` is a signed trial-minus-selected delta, present only
+when both whole-request counts are exact; subtracting conservative upper bounds
+does not establish a marginal bound.
+
+The opt-in binds `contextdb.routing_features.semantic.v1` and its evaluation
+ceiling. Scalar scorers retain the existing feature binding, callback and variant
+retention cost. `FiniteScoreAdapter` forwards either profile. Opting in without a
+semantic implementation fails explicitly. This ABI does not enable a native
+learned scorer, run Kev, admit private training or authorize model processing.
 
 ## Current boundary
 

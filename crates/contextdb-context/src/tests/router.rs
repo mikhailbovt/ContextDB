@@ -17,6 +17,8 @@ mod material;
 mod policy;
 #[path = "router_replay.rs"]
 mod replay;
+#[path = "router_semantic.rs"]
+mod semantic;
 
 fn routed(
     request: &CompileAssemblyRequest,
