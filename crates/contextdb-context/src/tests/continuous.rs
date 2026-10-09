@@ -2,6 +2,9 @@ use super::*;
 use contextdb_core::{ContentDigest, ObservationId, OriginalSourceSpan};
 use contextdb_recall::QueryBudget;
 
+#[path = "router.rs"]
+mod router;
+
 #[derive(Debug)]
 struct Fixture {
     data: InMemoryContextProvider,

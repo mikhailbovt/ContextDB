@@ -22,4 +22,8 @@ pub enum ContextError {
     Tokenizer(String),
     #[error("canonical serialization failed: {0}")]
     Serialization(String),
+    #[error("router scorer refused: {0}")]
+    RouterScore(String),
+    #[error("router proposal refused: {0}")]
+    RouterProposal(String),
 }

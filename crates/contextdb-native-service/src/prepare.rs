@@ -872,9 +872,10 @@ fn service_error(error: ContextError) -> ServiceError {
         ContextError::BudgetExceeded(_) => ErrorCode::ResourceExhausted,
         ContextError::Authorization(_) => ErrorCode::PermissionDenied,
         ContextError::Provider(_) => ErrorCode::IndexTooStale,
-        ContextError::InvalidRequest(_) | ContextError::InvalidContinuation(_) => {
-            ErrorCode::InvalidArgument
-        }
+        ContextError::InvalidRequest(_)
+        | ContextError::InvalidContinuation(_)
+        | ContextError::RouterScore(_)
+        | ContextError::RouterProposal(_) => ErrorCode::InvalidArgument,
         ContextError::Tokenizer(_) | ContextError::Serialization(_) => {
             ErrorCode::FormatIncompatible
         }

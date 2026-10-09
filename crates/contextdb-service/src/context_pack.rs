@@ -1114,7 +1114,9 @@ fn map_recall_error(error: RecallError) -> ServiceError {
 
 fn map_context_error(error: ContextError) -> ServiceError {
     match error {
-        ContextError::InvalidRequest(_) => invalid_request(),
+        ContextError::InvalidRequest(_)
+        | ContextError::RouterScore(_)
+        | ContextError::RouterProposal(_) => invalid_request(),
         ContextError::Provider(_) => ServiceError::new(
             ErrorCode::ProviderUnavailable,
             "ContextPack provider failed",

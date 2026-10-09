@@ -18,6 +18,8 @@ it, and how to operate the current alpha safely.
 - [Conversation integration](integrations/conversation.md) — durable conversation semantics.
 - [Owned conversation host](../tools/owned-conversation/README.md) — encrypted local capture,
   bounded context assembly and cold continuation with a local text reader.
+- [Router contracts](api/router-contracts.md) — authorized selection records and compiler
+  validation for the continuous context pipeline.
 - [Domain pack authoring](domains/authoring.md) — extend ContextDB without weakening the core.
 - [Local MCP broker](operations/local-mcp-broker.md) — Linux and Windows single-owner
   concurrency, authenticated local IPC, and safe operator shutdown.
