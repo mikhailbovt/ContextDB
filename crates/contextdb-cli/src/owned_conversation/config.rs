@@ -19,6 +19,7 @@ use contextdb_service::RouterTraceProfile;
 use serde::{Deserialize, Serialize};
 
 use super::invalid;
+use super::kev::{KevConfig, PolicyBinding};
 use super::preparation;
 use super::reader::LocalReaderConfig;
 use crate::CliResult;
@@ -69,6 +70,8 @@ struct SettingsBinding<'a> {
     raw_projection_limits: (u32, u8),
     #[serde(skip_serializing_if = "Option::is_none")]
     router_trace: Option<TraceSettingsBinding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    development_kev: Option<PolicyBinding<'a>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -107,6 +110,8 @@ pub(super) struct HostConfig {
     pub(super) reader: LocalReaderConfig,
     #[serde(default, skip_serializing_if = "RouterTraceProfile::is_off")]
     router_trace_profile: RouterTraceProfile,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) development_kev: Option<KevConfig>,
 }
 
 impl HostConfig {
@@ -165,6 +170,14 @@ impl HostConfig {
                 "configuration exceeds the bounded local conversation profile",
             ));
         }
+        if let Some(kev) = &self.development_kev {
+            if self.router_trace_profile.is_off() {
+                return Err(invalid(
+                    "development Kev requires protected whole-frontier preparation",
+                ));
+            }
+            kev.validate()?;
+        }
         let settings = self.settings()?;
         settings.rolling.validate(self.input_tokens)?;
         Ok(())
@@ -196,6 +209,7 @@ impl HostConfig {
             preparation: preparation::PROFILE,
             raw_projection_limits: (preparation::BATCH_EVENTS, preparation::MAX_BATCHES),
             router_trace: TraceSettingsBinding::for_profile(self.router_trace_profile),
+            development_kev: self.development_kev.as_ref().map(KevConfig::binding),
         };
         serde_json::to_vec(&(self, binding))
             .map_err(|_| invalid("conversation configuration cannot be bound"))

@@ -117,10 +117,34 @@ fn planned_fixture_with_ports(
     source_text: &str,
     encoder: &dyn OutgoingEncoder,
 ) -> PlannedFixture {
+    planned_fixture_with_profile(service, raw, setup, source_text, encoder, None)
+}
+
+fn planned_fixture_with_profile(
+    service: &NativeService,
+    raw: bool,
+    setup: Option<FixtureSetup>,
+    source_text: &str,
+    encoder: &dyn OutgoingEncoder,
+    learned_profile: Option<RouterTraceProfile>,
+) -> PlannedFixture {
     let session = SessionId::new();
     let run = AgentRunId::new();
     let mut original = source(1, source_text);
     original.context = request(&original).context;
+    if learned_profile.is_some() {
+        // Explicit test host grant; trace retention never grants processing.
+        original
+            .context
+            .capability_grants
+            .insert(Capability::ModelProcessing);
+        original.context.request.subject_id =
+            contextdb_core::MemorySubjectId::from_uuid(uuid::Uuid::from_u128(10))
+                .expect("typed fixture owner")
+                .to_string();
+        original.context.request.audiences =
+            BTreeSet::from([original.context.request.subject_id.clone()]);
+    }
     original.context.session_id = Some(session.to_string());
     original.event.session_id = Some(session);
     original.event.run_id = Some(run);
@@ -144,6 +168,9 @@ fn planned_fixture_with_ports(
         .append_event(original.clone())
         .expect("original capture");
     let mut plan = request(&original);
+    if let Some(profile) = learned_profile {
+        plan.router_trace_profile = profile;
+    }
     if raw {
         let mut ids = BTreeSet::new();
         for (sequence, text) in [
@@ -179,6 +206,21 @@ fn planned_fixture_with_ports(
         end: source_text.len() as u64,
         span_digest: original.event.payload.digest().expect("span digest"),
     };
+    if learned_profile.is_some() {
+        plan.base.current.push(OutgoingMessage {
+            id: BlockId::new("learned-current-source").expect("fixture message"),
+            zone: OutgoingZone::CurrentTurn,
+            role: OutgoingRole::User,
+            text: source_text.into(),
+            originals: vec![VisibleOriginal {
+                span: source_span.clone(),
+                text_start: 0,
+                text_end: source_text.len() as u64,
+            }],
+            tool_calls: Vec::new(),
+            tool_result: None,
+        });
+    }
     let checkpoint = service
         .save_run_checkpoint(
             SaveRunCheckpointRequest {
@@ -228,6 +270,17 @@ fn planned_fixture_with_ports(
             &mut budget(),
         )
         .expect("actual owned checkpoint");
+    if learned_profile.is_some() {
+        // This fixture's newly captured operational checkpoint has no semantic
+        // assertion. Record that explicit interpretation through the real owner
+        // before claiming its previously published state is complete/current.
+        crate::assertions::tests::publish(
+            service,
+            &original,
+            "semantic-checkpoint-coverage",
+            Vec::new(),
+        );
+    }
     let prepared = service
         .prepare_context(plan, &ReferenceTokenizer, encoder, &mut budget())
         .expect("actual fixture preparation with its trusted encoder");
@@ -260,6 +313,24 @@ pub(in crate::router_trace) fn accepted_fixture(
 ) -> TraceCaptureFixture {
     let fixture = planned_fixture(service);
     accepted_from_planned(service, fixture)
+}
+
+pub(in crate::router_trace) fn accepted_semantic_fixture(
+    service: &Arc<NativeService>,
+    profile: RouterTraceProfile,
+    setup: FixtureSetup,
+) -> TraceCaptureFixture {
+    accepted_from_planned(
+        service,
+        planned_fixture_with_profile(
+            service,
+            true,
+            Some(setup),
+            "The owner requires local-only storage and leaves conflicting proposals unresolved.",
+            &ReferenceOutgoingEncoder(&ReferenceTokenizer),
+            Some(profile),
+        ),
+    )
 }
 
 pub(in crate::router_trace) fn accepted_fixture_with_setup(

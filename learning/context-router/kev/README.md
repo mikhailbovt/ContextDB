@@ -40,9 +40,10 @@ permission directives and semantic costs. It canonicalizes unordered block and
 support inventories, including equal supports, but preserves conversation, tool
 and rendered-source chronology. Nonraw fields accept only declared natural
 `question`, `reason` and `missing_facet` keys; this fixed fixture has no facet
-vocabulary. Native StateKey/resolution/opaque facets refuse until a typed natural
-adapter exists. Original source prose is preserved without UUID regex removal.
-There is no native learned-scorer activation or private training intake here.
+vocabulary. Opaque native StateKey/resolution/facets refuse through this projection;
+supported native values require the owner's typed natural adapter. Original source
+prose is preserved without UUID regex removal. The trainer itself neither activates
+a native scorer nor admits private training data.
 
 ## Local setup
 
@@ -149,3 +150,82 @@ under the same pinned runtime. The prior development bundle remains readable
 when its model files, revisions, package profile and synthetic data match these
 pins. Verification establishes artifact/logit reproducibility, never source-use
 permission, model usefulness or benchmark completion.
+
+## Local inference worker
+
+`worker.py` keeps one pinned conditional model loaded for a trusted local host.
+It reuses the same `conditional.project`, strict tokenizer admission and bundle
+loader, with one question per forward, `eval`, `no_grad` and temperature 1. It
+returns the finite useful-minus-not-useful logit; the host applies independent
+sigmoid and its explicitly bound STOP/utility conversion. It performs no training,
+corpus export, network fallback or context logging/caching.
+
+The current conditional bundle is **development only**. Its 24 real updates and
+cold reload pass establish plumbing; at the fixed 0.5 threshold it marked all 59
+known development questions useful, including 28 negatives, and failed every
+all-zero base. Default R0 remains unchanged. Useful scoring, calibration,
+held-out reader quality and serving latency are not established.
+
+The host starts this process with absolute paths and exact pins:
+
+```text
+python -I worker.py --corpus ABS --model-lock ABS --output-root ABS \
+  --run-name NAME --bundle-sha256 HEX --worker-sha256 HEX \
+  --config-sha256 HEX --startup-timeout-micros 300000000
+```
+
+Warm admission checks the completed rendered-closure bundle, exact trained source
+hashes and model/runtime pins before GPU construction, then reproduces the saved
+public development row before emitting READY. Old initial-context bundles refuse.
+The corpus path supplies only that fixed public sanity input; it grants no native
+inference or private training rights. Current native ModelProcessing scopes and
+the whole processed source frontier must be admitted by the host before input is
+sent. Unsupported native metadata refuses through the unchanged projection.
+
+Binary framing is big-endian u32 body length, u16 metadata length, strict JSON
+metadata followed by exact semantic JSON bytes. Metadata/replies are bounded to
+16 KiB; input to 2 MiB. READY binds bundle, model profile, tensor, worker and four
+trained source hashes. Each score uses a sequential ID, immutable configuration
+hash, exact input SHA256 and remaining timeout. Only one request is in flight.
+The same parent deadline includes IPC, projection, tokenization and inference;
+late, malformed, nonfinite, oversized or failed requests invalidate the process.
+No timeout reset, hidden retry or fallback occurs in the worker. Library stdout
+and stderr are suppressed; protocol replies and fixed error codes use reserved
+pipe handles. CUDA cancellation remains cooperative, with the host rejecting late
+results and terminating the child.
+
+Pure checks use no tokenizer or model:
+
+```text
+python -I worker_check.py --corpus ABS --old-bundle ABS
+```
+
+Three grouped gates cover framing/correlation, exact shared projection and strict
+single-row admission, plus deadline/nonfinite/log isolation and old-profile
+refusal. Actual warm and persistent inference checks require the pinned CUDA
+environment and are separate from these pure gates.
+
+## Native owned host
+
+`owned-conversation` accepts optional `development_kev` only in trusted operator
+configuration, with `router_trace_profile: required` or `required_replay_v2` and
+`development_only`/`model_processing` both true. The native owner requires current
+`ModelProcessing` capability and admits the whole processed source frontier for
+the actual database, scopes and purpose, even when the main reader's
+`external_processing` is false.
+
+Absolute paths, executable/worker/trained-source/model/weight pins and limits bind
+the retained run configuration. Resume verifies that binding before worker warm
+or reader launch. Startup is at most 300,000,000 microseconds; aggregate and
+per-call scoring allowances are at most 10,000,000 microseconds. The experimental
+utility uses independent sigmoid, with the fixed 0.5 STOP threshold.
+The trained projection strictly admits 2048 state tokens and 4096 per row; longer
+native owned-conversation gates are not established. Oversize refuses instead of
+silently switching to R0.
+An end-to-end learned eviction and cold-resume run remains unverified.
+
+The typed adapter supports literal Known state, Conflict/Unknown diagnostics and
+exact attributed sources through the same projection. Opaque generic metadata,
+Node/CodeLocation and arbitrary Structured values refuse before forward. Current
+admission is a check at the processing boundary, not atomic revocation during GPU
+execution. Configuration and hashes grant no private training or export rights.

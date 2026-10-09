@@ -19,6 +19,7 @@ use crate::{NativeService, encode, history_key};
 pub(in crate::router_trace) mod capture;
 mod lifecycle;
 mod lifecycle_v2;
+mod semantic;
 
 pub(super) fn request(source: &CaptureRequest) -> PrepareContextRequest {
     let mut context = source.context.clone();

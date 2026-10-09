@@ -559,6 +559,9 @@ pub struct RoutedAssembly {
 /// A bounded floating-point scorer port; it receives the same authorized closure
 /// as R0. Fixed micros quantization is explicit and never used to record R0 scores.
 pub trait FiniteContextScorer: std::fmt::Debug + Send + Sync {
+    fn failure_policy(&self) -> crate::ScorerFailurePolicy {
+        crate::ScorerFailurePolicy::R0Fallback
+    }
     fn id(&self) -> &str;
     fn revision(&self) -> &str {
         self.id()
@@ -587,6 +590,9 @@ pub trait FiniteContextScorer: std::fmt::Debug + Send + Sync {
 pub struct FiniteScoreAdapter<T>(pub T);
 
 impl<T: FiniteContextScorer> ContextScorer for FiniteScoreAdapter<T> {
+    fn failure_policy(&self) -> crate::ScorerFailurePolicy {
+        self.0.failure_policy()
+    }
     fn id(&self) -> &str {
         self.0.id()
     }

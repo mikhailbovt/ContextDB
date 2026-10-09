@@ -28,6 +28,7 @@ use crate::{CliError, CliResult, TokenKey, codex_operator_authority, load_state}
 
 mod binding;
 mod config;
+mod kev;
 mod preparation;
 mod reader;
 
@@ -63,8 +64,24 @@ pub(crate) fn run(path: &Path, config_path: &Path, start: bool) -> CliResult<()>
         deep: true,
     })?;
     let (native, _) = open_native_owner(path, &state, true)?;
+    let kev = config
+        .development_kev
+        .as_ref()
+        .map(kev::KevScorer::new)
+        .transpose()?
+        .map(Arc::new);
+    let native = if let Some(scorer) = &kev {
+        native.with_preparation_scorer(scorer.clone())?
+    } else {
+        native
+    };
     let owner = Arc::new(native);
-    let context = authority(&state.key, &identity, &digest)?;
+    let mut context = authority(&state.key, &identity, &digest)?;
+    if kev.is_some() {
+        context
+            .capability_grants
+            .insert(Capability::ModelProcessing);
+    }
     owner.recover_record_writes(&context, &mut budget(timeout))?;
     let previous = owner.load_run_checkpoint(&context, identity.run_id, &mut budget(timeout))?;
     if start && previous.is_some() {
@@ -90,6 +107,9 @@ pub(crate) fn run(path: &Path, config_path: &Path, start: bool) -> CliResult<()>
         owner.initialize_state_catalog(&context, &mut budget(timeout))?;
     }
     let binding = binding::require_binding(&owner, &context, &identity, &digest, start)?;
+    if let Some(scorer) = &kev {
+        scorer.warm()?;
+    }
 
     // No reader process or tokenizer operation occurs before all retained owner,
     // profile, identity and configuration bindings have passed verification.

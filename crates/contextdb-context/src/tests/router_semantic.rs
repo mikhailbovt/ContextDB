@@ -148,6 +148,93 @@ fn semantic_fixture(mandatory: bool, complement: bool) -> Fixture {
     result
 }
 
+#[derive(Debug)]
+struct ReducedAllowanceProbe;
+
+impl ContextScorer for ReducedAllowanceProbe {
+    fn id(&self) -> &str {
+        "test-reduced-semantic-allowance"
+    }
+    fn semantic_profile(&self) -> Option<SemanticScoringProfile> {
+        Some(SemanticScoringProfile::RenderedClosureV1)
+    }
+    fn score(&self, _: &ScoringUnit, _: &mut QueryBudget) -> Result<Option<u64>> {
+        panic!("semantic only")
+    }
+    fn score_semantic(
+        &self,
+        unit: &SemanticScoringUnit<'_>,
+        budget: &mut QueryBudget,
+    ) -> Result<Option<u64>> {
+        let mut offered = unit.budget;
+        offered.remaining_work /= 2;
+        offered.remaining_bytes = u64::MAX;
+        offered.remaining_timeout_micros = 0;
+        offered.remaining_scorer_work /= 2;
+        offered.remaining_scorer_micros = 0;
+        offered.remaining_evaluations = 0;
+        // A caller cannot alter cost or fit observations through this helper.
+        offered.exact_marginal_input_tokens = Some(i64::MIN);
+        offered.added_original_bytes = u64::MAX;
+        offered.outgoing_fits = !unit.budget.outgoing_fits;
+        let reduced = unit.with_reduced_allowance(offered);
+        assert!(std::ptr::eq(reduced.base, unit.base));
+        assert!(std::ptr::eq(reduced.selected.pack, unit.selected.pack));
+        assert!(std::ptr::eq(reduced.trial.pack, unit.trial.pack));
+        assert!(std::ptr::eq(
+            reduced.identity.seed_ids,
+            unit.identity.seed_ids
+        ));
+        assert!(std::ptr::eq(
+            reduced.identity.closure_ids,
+            unit.identity.closure_ids
+        ));
+        assert_eq!(
+            reduced.budget.remaining_work,
+            unit.budget.remaining_work / 2
+        );
+        assert_eq!(reduced.budget.remaining_bytes, unit.budget.remaining_bytes);
+        assert_eq!(reduced.budget.remaining_timeout_micros, 0);
+        assert_eq!(
+            reduced.budget.remaining_scorer_work,
+            unit.budget.remaining_scorer_work / 2
+        );
+        assert_eq!(reduced.budget.remaining_scorer_micros, 0);
+        assert_eq!(reduced.budget.remaining_evaluations, 0);
+        let mut original: Value =
+            serde_json::from_slice(&unit.model_input_json(budget)?).expect("original");
+        let mut later: Value =
+            serde_json::from_slice(&reduced.model_input_json(budget)?).expect("later");
+        for field in [
+            "remaining_work",
+            "remaining_bytes",
+            "remaining_timeout_micros",
+            "remaining_scorer_work",
+            "remaining_scorer_micros",
+            "remaining_evaluations",
+        ] {
+            original["budget"]
+                .as_object_mut()
+                .expect("budget")
+                .remove(field);
+            later["budget"]
+                .as_object_mut()
+                .expect("budget")
+                .remove(field);
+        }
+        assert_eq!(original, later);
+        Ok(None)
+    }
+}
+
+#[test]
+fn semantic_reborrow_only_reduces_allowance_and_preserves_actual_trial() {
+    let provider = semantic_fixture(false, false);
+    let compiled = must(compile(&input(), &provider, &ReducedAllowanceProbe));
+    assert!(compiled.optional_seeds.is_empty());
+    assert!(compiled.selection_evaluations > 0);
+}
+
 fn add_base_source(
     provider: &mut Fixture,
     id: &str,
