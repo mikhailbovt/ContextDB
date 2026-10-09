@@ -17,6 +17,7 @@ use contextdb_service::{PrepareRecallQuery, PreparedRouterTrace, ServiceResult};
 
 pub(crate) mod controls;
 pub(crate) mod material;
+mod read;
 #[cfg(test)]
 mod tests;
 pub(super) const TRACE_FEATURE: &str = "continuous-router-trace-v1";

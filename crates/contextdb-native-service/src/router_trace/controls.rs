@@ -1,6 +1,8 @@
 //! Exact trace lineage. Historical identity and current disclosure are separate.
 
 #[cfg(test)]
+mod ordering_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -458,94 +460,152 @@ impl NativeService {
         controls: &RouterTraceControls,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
+        let whole = self.admit_router_trace_controls(snapshot, context, controls, budget)?;
+        self.verify_router_trace_controls(snapshot, &whole, budget)
+    }
+
+    // Current admission closes over inherited custody without materializing a
+    // generic or original body. All outer and nested labels precede verification.
+    fn admit_router_trace_controls<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        controls: &RouterTraceControls,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<RouterTraceControls> {
         controls.validate()?;
         budget
-            .charge(1, controls.byte_length()? as u64)
+            .charge(1, (controls.byte_length()? as u64).saturating_mul(2))
             .map_err(budget_error)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
         self.require_custody_ready(snapshot, &workspace)?;
-        for id in &controls.originals {
-            budget.charge(1, 0).map_err(budget_error)?;
-            self.authorized_capture_policy(snapshot, context, *id)?;
-        }
-        for record in &controls.records {
-            if record.control.workspace != workspace {
-                return Err(permission_denied());
-            }
-            self.require_record_sources_current(snapshot, &workspace)?;
-            let historical = self.router_record_policy(snapshot, record, budget)?;
-            let bytes = snapshot
-                .get(
-                    &self.keyspaces.policy_head,
-                    record.control.record_digest.as_bytes(),
-                )
-                .map_err(storage_error)?
-                .ok_or_else(unavailable_origin)?;
-            budget.charge(1, bytes.len() as u64).map_err(budget_error)?;
-            let current: StoredPolicy = decode(&bytes, "router current record policy")?;
-            validate_stored_policy(&current)?;
-            if current.record_digest != record.control.record_digest
-                || current.revision < historical.revision
-                || digest_bytes(current.access.workspace_id.as_bytes()) != workspace
-            {
-                return Err(integrity("router current record policy identity changed"));
-            }
-            if !policy_allows(&context.request, &historical.access)
-                || !policy_allows(&context.request, &current.access)
-            {
-                return Err(permission_denied());
-            }
-            self.authorize_record_sources(snapshot, &context.request, &historical)?;
-            if self
-                .pruned_record(
-                    snapshot,
-                    &historical.record_digest,
-                    historical.revision,
-                    budget,
-                )?
-                .is_some()
-            {
-                return Err(unavailable_origin());
-            }
-        }
+        let mut whole = controls.clone();
+        let mut pending = vec![controls.clone()];
+        let mut originals = BTreeSet::new();
+        let mut records = BTreeSet::new();
+        let mut authorities = BTreeSet::new();
+        let mut mutations = BTreeSet::new();
         let now = current_time()?;
-        for state in &controls.states {
-            if state.workspace != workspace {
-                return Err(permission_denied());
-            }
-            let historical = self
-                .authority_at(
-                    snapshot,
-                    &workspace,
-                    &state.key,
-                    state.authority_commit,
-                    budget,
-                )?
-                .ok_or_else(unavailable_origin)?;
-            let current = self
-                .authority_at(snapshot, &workspace, &state.key, u64::MAX, budget)?
-                .ok_or_else(unavailable_origin)?;
-            if !policy_allows(&context.request, &historical.access)
-                || !policy_allows(&context.request, &current.access)
-            {
-                return Err(permission_denied());
-            }
-            for mutation in &state.mutations {
-                let label = self.router_mutation_label(snapshot, state, mutation, budget)?;
-                if label.pruned_at.is_some() {
-                    return Err(unavailable_origin());
+        while let Some(current_controls) = pending.pop() {
+            for id in &current_controls.originals {
+                if !originals.insert(*id) {
+                    continue;
                 }
-                if label.envelope.as_ref().is_some_and(|envelope| {
-                    !crate::assertions::query::envelope_allows(context, envelope, now)
-                }) {
+                budget.charge(1, 0).map_err(budget_error)?;
+                self.authorized_capture_policy_with_budget(snapshot, context, *id, budget)?;
+                if let Some(inherited) =
+                    self.admit_derived_custody_controls(snapshot, context, *id, budget)?
+                    && !controls_include(&whole, &inherited)
+                {
+                    // union_checked creates bounded copies; admit the actual
+                    // structured metadata sizes before those copies are made.
+                    budget
+                        .charge(
+                            1,
+                            ((whole.byte_length()? + inherited.byte_length()?) as u64)
+                                .saturating_mul(4),
+                        )
+                        .map_err(budget_error)?;
+                    whole.union_checked(&inherited)?;
+                    pending.push(inherited);
+                }
+            }
+            for record in &current_controls.records {
+                if !records.insert((
+                    record.control.record_digest.clone(),
+                    record.control.revision,
+                )) {
+                    continue;
+                }
+                if record.control.workspace != workspace {
                     return Err(permission_denied());
                 }
-                self.authorize_state_label(snapshot, context, &label, budget)?;
+                self.require_record_sources_current(snapshot, &workspace)?;
+                let historical = self.router_record_policy(snapshot, record, budget)?;
+                let bytes = snapshot
+                    .get(
+                        &self.keyspaces.policy_head,
+                        record.control.record_digest.as_bytes(),
+                    )
+                    .map_err(storage_error)?
+                    .ok_or_else(unavailable_origin)?;
+                budget.charge(1, bytes.len() as u64).map_err(budget_error)?;
+                let current: StoredPolicy = decode(&bytes, "router current record policy")?;
+                validate_stored_policy(&current)?;
+                if current.record_digest != record.control.record_digest
+                    || current.revision < historical.revision
+                    || digest_bytes(current.access.workspace_id.as_bytes()) != workspace
+                {
+                    return Err(integrity("router current record policy identity changed"));
+                }
+                if !policy_allows(&context.request, &historical.access)
+                    || !policy_allows(&context.request, &current.access)
+                {
+                    return Err(permission_denied());
+                }
+                self.authorize_record_sources_with_budget(
+                    snapshot,
+                    &context.request,
+                    &historical,
+                    budget,
+                )?;
+                if self
+                    .pruned_record(
+                        snapshot,
+                        &historical.record_digest,
+                        historical.revision,
+                        budget,
+                    )?
+                    .is_some()
+                {
+                    return Err(unavailable_origin());
+                }
+            }
+            for state in &current_controls.states {
+                if state.workspace != workspace {
+                    return Err(permission_denied());
+                }
+                let identity = (canonical_digest(&state.key)?, state.authority_commit);
+                if authorities.insert(identity.clone()) {
+                    let historical = self
+                        .authority_at(
+                            snapshot,
+                            &workspace,
+                            &state.key,
+                            state.authority_commit,
+                            budget,
+                        )?
+                        .ok_or_else(unavailable_origin)?;
+                    let current = self
+                        .authority_at(snapshot, &workspace, &state.key, u64::MAX, budget)?
+                        .ok_or_else(unavailable_origin)?;
+                    if !policy_allows(&context.request, &historical.access)
+                        || !policy_allows(&context.request, &current.access)
+                    {
+                        return Err(permission_denied());
+                    }
+                }
+                for mutation in &state.mutations {
+                    if !mutations.insert((identity.clone(), mutation.label_key.clone())) {
+                        continue;
+                    }
+                    let label = self.router_mutation_label(snapshot, state, mutation, budget)?;
+                    if label.pruned_at.is_some() {
+                        return Err(unavailable_origin());
+                    }
+                    if label.envelope.as_ref().is_some_and(|envelope| {
+                        !crate::assertions::query::envelope_allows(context, envelope, now)
+                    }) {
+                        return Err(permission_denied());
+                    }
+                    // Exact label sources are a subset of this control's originals.
+                    // Their current policy and inherited custody were admitted above;
+                    // calling the ordinary label reader here would verify bodies
+                    // before a later outer state denial.
+                }
             }
         }
-        // Only after all current labels allow this principal may immutable
-        // native material be loaded for its historical integrity checks.
-        self.verify_router_trace_controls(snapshot, controls, budget)
+        Ok(whole)
     }
 
     /// Historical policies are stable reconstruction inputs. Current policies
@@ -691,6 +751,26 @@ impl NativeService {
         }
         Ok(label)
     }
+}
+
+fn controls_include(whole: &RouterTraceControls, subset: &RouterTraceControls) -> bool {
+    subset.originals.is_subset(&whole.originals)
+        && subset
+            .records
+            .iter()
+            .all(|record| whole.records.contains(record))
+        && subset.states.iter().all(|state| {
+            whole.states.iter().any(|retained| {
+                retained.workspace == state.workspace
+                    && retained.key == state.key
+                    && retained.authority_commit == state.authority_commit
+                    && retained.authority_digest == state.authority_digest
+                    && state
+                        .mutations
+                        .iter()
+                        .all(|mutation| retained.mutations.contains(mutation))
+            })
+        })
 }
 
 fn state_prefix(workspace: &str, key: &StateKey) -> ServiceResult<String> {

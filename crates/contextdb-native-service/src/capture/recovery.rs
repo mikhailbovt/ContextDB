@@ -13,6 +13,7 @@ use super::*;
 pub(in super::super) const RECOVERY_FEATURE: &str = "continuous-capture-recovery-v1";
 const ACTIVATED: &[u8] = b"recovery/activated";
 const MAX_RECOVERY_BYTES: usize = 1024 * 1024;
+const MAX_CAPTURE_CONTROL_BYTES: usize = 2 * MAX_RECOVERY_BYTES;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
@@ -131,6 +132,13 @@ impl CaptureRecovery {
     }
 
     pub(super) fn from_event(event: &EventEnvelope) -> ServiceResult<Self> {
+        Self::from_event_with_inputs(event, crate::custody::inputs(event)?)
+    }
+
+    pub(super) fn from_event_with_inputs(
+        event: &EventEnvelope,
+        inputs: crate::custody::Inputs,
+    ) -> ServiceResult<Self> {
         let (shape, bytes, media_type, renderer, model_call) = match &event.payload {
             EventPayload::InlineUtf8 { text, .. } => (
                 PayloadShape::Utf8,
@@ -210,7 +218,7 @@ impl CaptureRecovery {
                 renderer_digest: renderer.map(text_digest),
                 model_call,
             },
-            inputs: crate::custody::inputs(event)?,
+            inputs,
             checkpoint,
             router_trace,
         };
@@ -226,6 +234,40 @@ impl CaptureRecovery {
 }
 
 impl NativeService {
+    pub(super) fn capture_record_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<CaptureRecord> {
+        budget.check().map_err(crate::raw_index::budget_error)?;
+        let bytes = snapshot
+            .get(&self.keyspaces.continuous, &record_key(id))
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("capture control metadata is absent"))?;
+        if bytes.len() > MAX_CAPTURE_CONTROL_BYTES {
+            return Err(integrity(
+                "capture control metadata exceeds its stored bound",
+            ));
+        }
+        budget
+            .charge(1, bytes.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        decode(&bytes, "bounded capture control metadata")
+    }
+
+    pub(crate) fn capture_recovery_metadata<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<(CaptureReceipt, Option<CaptureRecovery>)> {
+        let record = self.capture_record_with_budget(snapshot, id, budget)?;
+        if let Some(recovery) = &record.recovery {
+            self.verify_recovery_features(snapshot, recovery)?;
+        }
+        Ok((record.receipt, record.recovery))
+    }
     /// Administrative metadata for either a complete original or an explicitly
     /// pruned original with independently retained control authority. Never used
     /// to manufacture an EventEnvelope or a successful original read.
@@ -235,10 +277,7 @@ impl NativeService {
         id: ObservationId,
         budget: &mut contextdb_recall::QueryBudget,
     ) -> ServiceResult<VerifiedCaptureControl> {
-        let record: CaptureRecord = read_required(snapshot, self, &record_key(id))?;
-        budget
-            .charge(1, encode(&record)?.len() as u64)
-            .map_err(crate::raw_index::budget_error)?;
+        let record = self.capture_record_with_budget(snapshot, id, budget)?;
         if let Some(recovery) = &record.recovery {
             self.verify_recovery_features(snapshot, recovery)?;
         }
@@ -252,15 +291,21 @@ impl NativeService {
                 original: None,
             });
         }
-        let original = self.load_captured_original(snapshot, id)?;
+        let original = self.load_captured_original_with_budget(snapshot, id, budget)?;
         budget
             .charge(1, encode(&original.event)?.len() as u64)
             .map_err(crate::raw_index::budget_error)?;
+        let recovery = if let Some(recovery) = record.recovery {
+            recovery
+        } else {
+            let controls = crate::router_trace::decode_envelope(&original.event, budget)?
+                .map(|envelope| envelope.origins);
+            let inputs = crate::custody::inputs_with_trace_controls(&original.event, controls)?;
+            CaptureRecovery::from_event_with_inputs(&original.event, inputs)?
+        };
         Ok(VerifiedCaptureControl {
             control_digest: self.capture_control_digest(snapshot, &original)?,
-            recovery: record
-                .recovery
-                .unwrap_or(CaptureRecovery::from_event(&original.event)?),
+            recovery,
             receipt: original.receipt,
             original: Some(original.event),
         })
@@ -423,11 +468,27 @@ impl NativeService {
         event: &EventEnvelope,
         global: u64,
     ) -> ServiceResult<()> {
+        self.validate_capture_recovery_with_inputs(snapshot, record, event, global, None)
+    }
+
+    pub(super) fn validate_capture_recovery_with_inputs<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        record: &CaptureRecord,
+        event: &EventEnvelope,
+        global: u64,
+        inputs: Option<crate::custody::Inputs>,
+    ) -> ServiceResult<()> {
         let activation: Option<u64> = read_optional(snapshot, self, ACTIVATED)?;
         match (&record.recovery, activation) {
             (Some(recovery), Some(first)) if first != 0 && global >= first => {
                 self.verify_recovery_features(snapshot, recovery)?;
-                if *recovery != CaptureRecovery::from_event(event)? {
+                let expected = if let Some(inputs) = inputs {
+                    CaptureRecovery::from_event_with_inputs(event, inputs)?
+                } else {
+                    CaptureRecovery::from_event(event)?
+                };
+                if *recovery != expected {
                     return Err(integrity(
                         "capture recovery metadata differs from its original",
                     ));

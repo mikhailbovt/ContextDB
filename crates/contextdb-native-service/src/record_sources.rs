@@ -417,6 +417,27 @@ impl NativeService {
         snapshot: &S,
         policy: &StoredPolicy,
     ) -> ServiceResult<Vec<AccessPolicy>> {
+        self.record_source_policies_inner(snapshot, policy, None)
+    }
+
+    pub(crate) fn record_source_policies_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        policy: &StoredPolicy,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Vec<AccessPolicy>> {
+        self.record_source_policies_inner(snapshot, policy, Some(budget))
+    }
+
+    fn record_source_policies_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        policy: &StoredPolicy,
+        mut budget: Option<&mut QueryBudget>,
+    ) -> ServiceResult<Vec<AccessPolicy>> {
+        if let Some(shared) = budget.as_deref_mut() {
+            shared.check().map_err(raw_index::budget_error)?;
+        }
         let Some(ledger) = &self.suppression else {
             return Ok(Vec::new());
         };
@@ -442,21 +463,36 @@ impl NativeService {
         self.require_custody_ready(snapshot, &workspace)?;
         let mut policies = Vec::new();
         for id in control.sources.keys() {
-            let source: StoredObservationPolicy = decode(
-                &snapshot
-                    .get(
-                        &self.keyspaces.observations_policy,
-                        digest_bytes(id.to_string().as_bytes()).as_bytes(),
-                    )
-                    .map_err(storage_error)?
-                    .ok_or_else(|| integrity("record origin policy absent"))?,
-                "record origin policy",
-            )?;
+            if let Some(shared) = budget.as_deref_mut() {
+                shared.check().map_err(raw_index::budget_error)?;
+            }
+            let bytes = snapshot
+                .get(
+                    &self.keyspaces.observations_policy,
+                    digest_bytes(id.to_string().as_bytes()).as_bytes(),
+                )
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("record origin policy absent"))?;
+            if let Some(shared) = budget.as_deref_mut() {
+                if bytes.len() > 1024 * 1024 {
+                    return Err(integrity(
+                        "record origin policy exceeds its metadata byte bound",
+                    ));
+                }
+                shared
+                    .charge(1, bytes.len() as u64)
+                    .map_err(raw_index::budget_error)?;
+            }
+            let source: StoredObservationPolicy = decode(&bytes, "record origin policy")?;
             if source.access.workspace_id != policy.access.workspace_id {
                 return Err(integrity("record origin crosses workspaces"));
             }
             policies.push(source.access);
-            policies.extend(self.stored_custody_policies(snapshot, *id)?);
+            policies.extend(if let Some(shared) = budget.as_deref_mut() {
+                self.stored_custody_policies_with_budget(snapshot, *id, shared)?
+            } else {
+                self.stored_custody_policies(snapshot, *id)?
+            });
         }
         Ok(policies)
     }
@@ -469,6 +505,23 @@ impl NativeService {
     ) -> ServiceResult<()> {
         if self
             .record_source_policies(snapshot, policy)?
+            .iter()
+            .any(|source| !policy_allows(context, source))
+        {
+            return Err(permission_denied());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn authorize_record_sources_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &RequestContext,
+        policy: &StoredPolicy,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        if self
+            .record_source_policies_with_budget(snapshot, policy, budget)?
             .iter()
             .any(|source| !policy_allows(context, source))
         {

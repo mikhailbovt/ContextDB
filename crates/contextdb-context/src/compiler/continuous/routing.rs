@@ -9,6 +9,23 @@ use crate::router::{
     SupportAlternative, canonical_digest, normalize_spans,
 };
 
+mod material;
+
+fn render_role(block: &ContextBlock) -> RouterRenderRole {
+    match block.kind {
+        PackBlockKind::RawObservation => RouterRenderRole::Evidence,
+        PackBlockKind::Unknown => RouterRenderRole::Unknown,
+        PackBlockKind::Conflict => RouterRenderRole::Conflict,
+        _ if !block.epistemic.acceptance.is_published() => RouterRenderRole::Proposal,
+        _ if block.epistemic.lifecycle != LifecycleState::Active
+            || block.interpretation == InterpretationRule::HistoricalData =>
+        {
+            RouterRenderRole::Historical
+        }
+        _ => RouterRenderRole::CurrentState,
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "binding contains the same owner and rendering inputs"
@@ -73,24 +90,12 @@ pub(super) fn make_request(
                     .collect(),
             });
         }
-        let render_role = match first.block.kind {
-            PackBlockKind::RawObservation => RouterRenderRole::Evidence,
-            PackBlockKind::Unknown => RouterRenderRole::Unknown,
-            PackBlockKind::Conflict => RouterRenderRole::Conflict,
-            _ if !first.block.epistemic.acceptance.is_published() => RouterRenderRole::Proposal,
-            _ if first.block.epistemic.lifecycle != LifecycleState::Active
-                || first.block.interpretation == InterpretationRule::HistoricalData =>
-            {
-                RouterRenderRole::Historical
-            }
-            _ => RouterRenderRole::CurrentState,
-        };
         inventory.push(MemoryUnit {
             id: id.clone(),
             kind: first.block.kind,
             epistemic: first.block.epistemic,
             interpretation: first.block.interpretation,
-            render_role,
+            render_role: render_role(&first.block),
             instruction_capability: first.block.instruction_capability,
             scopes: first.block.scopes.iter().cloned().collect(),
             facets: first.block.facets.iter().cloned().collect(),

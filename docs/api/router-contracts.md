@@ -95,5 +95,15 @@ Its initial complete inspection profile permits at most 100 authorized records;
 larger frontiers refuse before the next candidate record body is read. Inherited
 source controls can require earlier authorized reads. This is a bounded native
 integration, not a scalable indexed route or automatic generic cue in the host.
-Scoring remains R0. Operator inspection, historical corpus/export/training lineage
-and Kev inference remain separate work; no training or quality/cost gain is claimed.
+The embedded `AcceptedRouterTracePort` reads the exact accepted material under
+current capabilities, purpose and whole-custody controls in one latest snapshot.
+It uses the caller's shared allowance and performs no model call or write. Its
+result grants neither export nor training permission; ordinary transports do not
+acquire the port implicitly.
+
+Compiler validation separately reports support material and unit semantics.
+V1 lacks the complete prepared-policy commitment and intermediate trial material,
+so historical selection replay remains unavailable. Current source-wire replay
+is also a separate operation. The [synthetic corpus](../../learning/context-router/README.md)
+keeps query-time features, R0 behavior, labels and lineage distinct. Scoring
+remains R0; real export, replay completion and Kev training remain later work.

@@ -22,6 +22,7 @@ mod owned;
 mod prepare;
 mod raw;
 mod reference;
+mod router_trace;
 mod runtime;
 mod streaming;
 mod subscription;
@@ -46,6 +47,7 @@ pub use owned::*;
 pub use prepare::*;
 pub use raw::*;
 pub use reference::{HostArchiveAuthority, ReferenceService};
+pub use router_trace::*;
 pub use runtime::{
     ValidatedPostflightSubmission, canonical_postflight_record_digest, canonical_preflight_report,
     validate_postflight_submission,

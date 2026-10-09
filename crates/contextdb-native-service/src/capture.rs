@@ -27,7 +27,7 @@ use super::{
 
 pub(super) const CAPTURE_FEATURE: &str = "continuous-capture-v1";
 pub(super) const IMPACT_FEATURE: &str = "continuous-capture-impact-v1";
-use recovery::CaptureRecovery;
+pub(super) use recovery::CaptureRecovery;
 pub(super) use recovery::RECOVERY_FEATURE;
 mod recovery;
 /// Maximum original payload in one synchronized capture transaction.
@@ -780,6 +780,29 @@ impl NativeService {
         context: &AuthenticatedRequestContext,
         id: ObservationId,
     ) -> ServiceResult<StoredObservationPolicy> {
+        self.authorized_capture_policy_inner(snapshot, context, id, None)
+    }
+
+    pub(crate) fn authorized_capture_policy_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<StoredObservationPolicy> {
+        self.authorized_capture_policy_inner(snapshot, context, id, Some(budget))
+    }
+
+    fn authorized_capture_policy_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        budget: Option<&mut contextdb_recall::QueryBudget>,
+    ) -> ServiceResult<StoredObservationPolicy> {
+        if let Some(shared) = &budget {
+            shared.check().map_err(super::raw_index::budget_error)?;
+        }
         self.require_suppression_current(
             snapshot,
             &digest_bytes(context.request.workspace_id.as_bytes()),
@@ -789,6 +812,14 @@ impl NativeService {
             .get(&self.keyspaces.observations_policy, digest.as_bytes())
             .map_err(storage_error)?
             .ok_or_else(not_found)?;
+        if let Some(shared) = budget {
+            if bytes.len() > 1024 * 1024 {
+                return Err(integrity("capture policy exceeds its metadata byte bound"));
+            }
+            shared
+                .charge(1, bytes.len() as u64)
+                .map_err(super::raw_index::budget_error)?;
+        }
         let policy: StoredObservationPolicy = decode(&bytes, "observation policy")?;
         if !policy_allows(&context.request, &policy.access) {
             return Err(permission_denied());
@@ -804,22 +835,59 @@ impl NativeService {
         snapshot: &S,
         id: ObservationId,
     ) -> ServiceResult<CapturedOriginal> {
-        let record: CaptureRecord = read_required(snapshot, self, &record_key(id))?;
+        self.load_captured_original_inner(snapshot, id, None)
+    }
+
+    pub(crate) fn load_captured_original_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<CapturedOriginal> {
+        self.load_captured_original_inner(snapshot, id, Some(budget))
+    }
+
+    fn load_captured_original_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        mut budget: Option<&mut contextdb_recall::QueryBudget>,
+    ) -> ServiceResult<CapturedOriginal> {
+        let record: CaptureRecord = if let Some(shared) = budget.as_deref_mut() {
+            self.capture_record_with_budget(snapshot, id, shared)?
+        } else {
+            read_required(snapshot, self, &record_key(id))?
+        };
         let digest = digest_bytes(id.to_string().as_bytes());
-        let policy: StoredObservationPolicy = decode(
-            &snapshot
-                .get(&self.keyspaces.observations_policy, digest.as_bytes())
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("capture policy is absent"))?,
-            "capture policy",
-        )?;
-        let content: StoredObservationContent = decode(
-            &snapshot
-                .get(&self.keyspaces.observations_content, digest.as_bytes())
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("capture original is absent"))?,
-            "capture original",
-        )?;
+        let policy_bytes = snapshot
+            .get(&self.keyspaces.observations_policy, digest.as_bytes())
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("capture policy is absent"))?;
+        if let Some(shared) = budget.as_deref_mut() {
+            if policy_bytes.len() > 1024 * 1024 {
+                return Err(integrity("capture policy exceeds its metadata byte bound"));
+            }
+            shared
+                .charge(1, policy_bytes.len() as u64)
+                .map_err(super::raw_index::budget_error)?;
+        }
+        let policy: StoredObservationPolicy = decode(&policy_bytes, "capture policy")?;
+        if let Some(shared) = budget.as_deref_mut() {
+            shared.check().map_err(super::raw_index::budget_error)?;
+        }
+        let content_bytes = snapshot
+            .get(&self.keyspaces.observations_content, digest.as_bytes())
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("capture original is absent"))?;
+        if let Some(shared) = budget.as_deref_mut() {
+            if content_bytes.len() > 8 * 1024 * 1024 {
+                return Err(integrity("captured original exceeds its native row bound"));
+            }
+            shared
+                .charge(1, content_bytes.len() as u64)
+                .map_err(super::raw_index::budget_error)?;
+        }
+        let content: StoredObservationContent = decode(&content_bytes, "capture original")?;
         if content.digest != policy.content_digest
             || content.digest
                 != canonical_digest(&(
@@ -836,7 +904,14 @@ impl NativeService {
             .validate()
             .map_err(|_| integrity("captured envelope invariant failed"))?;
         validate_payload(&event).map_err(|_| integrity("captured original digest is invalid"))?;
-        if record.dependencies != capture_dependencies(&event)? {
+        let controls = if let Some(shared) = budget.as_deref_mut() {
+            super::router_trace::decode_envelope(&event, shared)?.map(|envelope| envelope.origins)
+        } else {
+            super::router_trace::trace_controls(&event)?
+        };
+        if record.dependencies
+            != capture_dependencies_with_trace_controls(&event, controls.as_ref())?
+        {
             return Err(integrity(
                 "capture source dependencies differ from its original",
             ));
@@ -864,7 +939,18 @@ impl NativeService {
         {
             return Err(integrity("capture receipt and original disagree"));
         }
-        self.validate_capture_recovery(snapshot, &record, &event, global)?;
+        if budget.is_some() {
+            let inputs = super::custody::inputs_with_trace_controls(&event, controls)?;
+            self.validate_capture_recovery_with_inputs(
+                snapshot,
+                &record,
+                &event,
+                global,
+                Some(inputs),
+            )?;
+        } else {
+            self.validate_capture_recovery(snapshot, &record, &event, global)?;
+        }
         Ok(CapturedOriginal {
             event,
             receipt: record.receipt,
@@ -1177,6 +1263,16 @@ impl NativeService {
 }
 
 fn capture_dependencies(event: &EventEnvelope) -> ServiceResult<Vec<CaptureDependency>> {
+    capture_dependencies_with_trace_controls(
+        event,
+        super::router_trace::trace_controls(event)?.as_ref(),
+    )
+}
+
+fn capture_dependencies_with_trace_controls(
+    event: &EventEnvelope,
+    controls: Option<&super::router_trace::controls::RouterTraceControls>,
+) -> ServiceResult<Vec<CaptureDependency>> {
     let mut dependencies = match &event.payload {
         EventPayload::Staged { reference, .. } => vec![CaptureDependency::Payload {
             reference: reference.clone(),
@@ -1198,10 +1294,14 @@ fn capture_dependencies(event: &EventEnvelope) -> ServiceResult<Vec<CaptureDepen
             .collect(),
         _ => Vec::new(),
     };
-    if let Some(controls) = super::router_trace::trace_controls(event)? {
-        for event_id in controls.originals {
-            if !dependencies.contains(&CaptureDependency::Source { event_id }) {
-                dependencies.push(CaptureDependency::Source { event_id });
+    if let Some(controls) = controls {
+        for event_id in &controls.originals {
+            if !dependencies.contains(&CaptureDependency::Source {
+                event_id: *event_id,
+            }) {
+                dependencies.push(CaptureDependency::Source {
+                    event_id: *event_id,
+                });
             }
         }
     }

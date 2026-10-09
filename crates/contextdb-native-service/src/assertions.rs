@@ -748,8 +748,8 @@ impl NativeService {
     ) -> ServiceResult<()> {
         for id in &label.sources {
             budget.charge(1, 0).map_err(budget_error)?;
-            self.authorized_capture_policy(snapshot, context, *id)?;
-            self.authorize_capture_dependencies(snapshot, context, *id)?;
+            self.authorized_capture_policy_with_budget(snapshot, context, *id, budget)?;
+            self.authorize_derived_custody_with_budget(snapshot, context, *id, budget)?;
         }
         Ok(())
     }
