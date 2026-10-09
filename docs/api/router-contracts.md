@@ -101,9 +101,11 @@ It uses the caller's shared allowance and performs no model call or write. Its
 result grants neither export nor training permission; ordinary transports do not
 acquire the port implicitly.
 
-Compiler validation separately reports support material and unit semantics.
-V1 lacks the complete prepared-policy commitment and intermediate trial material,
-so historical selection replay remains unavailable. Current source-wire replay
+Compiler validation separately reports support material, unit semantics and the
+complete candidate commitment. The explicit `compile_assembly_with_router_policy`
+entry retains versioned prepared actions/reasons for the last column; the default
+entry and native v1 traces omit it. Native v1 refuses this extension. Historical
+selection replay still lacks prepared selector state. Current source-wire replay
 is also a separate operation. The [synthetic corpus](../../learning/context-router/README.md)
 keeps query-time features, R0 behavior, labels and lineage distinct. Scoring
 remains R0; real export, replay completion and Kev training remain later work.

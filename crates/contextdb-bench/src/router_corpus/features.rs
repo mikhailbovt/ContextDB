@@ -1,7 +1,8 @@
 use super::*;
 use crate::Result;
 use contextdb_context::router::{
-    RouterMaterialVerification, RouterRenderRole, SupportAlternative, canonical_digest,
+    RouterMaterialStatus, RouterMaterialVerification, RouterRenderRole, SupportAlternative,
+    canonical_digest,
 };
 use contextdb_context::*;
 use contextdb_core::*;
@@ -166,6 +167,17 @@ pub fn build_router_features(
             support_alternatives: unit.support_alternatives.clone(),
         });
     }
+    let mut missing = vec![
+        RouterFeatureMissing::SelectedBaseSemanticView,
+        RouterFeatureMissing::IntermediateTrialMaterial,
+        RouterFeatureMissing::HistoricalSelectionReplay,
+        RouterFeatureMissing::HistoryCompleteness,
+        RouterFeatureMissing::SemanticEmbedding,
+        RouterFeatureMissing::MarginalUtilityCalibration,
+    ];
+    if material_verification.candidate_commitment != RouterMaterialStatus::Verified {
+        missing.insert(2, RouterFeatureMissing::PreparedPolicyCommitment);
+    }
     let features = RouterSemanticFeatures {
         schema: ROUTER_FEATURE_VERSION.into(),
         query: input.query.clone(),
@@ -178,15 +190,7 @@ pub fn build_router_features(
         tokenizer: input.request.binding.tokenizer.clone(),
         encoder: input.request.binding.encoder.clone(),
         layout: OUTGOING_LAYOUT.into(),
-        missing: vec![
-            RouterFeatureMissing::SelectedBaseSemanticView,
-            RouterFeatureMissing::IntermediateTrialMaterial,
-            RouterFeatureMissing::PreparedPolicyCommitment,
-            RouterFeatureMissing::HistoricalSelectionReplay,
-            RouterFeatureMissing::HistoryCompleteness,
-            RouterFeatureMissing::SemanticEmbedding,
-            RouterFeatureMissing::MarginalUtilityCalibration,
-        ],
+        missing,
     };
     let feature_digest = digest(&features, budget)?;
     Ok(RouterFeatureRecord {

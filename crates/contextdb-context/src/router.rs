@@ -25,6 +25,7 @@ pub const PLAN_FORMAT: &str = "contextdb.router_plan.v1";
 pub const MANIFEST_FORMAT: &str = "contextdb.router_manifest.v1";
 pub const FEATURE_SCHEMA: &str = "contextdb.routing_features.r0.v1";
 pub const DESCRIPTOR_SCHEMA: &str = "contextdb.routing_descriptor.v1";
+pub const ROUTER_PREPARED_POLICY_FORMAT: &str = "contextdb.router-prepared-policy.v1";
 pub const MAX_UNITS: usize = 512;
 pub const MAX_SCORES: usize = 4096;
 pub const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
@@ -277,6 +278,49 @@ pub enum ScoreProvenance {
 pub struct RouterPreparedMaterial {
     pub candidates: Vec<crate::PackCandidate>,
     pub evidence: Vec<crate::PackEvidence>,
+    /// Optional historical compiler decisions, never current authorization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared_policy: Option<RouterPreparedPolicy>,
+}
+
+/// Exact decisions captured by the compiler for every prepared support variant.
+/// The legacy material profile omits this extension entirely.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterPreparedPolicy {
+    pub format: String,
+    pub units: Vec<RouterPreparedUnitPolicy>,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterPreparedUnitPolicy {
+    pub id: BlockId,
+    pub alternatives: Vec<RouterPreparedAlternativePolicy>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterPreparedAlternativePolicy {
+    pub index: u32,
+    pub use_action: crate::UseAction,
+    pub directive_reason: crate::DirectiveReason,
+}
+
+impl std::fmt::Debug for RouterPreparedPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RouterPreparedPolicy")
+            .field("unit_count", &self.units.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for RouterPreparedUnitPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RouterPreparedUnitPolicy")
+            .field("alternative_count", &self.alternatives.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// Independent integrity results over retained prepared material. This is not
@@ -303,6 +347,9 @@ pub enum RouterMaterialUnavailableReason {
     /// V1 omits the compiler's prepared use action and directive reason, which
     /// participate in the complete candidate commitment and selection replay.
     MissingPreparedPolicy,
+    /// A complete candidate commitment does not retain all selector-entry,
+    /// generated-marker and omission inputs or execute historical selection.
+    MissingReplayPreparation,
 }
 
 /// Check retained support material with the authoritative compiler's block
@@ -320,6 +367,7 @@ impl std::fmt::Debug for RouterPreparedMaterial {
         f.debug_struct("RouterPreparedMaterial")
             .field("candidate_count", &self.candidates.len())
             .field("evidence_count", &self.evidence.len())
+            .field("prepared_policy", &self.prepared_policy.is_some())
             .finish_non_exhaustive()
     }
 }

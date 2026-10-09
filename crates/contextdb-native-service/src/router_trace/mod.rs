@@ -118,6 +118,7 @@ impl RouterEnvelope {
     }
 
     pub(super) fn validate(&self, budget: &mut QueryBudget) -> ServiceResult<()> {
+        self.validate_material_profile()?;
         self.request.validate(budget).map_err(trace_error)?;
         self.plan
             .validate(&self.request, budget)
@@ -285,6 +286,15 @@ impl RouterEnvelope {
         canonical_bytes(self, budget).map_err(trace_error)?;
         Ok(())
     }
+
+    fn validate_material_profile(&self) -> ServiceResult<()> {
+        if self.materials.prepared_policy.is_some() {
+            return Err(integrity(
+                "native router trace v1 does not support prepared policy material",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl crate::NativeService {
@@ -294,6 +304,7 @@ impl crate::NativeService {
         assembly: &contextdb_context::CompiledAssembly,
         budget: &mut QueryBudget,
     ) -> ServiceResult<PreparedRouterTrace> {
+        envelope.validate_material_profile()?;
         envelope
             .manifest
             .validate(&envelope.request, &envelope.plan, assembly, budget)

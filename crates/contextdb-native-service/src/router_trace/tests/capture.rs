@@ -27,6 +27,8 @@ use contextdb_service::{
 
 use super::*;
 
+mod policy;
+
 pub(in crate::router_trace) struct TraceCaptureFixture {
     pub context: AuthenticatedRequestContext,
     pub checkpoint: SavedRunCheckpoint,
