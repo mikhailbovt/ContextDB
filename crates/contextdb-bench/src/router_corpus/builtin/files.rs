@@ -5,7 +5,7 @@ use std::{
     path::Component,
 };
 
-pub(super) fn validate_root(root: &Path, must_exist: bool) -> Result<()> {
+pub(in crate::router_corpus) fn validate_root(root: &Path, must_exist: bool) -> Result<()> {
     if !root.is_absolute()
         || root
             .components()
@@ -40,11 +40,15 @@ fn linked(metadata: &fs::Metadata) -> bool {
         metadata.file_type().is_symlink()
     }
 }
-pub(super) fn regular(path: &Path) -> Result<bool> {
+pub(in crate::router_corpus) fn regular(path: &Path) -> Result<bool> {
     let metadata = fs::symlink_metadata(path).map_err(|_| invalid())?;
     Ok(metadata.is_file() && !linked(&metadata))
 }
-pub(super) fn read_bounded(path: &Path, limit: usize, budget: &mut QueryBudget) -> Result<Vec<u8>> {
+pub(in crate::router_corpus) fn read_bounded(
+    path: &Path,
+    limit: usize,
+    budget: &mut QueryBudget,
+) -> Result<Vec<u8>> {
     if !regular(path)? {
         return Err(invalid());
     }
@@ -64,7 +68,7 @@ pub(super) fn read_bounded(path: &Path, limit: usize, budget: &mut QueryBudget) 
     }
     Ok(bytes)
 }
-pub(super) fn write_new(
+pub(in crate::router_corpus) fn write_new(
     root: &Path,
     name: &str,
     bytes: &[u8],

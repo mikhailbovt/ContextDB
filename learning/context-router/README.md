@@ -19,7 +19,35 @@ cargo run -p contextdb-bench --locked --example router_corpus -- build-replay D:
 cargo run -p contextdb-bench --locked --example router_corpus -- verify-replay D:/Develop/router-replay-corpus
 ```
 
-The parent directory must exist. A new output directory receives five bounded
+For conditional supervision from the compiler's actual selected-base/trial
+callbacks, use another output directory:
+
+```powershell
+cargo run -p contextdb-bench --locked --example router_corpus -- build-conditional D:/Develop/router-conditional-corpus
+cargo run -p contextdb-bench --locked --example router_corpus -- verify-conditional D:/Develop/router-conditional-corpus
+```
+
+This profile collects rendered semantic inputs under a fixed, target-independent
+selection policy. Separate targets bind each exact callback and measure additional
+source coverage relative to its selected base. Already covered sources are
+negative; unproven partial complements remain masked. Valid alternative proof
+sets use exact source ranges. These labels are a synthetic learning surrogate,
+not measured reader utility. Connected histories remain in one fold.
+
+Its four artifacts are `inputs.json`, `observations.json`, `targets.json` and
+`lineage.json`, followed by `manifest.json`. The whole generation fails beyond
+64 cases, 512 callbacks, 16 proposals per selected base or 64 MiB; it never keeps
+only a prefix. Host observations and source identities stay outside model input.
+
+Cold verification regenerates the public fixtures through the same callback path
+and compares semantic material, source witnesses and complete encoded wires.
+Recorded remaining work, bytes, time and evaluation counters stay in the artifacts;
+fresh-run comparison excludes only the declared volatile counters. It does not
+reproduce historical elapsed time. The conditional Kev profile refuses the old
+initial-context bundle and excludes test/quarantine before Python projection or
+model use.
+
+The parent directory must exist. The original and replay directories receive five bounded
 artifacts and a final manifest. A completed retry verifies and reuses the same
 artifacts; an incomplete directory is preserved and refused. The writer accepts
 only built-in synthetic originals. It does not export private native traces.
@@ -49,9 +77,9 @@ ordered wire and token counts. Each compile reserves 200,000 work units and 16 M
 from the batch; replay reserves the recorded remaining selector allowance with the
 same enclosing deadline and cancellation. Completed retry reuses existing bytes.
 
-Behavior observations and labels never enter the feature builder. This corpus
-and trainer use initial context, without the live compiler's selected-base/trial
-semantic scoring view; calibrated utility remains unavailable. Synthetic artifacts
+Behavior observations and labels never enter the feature builder. The original
+corpus and initial-context trainer do not use the live compiler's selected-base/trial
+semantic scoring view; calibrated utility remains unavailable in every profile. Synthetic artifacts
 have no native acceptance or current source-wire proof. Native v1 refuses prepared
 policy extensions. These columns stay separate from historical integrity; hashes
 and synthetic markers grant no rights.
