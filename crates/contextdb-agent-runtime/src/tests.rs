@@ -16,6 +16,7 @@ use contextdb_service::{Capability, *};
 
 use super::*;
 
+mod capacity;
 mod economy;
 mod fences;
 mod partial;

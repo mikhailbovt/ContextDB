@@ -703,6 +703,21 @@ impl PrepareContextPort for NativeService {
                     .as_ref()
                     .and_then(|scorer| scorer.take_failure())
                     .unwrap_or_else(|| match error {
+                        ContextError::OutgoingCapacityExceeded { .. }
+                            if history_can_shrink
+                                && budget.check().is_ok()
+                                && budget.remaining_work() > 0
+                                && budget.remaining_bytes() > 0 =>
+                        {
+                            // Only completed hot exchanges may make room. A new
+                            // attempt uses the same remaining parent allowance;
+                            // no worker, closure or deadline error reaches here.
+                            ServiceError::new(
+                                contextdb_service::ErrorCode::BudgetExhausted,
+                                "complete outgoing request needs hot-history space",
+                                true,
+                            )
+                        }
                         ContextError::BudgetExceeded(_) => super::exhausted(
                             "protected router preparation exceeded its shared profile",
                         ),
@@ -1268,7 +1283,9 @@ fn context_error(error: impl std::fmt::Display) -> ContextError {
 fn service_error(error: ContextError) -> ServiceError {
     use contextdb_service::ErrorCode;
     let code = match error {
-        ContextError::BudgetExceeded(_) => ErrorCode::ResourceExhausted,
+        ContextError::BudgetExceeded(_) | ContextError::OutgoingCapacityExceeded { .. } => {
+            ErrorCode::ResourceExhausted
+        }
         ContextError::Authorization(_) => ErrorCode::PermissionDenied,
         ContextError::Provider(_) => ErrorCode::IndexTooStale,
         ContextError::InvalidRequest(_)

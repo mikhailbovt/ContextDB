@@ -381,10 +381,26 @@ fn stop_keeps_mandatory_closure_and_counts_the_complete_request() {
         )
     );
     input.budget.max_input_tokens = compiled.outgoing.input_tokens - 1;
-    assert!(matches!(
-        compile(&input, &fixture, &Stop),
-        Err(ContextError::BudgetExceeded(_))
-    ));
+    assert_eq!(
+        compile(&input, &fixture, &Stop).expect_err("complete input ceiling"),
+        ContextError::OutgoingCapacityExceeded {
+            input_tokens: compiled.outgoing.input_tokens,
+            max_input_tokens: compiled.outgoing.input_tokens - 1,
+            wire_bytes: compiled.outgoing.wire.len() as u64,
+            max_wire_bytes: u64::from(input.budget.max_wire_bytes),
+        }
+    );
+    input.budget.max_input_tokens = compiled.outgoing.input_tokens;
+    input.budget.max_wire_bytes = compiled.outgoing.wire.len() as u32 - 1;
+    assert_eq!(
+        compile(&input, &fixture, &Stop).expect_err("complete wire ceiling"),
+        ContextError::OutgoingCapacityExceeded {
+            input_tokens: compiled.outgoing.input_tokens,
+            max_input_tokens: compiled.outgoing.input_tokens,
+            wire_bytes: compiled.outgoing.wire.len() as u64,
+            max_wire_bytes: u64::from(input.budget.max_wire_bytes),
+        }
+    );
 }
 
 fn raw_candidate(id: &str, evidence: &str) -> ProviderCandidate {

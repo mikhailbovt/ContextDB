@@ -65,11 +65,14 @@ impl Trial {
             added_original_bytes: self.added_bytes,
         }
     }
-    fn require_outgoing_fit(self) -> Result<Self> {
+    fn require_outgoing_fit(self, ceiling: crate::OutgoingBudget) -> Result<Self> {
         if self.outgoing_overflow {
-            return Err(ContextError::BudgetExceeded(
-                "complete outgoing request exceeds declared profile".into(),
-            ));
+            return Err(ContextError::OutgoingCapacityExceeded {
+                input_tokens: self.outgoing.input_tokens,
+                max_input_tokens: ceiling.max_input_tokens,
+                wire_bytes: self.outgoing.wire.len() as u64,
+                max_wire_bytes: u64::from(ceiling.max_wire_bytes),
+            });
         }
         Ok(self)
     }
@@ -868,7 +871,7 @@ fn select_prepared(
         retain_semantics,
         budget,
     )?
-    .require_outgoing_fit()?;
+    .require_outgoing_fit(request.budget)?;
     let mut optional_seeds = BTreeSet::new();
     let mut scorer_duration = std::time::Duration::ZERO;
     let mut raw_recall_pressure: Option<RawRecallPressure> = None;
@@ -1168,7 +1171,7 @@ fn select_prepared(
         retain_semantics,
         budget,
     )?
-    .require_outgoing_fit()?;
+    .require_outgoing_fit(request.budget)?;
     let mut originals: Vec<_> = best
         .fit
         .pack

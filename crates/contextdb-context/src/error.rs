@@ -16,6 +16,21 @@ pub enum ContextError {
     Authorization(String),
     #[error("hard context budget cannot be satisfied: {0}")]
     BudgetExceeded(String),
+    /// A completely rendered request exceeds its declared input or wire ceiling.
+    /// This carries no inference, memory-closure or shared-work failure.
+    #[error(
+        "complete outgoing request exceeds declared profile: input={input_tokens}/{max_input_tokens}, wire={wire_bytes}/{max_wire_bytes}"
+    )]
+    OutgoingCapacityExceeded {
+        /// Encoder-reported tokens for the complete outgoing request.
+        input_tokens: u32,
+        /// Declared complete-request input ceiling.
+        max_input_tokens: u32,
+        /// Actual encoded request byte length.
+        wire_bytes: u64,
+        /// Declared complete-request byte ceiling.
+        max_wire_bytes: u64,
+    },
     #[error("context continuation is invalid: {0}")]
     InvalidContinuation(String),
     #[error("tokenizer failed: {0}")]
