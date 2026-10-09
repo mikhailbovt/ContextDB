@@ -1,6 +1,7 @@
 //! Bounded synthetic corpus contracts. Observations and hashes never grant use rights.
 
 mod builtin;
+mod conditional;
 mod features;
 mod fixture;
 mod lineage;
@@ -8,6 +9,7 @@ mod replay;
 mod types;
 
 pub use builtin::*;
+pub use conditional::*;
 pub use features::*;
 pub use lineage::*;
 pub use replay::*;

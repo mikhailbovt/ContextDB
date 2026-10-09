@@ -18,8 +18,9 @@ import time
 import uuid
 from pathlib import Path
 
+import corpus as initial_profile
 from corpus import (CORPUS_BLAKE3, LIMITS, PINS, PROFILE, canonical, checked_root, fixed_entries,
-                    load_examples, read_json, require, sha_file)
+                    read_json, require, sha_file)
 
 SOURCE_REVISION = "5e42a7a03f28134853dd3ff77461457e921e5ec1"
 ADAPTER_REVISION = "9a45d25eb2ab761841196625383fa1dff0e56c1e"
@@ -38,6 +39,26 @@ LEGACY_BASE_FILES = {".gitattributes", "config.json", "LICENSE", "merges.txt",
                      "model.safetensors-00001-of-00001.safetensors", "model.safetensors.index.json",
                      "preprocessor_config.json", "README.md", "tokenizer.json", "tokenizer_config.json",
                      "video_preprocessor_config.json", "vocab.json"}
+
+
+def data_profile(name=PROFILE):
+    if name == PROFILE:
+        return initial_profile
+    import conditional
+    require(name == conditional.PROFILE, "unsupported development profile")
+    return conditional
+
+
+def selected_profile(args):
+    if getattr(args, "profile", "initial-context") == "initial-context":
+        return initial_profile
+    import conditional
+    require(args.profile == "rendered-closure", "unsupported profile")
+    return conditional
+
+
+def bundle_format(name):
+    return BUNDLE_FORMAT if name == PROFILE else data_profile(name).BUNDLE_FORMAT
 
 
 def bounded_json(path, maximum):
@@ -62,7 +83,7 @@ def validate_lock(lock):
     return {key: checked_root(path) for key, path in lock["paths"].items()}
 
 
-def provenance(lock_path):
+def provenance(lock_path, profile_name=PROFILE):
     require(lock_path.is_absolute() and lock_path.resolve() == lock_path,
             "absolute resolved model lock required")
     lock = read_json(lock_path, 64 << 10)
@@ -88,13 +109,17 @@ def provenance(lock_path):
     require(all(packages.get(name) == version for name, version in lock["packages"].items()),
             "runtime dependency revision changed")
     public_lock = {key: value for key, value in lock.items() if key != "paths"}
+    tool_files = ("corpus.py", "trainer.py", "check.py")
+    if profile_name != PROFILE:
+        data_profile(profile_name)
+        tool_files += ("conditional.py",)
     pin = {"source_revision": SOURCE_REVISION, "adapter_revision": ADAPTER_REVISION,
            "base_revision": BASE_REVISION, "model_profile_sha256": hashlib.sha256(canonical(public_lock)).hexdigest(),
            "initial_files": {f"{key}/{name}": item for key, component in lock["components"].items()
                              for name, item in component["files"].items()},
            "packages": lock["packages"], "python": sys.version,
            "tool_sources_sha256": {name: sha_file(Path(__file__).with_name(name), 1 << 20)
-                                   for name in ("corpus.py", "trainer.py", "check.py")}}
+                                   for name in tool_files}}
     return paths, pin
 
 
@@ -141,19 +166,21 @@ def load_model(seed, paths):
     return torch, tok, model, meta, tensors
 
 
-def encode_all(model, tok, examples):
+def encode_all(model, tok, examples, limits=LIMITS):
     encoded = []
     for example in examples:
-        enc = model.encode(tok, example.record, max_state=LIMITS["state_tokens"],
-                           max_branch=LIMITS["row_tokens"], strict=True)
-        require(not enc["state_truncated"] and len(enc["ids"]) <= LIMITS["packed_tokens"],
+        enc = model.encode(tok, example.record, max_state=limits["state_tokens"],
+                           max_branch=limits["row_tokens"], strict=True)
+        require(not enc["state_truncated"] and len(enc["ids"]) <= limits["packed_tokens"],
                 "token admission exceeded; truncation is forbidden")
         require(len(enc["decide_idx"]) == len(example.known), "question/mask count differs")
         one_question = []
         for question in example.record["questions"]:
-            one_question.append(model.encode(tok, {"state": example.record["state"], "questions": [question]},
-                                              max_state=LIMITS["state_tokens"],
-                                              max_branch=LIMITS["row_tokens"], strict=True))
+            row = model.encode(tok, {"state": example.record["state"], "questions": [question]},
+                               max_state=limits["state_tokens"], max_branch=limits["row_tokens"], strict=True)
+            require(not row["state_truncated"] and len(row["ids"]) <= limits["row_tokens"]
+                    and len(row["decide_idx"]) == 1, "single-question token admission exceeded")
+            one_question.append(row)
         encoded.append(one_question)
     return encoded
 
@@ -283,13 +310,13 @@ def save_bundle(torch, model, meta, optimizer, staging, profile, report, adapter
         with path.open("r+b") as stream:
             os.fsync(stream.fileno())
         files[name] = {"bytes": size, "sha256": sha_file(path, size)}
-    save_file(staging / "bundle.json", {"format": BUNDLE_FORMAT, "profile": PROFILE,
+    save_file(staging / "bundle.json", {"format": bundle_format(profile["profile"]), "profile": profile["profile"],
               "optimizer_steps": report["optimizer_steps"], "files": files,
               "trainable_tensors_sha256": report["after_trainable_digest"],
               "useful_model_claim": False, "current_training_grant": False})
 
 
-def inspect_bundle(staging, output_root, completed=False):
+def inspect_bundle(staging, output_root, completed=False, profile_name=PROFILE):
     """Bound every path and artifact before hashing or loading tensor payloads."""
     output_root = checked_root(output_root)
     require(staging.is_absolute() and staging.is_dir() and not staging.is_symlink() and
@@ -298,7 +325,7 @@ def inspect_bundle(staging, output_root, completed=False):
     bundle = bounded_json(staging / "bundle.json", 64 << 10)
     require(set(bundle) == {"format", "profile", "optimizer_steps", "files", "trainable_tensors_sha256",
                             "useful_model_claim", "current_training_grant"}
-            and bundle["format"] == BUNDLE_FORMAT and bundle["profile"] == PROFILE
+            and bundle["format"] == bundle_format(profile_name) and bundle["profile"] == profile_name
             and bundle["useful_model_claim"] is False and bundle["current_training_grant"] is False,
             "bundle profile differs")
     require(type(bundle["files"]) is dict and set(bundle["files"]) == set(BUNDLE_LIMITS),
@@ -309,7 +336,8 @@ def inspect_bundle(staging, output_root, completed=False):
                 for k, v in bundle["files"].items()) and
             sum(v["bytes"] for v in bundle["files"].values()) <= BUNDLE_MAX_BYTES,
             "bundle declared artifact/sum ceiling exceeded")
-    require(type(bundle["optimizer_steps"]) is int and bundle["optimizer_steps"] in {8, 16}
+    allowed_steps = {8, 16} if profile_name == PROFILE else set(range(1, 65))
+    require(type(bundle["optimizer_steps"]) is int and bundle["optimizer_steps"] in allowed_steps
             and isinstance(bundle["trainable_tensors_sha256"], str)
             and re.fullmatch(r"[a-f0-9]{64}", bundle["trainable_tensors_sha256"]),
             "invalid optimization/tensor commitment")
@@ -319,9 +347,9 @@ def inspect_bundle(staging, output_root, completed=False):
     fixed_entries(staging, set(bundle["files"]) | extras)
     if completion:
         complete = bounded_json(staging / "complete.json", 64 << 10)
-        cold_reference(staging)
+        cold_reference(staging, data_profile(profile_name).LIMITS)
         require(set(complete) == {"format", "bundle_sha256", "cold_reload_sha256", "optimizer_steps"}
-                and complete["format"] == BUNDLE_FORMAT
+                and complete["format"] == bundle_format(profile_name)
                 and complete["optimizer_steps"] == bundle["optimizer_steps"]
                 and complete["bundle_sha256"] == sha_file(staging / "bundle.json", 64 << 10)
                 and complete["cold_reload_sha256"] == sha_file(staging / "cold-reload.json", 64 << 10),
@@ -331,16 +359,20 @@ def inspect_bundle(staging, output_root, completed=False):
         require(path.is_file() and not path.is_symlink() and path.stat().st_size == item["bytes"]
                 and sha_file(path, item["bytes"]) == item["sha256"], "bundle digest mismatch")
     profile = bounded_json(staging / "profile.json", BUNDLE_LIMITS["profile.json"])
-    require(profile["profile"] == PROFILE and profile["corpus_manifest_blake3"] == CORPUS_BLAKE3
-            and profile["corpus_files_sha256"] == PINS and profile["limits"] == LIMITS
-            and profile["partitions"] == {"train": 8, "validation": 8, "test": 8, "quarantined": 8}
-            and profile["excluded_model_examples"] == 16
-            and type(profile["seed"]) is int and 0 <= profile["seed"] < 2**32
-            and type(profile["epochs"]) is int and profile["epochs"] in {1, 2}
-            and profile["epochs"] * 8 == bundle["optimizer_steps"]
+    require(profile["profile"] == profile_name and type(profile["seed"]) is int and 0 <= profile["seed"] < 2**32
             and profile["objective"] == "independent yes-minus-no masked BCE"
             and profile["no_training_permission_from_hashes"] is True,
             "saved synthetic development profile differs")
+    if profile_name == PROFILE:
+        require(profile["corpus_manifest_blake3"] == CORPUS_BLAKE3 and profile["corpus_files_sha256"] == PINS
+                and profile["limits"] == LIMITS
+                and profile["partitions"] == {"train": 8, "validation": 8, "test": 8, "quarantined": 8}
+                and profile["excluded_model_examples"] == 16 and type(profile["epochs"]) is int
+                and profile["epochs"] in {1, 2} and profile["epochs"] * 8 == bundle["optimizer_steps"],
+                "saved initial-context profile differs")
+    else:
+        data_profile(profile_name).validate_saved_profile(profile, bundle["optimizer_steps"])
+        require("model_profile_sha256" in profile["provenance"], "conditional legacy provenance refused")
     pin = profile["provenance"]
     require(pin["source_revision"] == SOURCE_REVISION and pin["adapter_revision"] == ADAPTER_REVISION
             and pin["base_revision"] == BASE_REVISION, "saved model revision differs")
@@ -354,23 +386,23 @@ def inspect_bundle(staging, output_root, completed=False):
     return bundle, profile
 
 
-def cold_reference(path):
+def cold_reference(path, limits=LIMITS):
     reference = bounded_json(path / "cold-reload.json", 64 << 10)
     require(set(reference) == {"status", "examples", "from_partition", "association", "utility_logits", "test_evaluated"}
             and reference["status"] == "strict-tensor-and-logit-match"
             and reference["examples"] == 1 and reference["from_partition"] == "validation"
             and reference["test_evaluated"] == 0
             and isinstance(reference["association"], str) and len(reference["association"]) <= 256
-            and type(reference["utility_logits"]) is list and 0 < len(reference["utility_logits"]) <= LIMITS["questions"]
+            and type(reference["utility_logits"]) is list and 0 < len(reference["utility_logits"]) <= limits["questions"]
             and all(type(value) in {int, float} and math.isfinite(value) for value in reference["utility_logits"]),
             "bounded finite cold development observation required")
     return reference
 
 
-def reload_bundle(torch, model, staging, output_root):
+def reload_bundle(torch, model, staging, output_root, profile_name=PROFILE):
     from peft import get_peft_model_state_dict, set_peft_model_state_dict
     from safetensors.torch import load_file
-    bundle, _ = inspect_bundle(staging, output_root)
+    bundle, _ = inspect_bundle(staging, output_root, profile_name=profile_name)
     adapter = load_file(str(staging / "adapter.safetensors"), device="cpu")
     head = load_file(str(staging / "head.safetensors"), device="cpu")
     expected = get_peft_model_state_dict(model.lm)
@@ -434,10 +466,13 @@ def verify_recorded_pin(profile, current):
                 and files == current["initial_files"] and recorded["packages"] == current["packages"]
                 and recorded["model_profile_sha256"] == current["model_profile_sha256"],
                 "recorded portable model profile differs")
+        if profile["profile"] != PROFILE:
+            require(recorded["tool_sources_sha256"] == current["tool_sources_sha256"],
+                    "conditional formatter/trainer revision differs")
         return
     # Explicit compatibility with the earlier same-profile public-synthetic run.
     # Extra upstream metadata/logs are never opened or used as executable input.
-    require(set(recorded) == {"source_revision", "adapter_revision", "base_revision", "initial_files",
+    require(profile["profile"] == PROFILE and set(recorded) == {"source_revision", "adapter_revision", "base_revision", "initial_files",
                               "packages", "python", "draft_sources_sha256"}, "unsupported legacy provenance")
     allowed = {"models/kev-0.8b/" + name for name in LEGACY_ADAPTER_FILES}
     allowed |= {"models/qwen3.5-0.8b-base/" + name for name in LEGACY_BASE_FILES}
@@ -462,8 +497,10 @@ def run(args):
     require(1 <= args.epochs <= 2 and math.isfinite(args.lr) and 0 < args.lr <= 1e-4,
             "development optimization ceiling")
     require(0 <= args.seed < 2**32, "seed exceeds supported range")
-    examples, intake = load_examples(args.corpus, args.seed)
-    paths, pin = provenance(args.model_lock)
+    selected = selected_profile(args)
+    require(selected is initial_profile or args.epochs == 1, "conditional profile permits exactly one bounded epoch")
+    examples, intake = selected.load_examples(args.corpus, args.seed)
+    paths, pin = provenance(args.model_lock, selected.PROFILE)
     output_root = checked_root(args.output_root)
     output = run_path(output_root, args.run_name)
     require(not output.exists(), "new output required; overwrite is forbidden")
@@ -476,10 +513,14 @@ def run(args):
     save_file(staging / "run-intent.json", profile)
     started = time.monotonic()
     torch, tok, model, meta, tensors = load_model(args.seed, paths)
-    encoded = encode_all(model, tok, examples)
+    # Every train/dev full record and row is admitted before the first optimizer.
+    encoded = encode_all(model, tok, examples, selected.LIMITS)
     train = [(x, e) for x, e in zip(examples, encoded) if x.partition == "train"]
     dev = [(x, e) for x, e in zip(examples, encoded) if x.partition == "validation"]
-    require(len(train) == len(dev) == 8, "train/dev population differs")
+    if selected is initial_profile:
+        require(len(train) == len(dev) == 8, "train/dev population differs")
+    else:
+        require(0 < len(train) <= 64 and 0 < len(dev) <= 64, "conditional train/dev group ceiling")
     torch.cuda.reset_peak_memory_stats()
     before_dev = evaluate(torch, model, *zip(*dev), started)
     initial = trainable_snapshot(model)
@@ -552,16 +593,16 @@ def run(args):
     gc.collect()
     torch.cuda.empty_cache()
     _, tok, cold, _, _ = load_model(args.seed, paths)
-    reload_bundle(torch, cold, staging, output_root)
+    reload_bundle(torch, cold, staging, output_root, selected.PROFILE)
     cold.eval()
     with torch.no_grad():
-        cold_logits = utility_logits(torch, cold, encode_all(cold, tok, [dev[0][0]])[0], started).cpu()
+        cold_logits = utility_logits(torch, cold, encode_all(cold, tok, [dev[0][0]], selected.LIMITS)[0], started).cpu()
     require(torch.equal(reference, cold_logits), "same-runtime cold logits differ")
     save_file(staging / "cold-reload.json", {"status": "strict-tensor-and-logit-match",
               "examples": 1, "from_partition": "validation", "association": dev[0][0].association,
               "utility_logits": reference.tolist(), "test_evaluated": 0})
     # Cold evidence is also committed by a final completion manifest.
-    save_file(staging / "complete.json", {"format": BUNDLE_FORMAT, "bundle_sha256": sha_file(staging / "bundle.json"),
+    save_file(staging / "complete.json", {"format": bundle_format(selected.PROFILE), "bundle_sha256": sha_file(staging / "bundle.json"),
               "cold_reload_sha256": sha_file(staging / "cold-reload.json"), "optimizer_steps": steps})
     require(not output.exists(), "output appeared during run")
     clock_check(started)
@@ -580,16 +621,19 @@ def main():
     training.add_argument("--seed", type=int, default=20261009)
     verifying = sub.add_parser("verify-bundle", help="fresh-process strict reload; one existing development example only")
     for command in (preflight, training, verifying):
+        command.add_argument("--profile", choices=("initial-context", "rendered-closure"), default="initial-context",
+                             help="explicit feature/bundle contract; source/model lock stays unchanged")
         command.add_argument("--corpus", type=Path, required=True, help="absolute pinned public replay corpus directory")
         command.add_argument("--model-lock", type=Path, required=True, help="absolute operator model lock JSON")
         command.add_argument("--output-root", type=Path, required=True, help="existing absolute owned output directory")
     for command in (training, verifying):
         command.add_argument("--run-name", required=True, help="direct child name; train never overwrites")
     args = parser.parse_args()
+    selected = selected_profile(args)
     checked_root(args.output_root)
     if args.command == "preflight":
-        examples, intake = load_examples(args.corpus)
-        _, pin = provenance(args.model_lock)
+        examples, intake = selected.load_examples(args.corpus)
+        _, pin = provenance(args.model_lock, selected.PROFILE)
         print(json.dumps({"status": "preflight-no-model", "examples": len(examples),
                           "intake": intake, "source_revision": pin["source_revision"],
                           "model_profile_sha256": pin["model_profile_sha256"]}))
@@ -597,21 +641,21 @@ def main():
         run(args)
     else:
         path = run_path(args.output_root, args.run_name)
-        _, profile = inspect_bundle(path, args.output_root, completed=True)
-        paths, pin = provenance(args.model_lock)
+        _, profile = inspect_bundle(path, args.output_root, completed=True, profile_name=selected.PROFILE)
+        paths, pin = provenance(args.model_lock, selected.PROFILE)
         verify_recorded_pin(profile, pin)
-        examples, _ = load_examples(args.corpus, profile["seed"])
-        reference = cold_reference(path)
+        examples, _ = selected.load_examples(args.corpus, profile["seed"])
+        reference = cold_reference(path, selected.LIMITS)
         example = next((e for e in examples if e.association == reference["association"]
                         and e.partition == "validation"), None)
         require(example is not None and len(reference["utility_logits"]) == len(example.known),
                 "cold observation must name one existing development row with exact question count")
         started = time.monotonic()
         torch, tok, model, _, _ = load_model(profile["seed"], paths)
-        reload_bundle(torch, model, path, args.output_root)
+        reload_bundle(torch, model, path, args.output_root, selected.PROFILE)
         model.eval()
         with torch.no_grad():
-            actual = utility_logits(torch, model, encode_all(model, tok, [example])[0], started).cpu()
+            actual = utility_logits(torch, model, encode_all(model, tok, [example], selected.LIMITS)[0], started).cpu()
         expected = torch.tensor(reference["utility_logits"], dtype=actual.dtype)
         require(torch.equal(actual, expected), "fresh-process development logits differ")
         print(json.dumps({"status": "fresh-process-strict-bundle-and-logit-match", "development_examples": 1,

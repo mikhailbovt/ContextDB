@@ -286,7 +286,7 @@ fn verify_builtin(
     })
 }
 
-mod files;
+pub(super) mod files;
 mod records;
 use files::{read_bounded, regular, validate_root, write_new};
 use records::{build_artifacts, validate_builtin_profile};
