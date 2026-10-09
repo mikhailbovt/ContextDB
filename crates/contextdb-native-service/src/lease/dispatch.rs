@@ -42,7 +42,23 @@ impl NativeService {
             .pending_model
             .as_ref()
             .ok_or_else(|| invalid("run has no planned model attempt"))?;
+        let trace_matches = match &original.event.payload {
+            EventPayload::Assembly { manifest } => match (
+                &manifest.router_trace,
+                record.seal.trace_digest,
+                record.seal.origin_digest,
+            ) {
+                (None, None, None) => true,
+                (Some(trace), Some(digest), Some(origins)) => {
+                    trace.header.trace_digest == digest
+                        && trace.header.origin_closure_digest == origins
+                }
+                _ => false,
+            },
+            _ => false,
+        };
         if original.receipt != *request
+            || !trace_matches
             || original.event.kind != EventKind::ModelRequested
             || original.event.run_id != Some(state.identity.run_id)
             || pending.call_id != call
@@ -50,6 +66,7 @@ impl NativeService {
             || pending.wire_digest.is_some()
             || pending.interrupted_output.is_some()
             || original.event.producer_sequence != state.next_sequence
+            || original.event.producer_id != state.producer_id
             || !matches!(&original.event.payload, EventPayload::Assembly { manifest }
                 if manifest.model_call_id == call && manifest.wire_digest == record.seal.wire_digest
                     && manifest.byte_length == record.seal.wire_bytes)

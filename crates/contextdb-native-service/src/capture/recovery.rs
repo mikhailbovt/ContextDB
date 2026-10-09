@@ -63,10 +63,45 @@ pub(in super::super) struct CaptureRecovery {
     payload: PayloadMetadata,
     pub(in super::super) inputs: crate::custody::Inputs,
     pub(super) checkpoint: Option<crate::owned::CheckpointControl>,
+    /// Preserves trace presence and immutable commitments after body pruning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in super::super) router_trace: Option<contextdb_core::RouterTraceHeader>,
 }
 
 impl CaptureRecovery {
     pub(super) fn verify_features(&self, manifest: &Manifest) -> ServiceResult<()> {
+        if self.version != if self.router_trace.is_some() { 2 } else { 1 }
+            || self.router_trace.is_some() != self.inputs.trace_controls.is_some()
+            || (self.router_trace.is_some()
+                && !manifest
+                    .features
+                    .contains(crate::router_trace::TRACE_FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery router trace format is incomplete",
+            ));
+        }
+        if let Some(header) = &self.router_trace {
+            Validate::validate(header)
+                .map_err(|_| integrity("capture recovery router trace header is invalid"))?;
+            if self.payload.model_call != Some(header.model_call_id)
+                || self.payload.digest != Some(header.wire_digest)
+                || self.payload.bytes != Some(header.wire_byte_length)
+            {
+                return Err(integrity(
+                    "capture recovery router trace wire binding differs",
+                ));
+            }
+            let controls = self
+                .inputs
+                .trace_controls
+                .as_ref()
+                .ok_or_else(|| integrity("capture recovery router trace inputs are absent"))?;
+            controls.validate()?;
+            if digest(&encode(controls)?) != header.origin_closure_digest {
+                return Err(integrity("capture recovery router trace origins changed"));
+            }
+        }
         if (matches!(self.provenance, Some(EventProvenance::ModelOutput { .. }))
             && !manifest
                 .features
@@ -139,8 +174,15 @@ impl CaptureRecovery {
             ),
         };
         let checkpoint = crate::owned::CheckpointControl::from_event(event)?;
+        let router_trace = match &event.payload {
+            EventPayload::Assembly { manifest } => manifest
+                .router_trace
+                .as_ref()
+                .map(|trace| trace.header.clone()),
+            _ => None,
+        };
         let metadata = Self {
-            version: 1,
+            version: if router_trace.is_some() { 2 } else { 1 },
             scope_ids: event.scope_ids.clone(),
             producer_id: event.producer_id,
             kind: event.kind,
@@ -170,6 +212,7 @@ impl CaptureRecovery {
             },
             inputs: crate::custody::inputs(event)?,
             checkpoint,
+            router_trace,
         };
         if encode(&metadata)?.len() > MAX_RECOVERY_BYTES {
             return Err(exhausted("capture recovery metadata exceeds 1 MiB"));
@@ -196,6 +239,9 @@ impl NativeService {
         budget
             .charge(1, encode(&record)?.len() as u64)
             .map_err(crate::raw_index::budget_error)?;
+        if let Some(recovery) = &record.recovery {
+            self.verify_recovery_features(snapshot, recovery)?;
+        }
         if let Some(control_digest) = self.verify_pruned_source(snapshot, id, budget)? {
             return Ok(VerifiedCaptureControl {
                 receipt: record.receipt,
@@ -239,6 +285,9 @@ impl NativeService {
             .charge(1, bytes.len() as u64)
             .map_err(crate::raw_index::budget_error)?;
         let record: CaptureRecord = decode(&bytes, "retained capture control")?;
+        if let Some(recovery) = &record.recovery {
+            self.verify_recovery_features(snapshot, recovery)?;
+        }
         if record.receipt != source.receipt
             || control_digest(&bytes) != source.control_digest
             || record.work()?.recovery_digest != Some(source.recovery_digest)
@@ -377,6 +426,7 @@ impl NativeService {
         let activation: Option<u64> = read_optional(snapshot, self, ACTIVATED)?;
         match (&record.recovery, activation) {
             (Some(recovery), Some(first)) if first != 0 && global >= first => {
+                self.verify_recovery_features(snapshot, recovery)?;
                 if *recovery != CaptureRecovery::from_event(event)? {
                     return Err(integrity(
                         "capture recovery metadata differs from its original",
@@ -391,6 +441,21 @@ impl NativeService {
             }
         }
         Ok(())
+    }
+
+    fn verify_recovery_features<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        recovery: &CaptureRecovery,
+    ) -> ServiceResult<()> {
+        let manifest: Manifest = decode(
+            &snapshot
+                .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("capture recovery native manifest is absent"))?,
+            "capture recovery native manifest",
+        )?;
+        recovery.verify_features(&manifest)
     }
 
     pub(super) fn verify_capture_recovery_format<S: ReadSnapshot>(

@@ -23,6 +23,7 @@ use routing::{finish, make_request, score_record};
 struct RouterRecord {
     request: AuthorizedRouterRequest,
     scores: Vec<RouterScore>,
+    prepared_units: BTreeMap<BlockId, Unit>,
 }
 
 #[derive(Clone)]
@@ -187,7 +188,15 @@ impl ContextCompiler {
         result.manifest.compilation_work_units = work - budget.remaining_work();
         result.manifest.compilation_bytes_processed = bytes - budget.remaining_bytes();
         result.manifest.compilation_micros = elapsed_micros(started);
-        router::canonical_bytes(&(&result.request, &result.plan, &result.manifest), budget)?;
+        router::canonical_bytes(
+            &(
+                &result.request,
+                &result.plan,
+                &result.manifest,
+                &result.prepared_material,
+            ),
+            budget,
+        )?;
         require_router_deadline(started, budget)?;
         Ok(result)
     }
@@ -238,7 +247,15 @@ impl ContextCompiler {
         result.manifest.compilation_work_units = work - budget.remaining_work();
         result.manifest.compilation_bytes_processed = bytes - budget.remaining_bytes();
         result.manifest.compilation_micros = elapsed_micros(started);
-        router::canonical_bytes(&(&result.request, &result.plan, &result.manifest), budget)?;
+        router::canonical_bytes(
+            &(
+                &result.request,
+                &result.plan,
+                &result.manifest,
+                &result.prepared_material,
+            ),
+            budget,
+        )?;
         require_router_deadline(started, budget)?;
         Ok(result)
     }
@@ -302,7 +319,12 @@ impl ContextCompiler {
                 result.manifest.compilation_bytes_processed = bytes - budget.remaining_bytes();
                 result.manifest.compilation_micros = elapsed_micros(started);
                 router::canonical_bytes(
-                    &(&result.request, &result.plan, &result.manifest),
+                    &(
+                        &result.request,
+                        &result.plan,
+                        &result.manifest,
+                        &result.prepared_material,
+                    ),
                     budget,
                 )?;
                 require_router_deadline(started, budget)?;
@@ -591,6 +613,7 @@ impl ContextCompiler {
                     budget,
                 )?,
                 scores: Vec::new(),
+                prepared_units: BTreeMap::new(),
             })
         } else {
             None
@@ -907,6 +930,9 @@ impl ContextCompiler {
                 raw_recall_pressure
             },
         };
+        if let Some(record) = &mut router_record {
+            record.prepared_units = units;
+        }
         Ok((assembly, router_record))
     }
 }

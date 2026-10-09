@@ -79,6 +79,7 @@ impl ReferenceOutgoingEncoder<'_> {
             wire_digest: ContentDigest::from_bytes(*blake3::hash(&replay).as_bytes()),
             byte_length: replay.len() as u64,
             parts,
+            router_trace: None,
         })
     }
 }

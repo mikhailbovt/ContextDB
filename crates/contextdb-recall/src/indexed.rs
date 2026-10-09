@@ -81,6 +81,21 @@ impl QueryBudget {
     pub fn remaining_bytes(&self) -> u64 {
         self.remaining_bytes
     }
+
+    /// Remaining cooperative timeout for a nested operation, without resetting
+    /// the enclosing deadline or cancellation state.
+    pub fn remaining_timeout_micros(&self) -> Result<u64, QueryLimit> {
+        self.check()?;
+        let remaining = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .ok_or(QueryLimit::Deadline)?;
+        let micros = u64::try_from(remaining.as_micros()).unwrap_or(u64::MAX);
+        if micros == 0 {
+            return Err(QueryLimit::Deadline);
+        }
+        Ok(micros)
+    }
 }
 
 /// Retrieval intent distinguishes an exhaustive cursor from a ranked candidate set.

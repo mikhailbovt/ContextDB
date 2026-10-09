@@ -317,6 +317,7 @@ impl ReaderAdapter for LocalReader {
             wire_digest: ContentDigest::from_bytes(*blake3::hash(&expected).as_bytes()),
             byte_length: expected.len() as u64,
             parts,
+            router_trace: None,
         })
     }
     fn complete(

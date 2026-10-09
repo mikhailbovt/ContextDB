@@ -49,6 +49,8 @@ struct CustodyState {
 pub(super) struct Inputs {
     pub(super) sources: BTreeSet<ObservationId>,
     pub(super) payloads: Vec<OriginalPayloadRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) trace_controls: Option<crate::router_trace::controls::RouterTraceControls>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -62,6 +64,9 @@ struct CustodyRecord {
     inputs: Inputs,
     /// Canonical-digest order, unique by complete policy, never an ACL union.
     policies: Vec<AccessPolicy>,
+    /// Current generic/state permissions remain independent from copied labels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trace_controls: Option<crate::router_trace::controls::RouterTraceControls>,
 }
 
 /// Bounded administrative migration/revocation progress, not physical deletion.
@@ -215,6 +220,9 @@ impl NativeService {
         {
             return Err(permission_denied());
         }
+        if let Some(controls) = &record.trace_controls {
+            self.authorize_router_trace_controls(tx, context, controls, &mut trace_budget())?;
+        }
         self.enable_capture_extension(tx, CUSTODY_FEATURE)?;
         self.put_custody_record(tx, &record)?;
         if !state.pending {
@@ -299,6 +307,9 @@ impl NativeService {
         {
             return Err(permission_denied());
         }
+        if let Some(controls) = &record.trace_controls {
+            self.authorize_router_trace_controls(snapshot, context, controls, &mut trace_budget())?;
+        }
         Ok(())
     }
 
@@ -310,6 +321,14 @@ impl NativeService {
         id: ObservationId,
     ) -> ServiceResult<Vec<AccessPolicy>> {
         Ok(self.custody_record(snapshot, id)?.policies)
+    }
+
+    pub(crate) fn stored_router_trace_controls<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+    ) -> ServiceResult<Option<crate::router_trace::controls::RouterTraceControls>> {
+        Ok(self.custody_record(snapshot, id)?.trace_controls)
     }
 
     fn build_custody_record<S: ReadSnapshot>(
@@ -330,6 +349,7 @@ impl NativeService {
                 event_digest: super::capture::content_digest_of(event)?,
                 inputs: inputs(event)?,
                 policies: Vec::new(),
+                trace_controls: None,
             },
             overlay,
             budget,
@@ -354,6 +374,7 @@ impl NativeService {
                 event_digest: receipt.event_digest,
                 inputs,
                 policies: Vec::new(),
+                trace_controls: None,
             },
             overlay,
             budget,
@@ -379,6 +400,15 @@ impl NativeService {
         )?;
         let workspace = &record.workspace;
         let inputs = &record.inputs;
+        let mut trace_controls = inputs.trace_controls.clone();
+        if let Some(controls) = &trace_controls {
+            controls.validate()?;
+            if !controls.originals.is_subset(&inputs.sources) {
+                return Err(integrity(
+                    "router trace originals are absent from custody inputs",
+                ));
+            }
+        }
         let mut labels = BTreeMap::new();
         charge(&mut budget, 1, encode(&policy)?.len() as u64)?;
         insert_label(&mut labels, policy.access, workspace)?;
@@ -395,6 +425,13 @@ impl NativeService {
                     "custody dependency crosses workspace or capture order",
                 ));
             }
+            if let Some(controls) = &parent.trace_controls {
+                if let Some(union) = &mut trace_controls {
+                    union.union_checked(controls)?;
+                } else {
+                    trace_controls = Some(controls.clone());
+                }
+            }
             for policy in parent.policies {
                 charge(&mut budget, 1, 0)?;
                 insert_label(&mut labels, policy, workspace)?;
@@ -406,6 +443,23 @@ impl NativeService {
             charge(&mut budget, 0, encode(&policy)?.len() as u64)?;
             insert_label(&mut labels, policy, workspace)?;
         }
+        if let Some(controls) = &trace_controls {
+            let policies = if let Some(shared) = budget.as_deref_mut() {
+                self.router_trace_historical_policies(snapshot, controls, shared)?
+            } else {
+                self.router_trace_historical_policies(snapshot, controls, &mut trace_budget())?
+            };
+            for policy in policies {
+                charge(&mut budget, 1, 0)?;
+                insert_label(&mut labels, policy, workspace)?;
+            }
+        }
+        record.version = if trace_controls.is_some() {
+            2
+        } else {
+            CUSTODY_VERSION
+        };
+        record.trace_controls = trace_controls;
         record.policies = labels.into_values().collect();
         if encode(&record)?.len() > MAX_RECORD_BYTES {
             return Err(exhausted("capture custody metadata exceeds 1 MiB"));
@@ -440,7 +494,12 @@ impl NativeService {
             .raw_value(snapshot, &record_key(id))?
             .ok_or_else(pending)?;
         let receipt = self.captured_receipt_metadata(snapshot, id)?;
-        if record.version != CUSTODY_VERSION
+        if record.version
+            != if record.trace_controls.is_some() {
+                2
+            } else {
+                CUSTODY_VERSION
+            }
             || record.event_id != id
             || record.commit == 0
             || record.commit != receipt.workspace_commit
@@ -452,6 +511,27 @@ impl NativeService {
             || record.inputs.payloads.len() > super::CAPTURE_MAX_REQUEST_PARTS
         {
             return Err(integrity("custody record binding or bounds invalid"));
+        }
+        if let Some(controls) = &record.trace_controls {
+            controls.validate()?;
+            let manifest: super::Manifest = decode(
+                &snapshot
+                    .get(&self.keyspaces.meta, super::META_MANIFEST_KEY)
+                    .map_err(storage_error)?
+                    .ok_or_else(|| integrity("router custody native manifest is absent"))?,
+                "router custody native manifest",
+            )?;
+            if !manifest
+                .features
+                .contains(crate::router_trace::TRACE_FEATURE)
+            {
+                return Err(integrity("router custody format feature is absent"));
+            }
+        }
+        if record.inputs.trace_controls.is_some() && record.trace_controls.is_none() {
+            return Err(integrity(
+                "router trace custody lost its transitive controls",
+            ));
         }
         let mut labels = BTreeMap::new();
         for policy in &record.policies {
@@ -518,6 +598,13 @@ pub(super) fn inputs(event: &EventEnvelope) -> ServiceResult<Inputs> {
                     RequestPart::Novel { .. } => (),
                 }
             }
+            if manifest.router_trace.is_some() {
+                let controls = crate::router_trace::trace_controls(event)?
+                    .ok_or_else(|| integrity("router trace input controls are absent"))?;
+                controls.validate()?;
+                inputs.sources.extend(&controls.originals);
+                inputs.trace_controls = Some(controls);
+            }
         }
         _ => (),
     }
@@ -560,6 +647,17 @@ pub(super) fn inputs(event: &EventEnvelope) -> ServiceResult<Inputs> {
         return Err(invalid("capture custody cannot depend on itself"));
     }
     Ok(inputs)
+}
+
+// Public original reads have no caller QueryBudget. Their extra typed control
+// work is still bounded; prepare/admission use the caller's shared allowance.
+fn trace_budget() -> QueryBudget {
+    QueryBudget::new(
+        2_000_000,
+        16 * 1024 * 1024,
+        std::time::Duration::from_secs(30),
+        Default::default(),
+    )
 }
 
 fn insert_label(

@@ -16,8 +16,8 @@ use contextdb_core::{
     RequestPart,
 };
 use contextdb_service::{
-    CaptureAcceptance, CaptureRequest, ErrorCode, PayloadPort, ServiceError, ServiceResult,
-    StagePayloadRequest,
+    CaptureAcceptance, CaptureReceipt, CaptureRequest, ErrorCode, PayloadPort, PrepareContextPort,
+    PreparedContext, ServiceError, ServiceResult, StagePayloadRequest,
 };
 
 /// Native inline profile shared by the host adapters.
@@ -79,8 +79,22 @@ impl<S: PayloadPort + ?Sized> CaptureHost<S> {
     /// Record exact ordered model input without indexing retrieved echoes as new roots.
     pub fn capture_model_request(
         &self,
+        request: CaptureRequest,
+        manifest: ModelRequestManifest,
+    ) -> ServiceResult<CaptureAcceptance> {
+        if manifest.router_trace.is_some() {
+            return Err(invalid("router trace requires prepared owner capture"));
+        }
+        self.stage_model_request(request, manifest, |request| {
+            self.owner.append_event_with_status(request)
+        })
+    }
+
+    fn stage_model_request(
+        &self,
         mut request: CaptureRequest,
         mut manifest: ModelRequestManifest,
+        publish: impl FnOnce(CaptureRequest) -> ServiceResult<CaptureAcceptance>,
     ) -> ServiceResult<CaptureAcceptance> {
         request.context.validate_authentication()?;
         let novel_bytes = manifest
@@ -119,7 +133,94 @@ impl<S: PayloadPort + ?Sized> CaptureHost<S> {
             model_call_id: manifest.model_call_id,
         });
         request.event.payload = EventPayload::Assembly { manifest };
-        self.owner.append_event_with_status(request)
+        publish(request)
+    }
+}
+
+impl<S: PayloadPort + PrepareContextPort + ?Sized> CaptureHost<S> {
+    /// Capture an owner-prepared protected trace outside the reader's wire.
+    pub fn capture_prepared_model_request(
+        &self,
+        mut request: CaptureRequest,
+        manifest: ModelRequestManifest,
+        prepared: &PreparedContext,
+        current_checkpoint: Option<&CaptureReceipt>,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<CaptureAcceptance> {
+        request.context.validate_authentication()?;
+        if manifest
+            .parts
+            .iter()
+            .try_fold(0_usize, |total, part| {
+                total.checked_add(match part {
+                    RequestPart::Novel { bytes } => bytes.len(),
+                    _ => 0,
+                })
+            })
+            .is_none_or(|total| total > INLINE_BYTES)
+            || manifest
+                .parts
+                .iter()
+                .any(|part| matches!(part, RequestPart::StoredNovel { .. }))
+        {
+            return Err(ServiceError::new(
+                ErrorCode::ResourceExhausted,
+                "protected requests require bounded inline novel material",
+                false,
+            ));
+        }
+        let trace = prepared
+            .router_trace
+            .as_ref()
+            .ok_or_else(|| invalid("protected request has no prepared trace"))?;
+        let expected = trace.attach(manifest.model_call_id, budget)?;
+        if manifest.router_trace.as_deref() != Some(&expected)
+            || manifest.wire_digest != prepared.assembly.wire_digest
+            || manifest.byte_length != prepared.outgoing.wire.len() as u64
+        {
+            return Err(invalid("protected request differs from prepared trace"));
+        }
+        // Consume the final event without cloning a caller's discarded payload.
+        // This profile has already excluded staging and StoredNovel.
+        request.event.kind = EventKind::ModelRequested;
+        request.event.role = EventRole::Host;
+        request.event.provenance = Some(contextdb_core::EventProvenance::ModelRequest {
+            model_call_id: manifest.model_call_id,
+        });
+        request.event.payload = EventPayload::Assembly { manifest };
+        let mut encoded = EventSize(0);
+        serde_json::to_writer(&mut encoded, &request.event).map_err(|_| {
+            ServiceError::new(
+                ErrorCode::ResourceExhausted,
+                "protected request exceeds the native event profile",
+                false,
+            )
+        })?;
+        budget.charge(1, encoded.0 as u64).map_err(|_| {
+            ServiceError::new(
+                ErrorCode::ResourceExhausted,
+                "protected request exhausted the shared allowance",
+                false,
+            )
+        })?;
+        self.owner
+            .capture_prepared_model_request(request, prepared, current_checkpoint, budget)
+    }
+}
+
+struct EventSize(usize);
+impl std::io::Write for EventSize {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self.0.saturating_add(bytes.len());
+        if self.0 > 8 * 1024 * 1024 {
+            return Err(std::io::Error::other(
+                "protected event exceeds byte ceiling",
+            ));
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 

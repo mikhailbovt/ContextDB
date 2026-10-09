@@ -43,6 +43,8 @@ fn request(input: &CaptureRequest) -> PrepareContextRequest {
         Capability::ReadConflict,
     ]);
     PrepareContextRequest {
+        router_trace_profile: contextdb_service::RouterTraceProfile::Off,
+        memory_query: None,
         context,
         pack_id: ContextPackId::new(),
         purpose: PackPurpose::Conversation,

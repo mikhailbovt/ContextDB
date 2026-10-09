@@ -128,6 +128,7 @@ fn encrypted_chunk_pruning_restarts_and_restores_while_preserving_independent_sh
     .concat();
     call.event.payload = EventPayload::Assembly {
         manifest: ModelRequestManifest {
+            router_trace: None,
             model_call_id: call_id,
             renderer: "payload-cleanup/v1".into(),
             byte_length: wire.len() as u64,

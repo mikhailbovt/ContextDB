@@ -8,7 +8,8 @@ are observations and proposals; a digest or deserialized request grants no acces
 ## Compiler entry points
 
 - `compile_assembly_with_router` runs the existing assembly pipeline and records
-  actual scorer calls. It returns the assembly, request, plan and manifest.
+  actual scorer calls. It returns the assembly, request, plan, manifest and actual
+  prepared candidate/evidence material, including unselected alternatives.
 - `compile_router_plan` rebuilds the current authorized inventory and validates a
   proposed score/selection path through the same closure, support selection,
   complete protocol encoding and publication-owner read-set check. It does not
@@ -52,7 +53,7 @@ support are accounted for by the existing union renderer; actual complete
 protocol encoding determines token/byte fit.
 
 The router profile allows at most 512 units, 4096 evaluations, 32 scopes and a
-2 MiB combined request/plan/manifest envelope. Identity lists are ordered and
+2 MiB combined request/plan/manifest/material envelope. Identity lists are ordered and
 unique, support choices are explicit, and hard dependency cycles or unavailable
 members are rejected. This stricter opt-in graph validation can reject malformed
 optional graphs that the legacy entry point leaves unselected.
@@ -77,12 +78,22 @@ Nullable training/model fields remain empty in this profile.
 
 ## Current boundary
 
-The records live in memory and use versioned canonical JSON commitments. Their
+The compiler records use versioned canonical JSON commitments. Their
 `from_json` methods bound and charge input bytes before strict deserialization and
 structural validation. A host must invoke compiler validation before use.
 Structural validation alone is not authorization or a durable custody receipt.
 
-Protected native trace persistence, operator inspection, historical corpus
-construction, permission-aware export/deletion lineage and learned backends are
-separate integration work. This API does not enable training, change the native
-storage format, or publish a quality or cost improvement.
+The [owned host](../../tools/owned-conversation/README.md) can require protected
+native traces. Canonical pages live inside the encrypted model-request occurrence,
+outside the reader wire. Native seals, the pending owned call and atomic capture
+bind them; current source, generic-record and state controls restrict both the
+trace and its outputs/checkpoints. Recovery retains headers and controls after
+authorized body pruning. Legacy omitted traces remain unavailable.
+
+The service's optional generic query uses the existing resolver and recall engine.
+Its initial complete inspection profile permits at most 100 authorized records;
+larger frontiers refuse before the next candidate record body is read. Inherited
+source controls can require earlier authorized reads. This is a bounded native
+integration, not a scalable indexed route or automatic generic cue in the host.
+Scoring remains R0. Operator inspection, historical corpus/export/training lineage
+and Kev inference remain separate work; no training or quality/cost gain is claimed.

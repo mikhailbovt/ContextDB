@@ -75,7 +75,20 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     .receipt
             }
             EventPayload::Assembly { manifest } => {
-                host.capture_model_request(request, manifest)?.receipt
+                if let PendingCapture::ModelRequest { prepared, .. } = &pending
+                    && prepared.router_trace.is_some()
+                {
+                    host.capture_prepared_model_request(
+                        request,
+                        manifest,
+                        prepared,
+                        Some(&self.checkpoint_receipt),
+                        budget,
+                    )?
+                    .receipt
+                } else {
+                    host.capture_model_request(request, manifest)?.receipt
+                }
             }
             EventPayload::InlineBytes {
                 bytes, media_type, ..
@@ -147,6 +160,8 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 };
                 if event.event_id != pending.request_event
                     || manifest.model_call_id != pending.call_id
+                    || manifest.router_trace.is_some()
+                        != (self.settings.router_trace_profile == RouterTraceProfile::Required)
                 {
                     return Err(invalid("captured request differs from model intent"));
                 }

@@ -4600,6 +4600,7 @@
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
         "pkg:cargo/contextdb-core@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
         "pkg:cargo/contextdb-service@0.2.0-alpha.3",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
@@ -4663,6 +4664,7 @@
     },
     {
       "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20",
@@ -5483,7 +5485,7 @@
         },
         {
           "name": "contextdb:dependency-graph-sha256",
-          "value": "2bd05c2eb222cfae3b3fb50dbc3a195ea64cf8feda58a884e20113ceecce1f71"
+          "value": "91f01488592f63582454a0022bf984ec5238ee6afb01d485d164888d6c35bfc6"
         }
       ],
       "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.3",

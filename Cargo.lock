@@ -473,6 +473,7 @@ version = "0.2.0-alpha.3"
 dependencies = [
  "blake3",
  "contextdb-core",
+ "contextdb-recall",
  "contextdb-service",
  "serde",
  "serde_json",
@@ -606,6 +607,7 @@ dependencies = [
 name = "contextdb-core"
 version = "0.2.0-alpha.3"
 dependencies = [
+ "blake3",
  "proptest",
  "serde",
  "serde_json",

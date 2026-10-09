@@ -64,6 +64,7 @@ fn model_pair(
     let call = ModelCallId::new();
     request.event.payload = EventPayload::Assembly {
         manifest: ModelRequestManifest {
+            router_trace: None,
             model_call_id: call,
             renderer: "custody-test/v1".into(),
             wire_digest: source.span_digest,

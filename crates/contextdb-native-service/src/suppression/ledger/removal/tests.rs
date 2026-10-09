@@ -64,6 +64,7 @@ fn payload_membership_pages_reject_shared_blocks_redirects_corruption_and_family
     call.event.provenance = Some(EventProvenance::ModelRequest { model_call_id });
     call.event.payload = EventPayload::Assembly {
         manifest: ModelRequestManifest {
+            router_trace: None,
             model_call_id,
             renderer: "payload-pages/v1".into(),
             byte_length: wire.len() as u64,

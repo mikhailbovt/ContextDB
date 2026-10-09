@@ -6,19 +6,58 @@ use contextdb_core::{CommitRange, CommitSeq, PolicyDecision, TimeRange, Timestam
 use contextdb_recall::{
     AccessConsent, AccessRule, AuthorizedCorpus, DocumentId, DocumentPerspective,
     DocumentTemporalState, DocumentUseProfile, ProviderDocument, ProviderEvidence,
-    ProviderRelation, ProviderRequest, ProviderSnapshot, RecallConflictState, RecallDocument,
-    RecallDocumentKind, RecallError, RecallEvidence, RecallProvider, RecallRelation,
-    RecallRelationKind, RecallSensitivity, RecallWatermarks, Result, SuppliedVector,
+    ProviderRelation, ProviderRequest, ProviderSnapshot, QueryBudget, RecallConflictState,
+    RecallDocument, RecallDocumentKind, RecallError, RecallEvidence, RecallProvider,
+    RecallRelation, RecallRelationKind, RecallSensitivity, RecallWatermarks, Result,
+    SuppliedVector,
 };
-use contextdb_service::{AccessPolicy, Consent, MemoryRecord, MemoryRecordKind, Sensitivity};
+use contextdb_service::{
+    AccessPolicy, AuthenticatedRequestContext, Consent, ErrorCode, MemoryLifecycle, MemoryRecord,
+    MemoryRecordKind, Sensitivity, ServiceError, ServiceResult,
+};
 use contextdb_storage::{ReadSnapshot, ScanPageRequest, SnapshotSelector, StorageEngine};
 use serde_json::Value;
 
+use super::router_trace::controls::TraceRecordControl;
 use super::{
     MAX_AUTHORIZED_CANDIDATES, NativeService, SCAN_PAGE_BYTES, SCAN_PAGE_ENTRIES, SCHEMA_VERSION,
     StoredEvent, StoredPolicy, WorkspaceState, decode, event_digest, policy_route_key,
     policy_route_prefix, validate_stored_policy, visible_at,
 };
+
+/// The complete bounded corpus inspected by generic routing, with exact native
+/// record origins. This is private preparation material, not a disclosure grant.
+pub(crate) struct NativeRecallFrontier {
+    pub(crate) corpus: AuthorizedCorpus,
+    pub(crate) records: BTreeMap<DocumentId, NativeRecallRecord>,
+}
+
+pub(crate) struct NativeRecallRecord {
+    pub(crate) policy: StoredPolicy,
+    pub(crate) record: MemoryRecord,
+    pub(crate) origin: TraceRecordControl,
+}
+
+// This complete-inspection cap is separate from the number of ranked hits.
+// Refusal does not truncate an archive or claim exhaustive top-k coverage.
+const MAX_TRACED_CORPUS: usize = 100;
+
+enum FrontierError {
+    Recall(RecallError),
+    Service(ServiceError),
+}
+
+impl From<RecallError> for FrontierError {
+    fn from(error: RecallError) -> Self {
+        Self::Recall(error)
+    }
+}
+impl From<ServiceError> for FrontierError {
+    fn from(error: ServiceError) -> Self {
+        Self::Service(error)
+    }
+}
+type FrontierResult<T> = std::result::Result<T, FrontierError>;
 
 /// Exact-scan provider used by the canonical RecallEngine to ContextPack path.
 ///
@@ -40,7 +79,7 @@ impl<'a> NativeRecallProvider<'a> {
         }
     }
 
-    fn provider_snapshot(state: &WorkspaceState, database_id: &str) -> ProviderSnapshot {
+    pub(crate) fn provider_snapshot(state: &WorkspaceState, database_id: &str) -> ProviderSnapshot {
         let commit = state.watermarks.journal;
         ProviderSnapshot {
             database_id: database_id.to_owned(),
@@ -61,11 +100,15 @@ impl<'a> NativeRecallProvider<'a> {
         snapshot: &S,
         workspace_digest: &str,
         global_commit: u64,
-    ) -> Result<u64> {
-        let bytes = snapshot
-            .get(&self.service.keyspaces.events, &global_commit.to_be_bytes())
-            .map_err(provider_storage)?
-            .ok_or_else(|| provider_failure("transaction event is absent"))?;
+        budget: &mut Option<&mut QueryBudget>,
+    ) -> FrontierResult<u64> {
+        let bytes = frontier_bytes(
+            snapshot,
+            &self.service.keyspaces.events,
+            &global_commit.to_be_bytes(),
+            budget,
+        )?
+        .ok_or_else(|| provider_failure("transaction event is absent"))?;
         let event: StoredEvent =
             decode(&bytes, "native provider event").map_err(provider_service)?;
         let expected_digest = event_digest(&event).map_err(provider_service)?;
@@ -75,7 +118,7 @@ impl<'a> NativeRecallProvider<'a> {
             || event.workspace_commit == 0
             || event.event_digest != expected_digest
         {
-            return Err(provider_failure("transaction event binding is invalid"));
+            return Err(provider_failure("transaction event binding is invalid").into());
         }
         Ok(event.workspace_commit)
     }
@@ -85,15 +128,22 @@ impl<'a> NativeRecallProvider<'a> {
         snapshot: &S,
         workspace_digest: &str,
         policy: &StoredPolicy,
-    ) -> Result<CommitRange> {
-        let start =
-            self.workspace_commit_for_global(snapshot, workspace_digest, policy.transaction_from)?;
+        budget: &mut Option<&mut QueryBudget>,
+    ) -> FrontierResult<CommitRange> {
+        let start = self.workspace_commit_for_global(
+            snapshot,
+            workspace_digest,
+            policy.transaction_from,
+            budget,
+        )?;
         let end = policy
             .transaction_to
-            .map(|commit| self.workspace_commit_for_global(snapshot, workspace_digest, commit))
+            .map(|commit| {
+                self.workspace_commit_for_global(snapshot, workspace_digest, commit, budget)
+            })
             .transpose()?;
         CommitRange::new(CommitSeq::new(start), end.map(CommitSeq::new))
-            .map_err(|_| provider_failure("transaction-time range is invalid"))
+            .map_err(|_| provider_failure("transaction-time range is invalid").into())
     }
 
     fn provider_document<S: ReadSnapshot>(
@@ -102,16 +152,15 @@ impl<'a> NativeRecallProvider<'a> {
         workspace_digest: &str,
         policy: &StoredPolicy,
         access: AccessRule,
-    ) -> Result<(ProviderDocument, Option<ProviderRelation>)> {
-        let record = self
-            .service
-            .load_content(snapshot, policy)
-            .map_err(provider_service)?;
+        record: &MemoryRecord,
+        budget: &mut Option<&mut QueryBudget>,
+    ) -> FrontierResult<(ProviderDocument, Option<ProviderRelation>)> {
         let valid_time = bounded_time(
             record.document.valid_time.from,
             record.document.valid_time.to,
         )?;
-        let transaction_time = self.transaction_range(snapshot, workspace_digest, policy)?;
+        let transaction_time =
+            self.transaction_range(snapshot, workspace_digest, policy, budget)?;
         let text = record
             .document
             .search_text
@@ -194,7 +243,7 @@ impl<'a> NativeRecallProvider<'a> {
                 style_only: false,
             },
         };
-        let relation = relation(&record, &access, valid_time)?;
+        let relation = relation(record, &access, valid_time)?;
         Ok((
             ProviderDocument {
                 access,
@@ -203,6 +252,275 @@ impl<'a> NativeRecallProvider<'a> {
             },
             relation,
         ))
+    }
+}
+
+impl NativeRecallProvider<'_> {
+    /// Complete exact native materialization for the opt-in trace profile. The
+    /// same authorization loop serves legacy recall; this entry additionally
+    /// requires current retained provenance and charges the enclosing budget.
+    pub(crate) fn authorized_frontier<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        request: &ProviderRequest,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<NativeRecallFrontier> {
+        self.authorized_inner(snapshot, Some(context), request, &mut Some(budget))
+            .map_err(frontier_service)
+    }
+
+    fn authorized_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: Option<&AuthenticatedRequestContext>,
+        request: &ProviderRequest,
+        budget: &mut Option<&mut QueryBudget>,
+    ) -> FrontierResult<NativeRecallFrontier> {
+        frontier_charge(budget, 1, 0)?;
+        if request.snapshot.database_id != self.service.database_id
+            || request.principal.workspace != self.workspace_id
+        {
+            return Err(provider_failure("snapshot or workspace binding differs").into());
+        }
+        self.service.require_suppression_current(
+            snapshot,
+            &super::digest_bytes(self.workspace_id.as_bytes()),
+        )?;
+        let (global_commit, state) = self.service.select_snapshot(
+            snapshot,
+            self.workspace_id,
+            Some(request.snapshot.commit_seq),
+        )?;
+        let expected = Self::provider_snapshot(&state, &self.service.database_id);
+        if expected != request.snapshot {
+            return Err(provider_failure("provider snapshot binding differs").into());
+        }
+        let complete = budget.is_some();
+        if complete && context.is_none() {
+            return Err(provider_failure("complete frontier context is absent").into());
+        }
+        let route_prefix = policy_route_prefix(self.workspace_id);
+        let mut continuation: Option<Vec<u8>> = None;
+        let mut scanned = 0_usize;
+        let mut selected = BTreeMap::<String, (StoredPolicy, AccessRule)>::new();
+        loop {
+            frontier_charge(budget, 1, 0)?;
+            let page = snapshot
+                .scan_prefix_page(
+                    &self.service.keyspaces.policy_route,
+                    ScanPageRequest {
+                        prefix: &route_prefix,
+                        start_after: continuation.as_deref(),
+                        max_entries: SCAN_PAGE_ENTRIES,
+                        max_bytes: SCAN_PAGE_BYTES,
+                    },
+                )
+                .map_err(provider_storage)?;
+            scanned = scanned
+                .checked_add(page.entries.len())
+                .ok_or_else(|| provider_failure("policy scan counter is exhausted"))?;
+            if scanned > 1_000_000 {
+                return Err(provider_failure("policy scan exceeds the bounded profile").into());
+            }
+            for entry in page.entries {
+                frontier_charge(budget, 1, (entry.key.len() + entry.value.len()) as u64)?;
+                let policy: StoredPolicy =
+                    decode(&entry.value, "native provider policy").map_err(provider_service)?;
+                validate_stored_policy(&policy).map_err(provider_service)?;
+                if entry.key
+                    != policy_route_key(
+                        &policy.access.workspace_id,
+                        &policy.record_digest,
+                        policy.revision,
+                    )
+                {
+                    return Err(provider_failure("policy route binding is invalid").into());
+                }
+                // Quarantined proposals never reach content or routing.
+                if policy.kind == MemoryRecordKind::Candidate
+                    || !visible_at(&policy, global_commit)
+                    || policy.lifecycle != MemoryLifecycle::Active
+                {
+                    continue;
+                }
+                let access = access_rule(&policy.access);
+                if !request.principal.allows(&access) {
+                    continue;
+                }
+                access.validate()?;
+                if complete {
+                    // Historical labels cannot restore a current permission.
+                    // Inspect the current head label before historical content.
+                    let bytes = frontier_bytes(
+                        snapshot,
+                        &self.service.keyspaces.policy_head,
+                        policy.record_digest.as_bytes(),
+                        budget,
+                    )?
+                    .ok_or_else(|| provider_failure("current record policy is absent"))?;
+                    let current: StoredPolicy = decode(&bytes, "current native provider policy")
+                        .map_err(provider_service)?;
+                    validate_stored_policy(&current).map_err(provider_service)?;
+                    if current.record_digest != policy.record_digest
+                        || current.access.workspace_id != self.workspace_id
+                        || current.kind != policy.kind
+                    {
+                        return Err(
+                            provider_failure("current record policy binding differs").into()
+                        );
+                    }
+                    if current.lifecycle != MemoryLifecycle::Active
+                        || !request.principal.allows(&access_rule(&current.access))
+                    {
+                        continue;
+                    }
+                    let shared = budget
+                        .as_deref_mut()
+                        .ok_or_else(|| provider_failure("complete frontier budget is absent"))?;
+                    let policies = match self.service.router_record_policies(
+                        snapshot,
+                        context.ok_or_else(|| {
+                            provider_failure("complete frontier context is absent")
+                        })?,
+                        &current,
+                        shared,
+                    ) {
+                        Ok(policies) => policies,
+                        Err(error) if source_denied(&error) => continue,
+                        Err(error) => return Err(error.into()),
+                    };
+                    if policies
+                        .iter()
+                        .any(|policy| !request.principal.allows(&access_rule(policy)))
+                    {
+                        continue;
+                    }
+                }
+                let policies = if let Some(shared) = budget.as_deref_mut() {
+                    self.service.router_record_policies(
+                        snapshot,
+                        context.ok_or_else(|| {
+                            provider_failure("complete frontier context is absent")
+                        })?,
+                        &policy,
+                        shared,
+                    )
+                } else {
+                    self.service.record_source_policies(snapshot, &policy)
+                };
+                let policies = match policies {
+                    Ok(policies) => policies,
+                    Err(error) if source_denied(&error) => continue,
+                    Err(error) => return Err(error.into()),
+                };
+                if policies
+                    .iter()
+                    .any(|policy| !request.principal.allows(&access_rule(policy)))
+                {
+                    continue;
+                }
+                if selected
+                    .insert(policy.record_digest.clone(), (policy, access))
+                    .is_some()
+                {
+                    return Err(provider_failure("visible policy revisions overlap").into());
+                }
+                let ceiling = if complete {
+                    MAX_TRACED_CORPUS
+                } else {
+                    MAX_AUTHORIZED_CANDIDATES
+                };
+                if selected.len() > ceiling {
+                    if complete {
+                        return Err(ServiceError::new(
+                            ErrorCode::BudgetExhausted,
+                            "complete generic inspection frontier exceeds 100 records",
+                            false,
+                        )
+                        .into());
+                    }
+                    return Err(
+                        provider_failure("authorized corpus exceeds the bounded profile").into(),
+                    );
+                }
+            }
+            let Some(next) = page.continuation else {
+                break;
+            };
+            if continuation
+                .as_ref()
+                .is_some_and(|previous| &next <= previous)
+            {
+                return Err(provider_failure("policy scan cursor did not advance").into());
+            }
+            continuation = Some(next);
+        }
+        let mut documents = Vec::with_capacity(selected.len());
+        let mut relations = Vec::new();
+        let mut records = BTreeMap::new();
+        for (_, (policy, access)) in selected {
+            frontier_charge(budget, 1, 0)?;
+            let origin = if let Some(shared) = budget.as_deref_mut() {
+                Some(
+                    self.service
+                        .router_record_control(snapshot, &policy, shared)?,
+                )
+            } else {
+                None
+            };
+            let record = if complete {
+                let bytes = frontier_bytes(
+                    snapshot,
+                    &self.service.keyspaces.content_history,
+                    &super::history_key(&policy.record_digest, policy.revision),
+                    budget,
+                )?
+                .ok_or_else(|| provider_failure("authorized record content is absent"))?;
+                self.service.decode_content(&bytes, &policy)?
+            } else {
+                self.service.load_content(snapshot, &policy)?
+            };
+            if super::digest_bytes(record.document.id.as_bytes()) != policy.record_digest {
+                return Err(provider_failure("authorized record identity binding differs").into());
+            }
+            let (document, relation) = self.provider_document(
+                snapshot,
+                &state.workspace_digest,
+                &policy,
+                access,
+                &record,
+                budget,
+            )?;
+            if let Some(origin) = origin {
+                if origin.kind != policy.kind
+                    || origin.control.record_digest != policy.record_digest
+                {
+                    return Err(provider_failure("record origin kind or identity differs").into());
+                }
+                if records
+                    .insert(
+                        document.document.id.clone(),
+                        NativeRecallRecord {
+                            policy,
+                            record,
+                            origin,
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(provider_failure("duplicate native record identity").into());
+                }
+            }
+            documents.push(document);
+            relations.extend(relation);
+        }
+        frontier_charge(budget, documents.len() as u64 + relations.len() as u64, 0)?;
+        let corpus = AuthorizedCorpus::authorize(request, documents, relations)?;
+        if complete && corpus.documents().len() != records.len() {
+            return Err(provider_failure("complete corpus origin inventory differs").into());
+        }
+        Ok(NativeRecallFrontier { corpus, records })
     }
 }
 
@@ -223,127 +541,14 @@ impl RecallProvider for NativeRecallProvider<'_> {
     }
 
     fn authorized_corpus(&self, request: &ProviderRequest) -> Result<AuthorizedCorpus> {
-        if request.snapshot.database_id != self.service.database_id
-            || request.principal.workspace != self.workspace_id
-        {
-            return Err(provider_failure("snapshot or workspace binding differs"));
-        }
         let snapshot = self
             .service
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(provider_storage)?;
-        self.service
-            .require_suppression_current(
-                &snapshot,
-                &super::digest_bytes(self.workspace_id.as_bytes()),
-            )
-            .map_err(provider_service)?;
-        let (global_commit, state) = self
-            .service
-            .select_snapshot(
-                &snapshot,
-                self.workspace_id,
-                Some(request.snapshot.commit_seq),
-            )
-            .map_err(provider_service)?;
-        let expected = Self::provider_snapshot(&state, &self.service.database_id);
-        if expected != request.snapshot {
-            return Err(provider_failure("provider snapshot binding differs"));
-        }
-
-        let route_prefix = policy_route_prefix(self.workspace_id);
-        let mut continuation: Option<Vec<u8>> = None;
-        let mut scanned = 0_usize;
-        let mut selected = BTreeMap::<String, (StoredPolicy, AccessRule)>::new();
-        loop {
-            let page = snapshot
-                .scan_prefix_page(
-                    &self.service.keyspaces.policy_route,
-                    ScanPageRequest {
-                        prefix: &route_prefix,
-                        start_after: continuation.as_deref(),
-                        max_entries: SCAN_PAGE_ENTRIES,
-                        max_bytes: SCAN_PAGE_BYTES,
-                    },
-                )
-                .map_err(provider_storage)?;
-            scanned = scanned
-                .checked_add(page.entries.len())
-                .ok_or_else(|| provider_failure("policy scan counter is exhausted"))?;
-            if scanned > 1_000_000 {
-                return Err(provider_failure("policy scan exceeds the bounded profile"));
-            }
-            for entry in page.entries {
-                let policy: StoredPolicy =
-                    decode(&entry.value, "native provider policy").map_err(provider_service)?;
-                validate_stored_policy(&policy).map_err(provider_service)?;
-                if entry.key
-                    != policy_route_key(
-                        &policy.access.workspace_id,
-                        &policy.record_digest,
-                        policy.revision,
-                    )
-                {
-                    return Err(provider_failure("policy route binding is invalid"));
-                }
-                // Quarantined proposals, including their candidate-only links,
-                // cannot influence ordinary recall counts, budgets, graph
-                // expansion, ContextPack selection, or diagnostics.
-                if policy.kind == MemoryRecordKind::Candidate {
-                    continue;
-                }
-                let access = access_rule(&policy.access);
-                if visible_at(&policy, global_commit)
-                    && policy.lifecycle == contextdb_service::MemoryLifecycle::Active
-                    && request.principal.allows(&access)
-                {
-                    access.validate()?;
-                    let policies = match self.service.record_source_policies(&snapshot, &policy) {
-                        Ok(policies) => policies,
-                        Err(error) if super::record_sources::source_unavailable(&error) => continue,
-                        Err(error) => return Err(provider_service(error)),
-                    };
-                    if policies
-                        .iter()
-                        .any(|policy| !request.principal.allows(&access_rule(policy)))
-                    {
-                        continue;
-                    }
-                    if selected
-                        .insert(policy.record_digest.clone(), (policy, access))
-                        .is_some()
-                    {
-                        return Err(provider_failure("visible policy revisions overlap"));
-                    }
-                    if selected.len() > MAX_AUTHORIZED_CANDIDATES {
-                        return Err(provider_failure(
-                            "authorized corpus exceeds the bounded profile",
-                        ));
-                    }
-                }
-            }
-            let Some(next) = page.continuation else {
-                break;
-            };
-            if continuation
-                .as_ref()
-                .is_some_and(|previous| &next <= previous)
-            {
-                return Err(provider_failure("policy scan cursor did not advance"));
-            }
-            continuation = Some(next);
-        }
-
-        let mut documents = Vec::with_capacity(selected.len());
-        let mut relations = Vec::new();
-        for (_, (policy, access)) in selected {
-            let (document, relation) =
-                self.provider_document(&snapshot, &state.workspace_digest, &policy, access)?;
-            documents.push(document);
-            relations.extend(relation);
-        }
-        AuthorizedCorpus::authorize(request, documents, relations)
+        self.authorized_inner(&snapshot, None, request, &mut None)
+            .map(|frontier| frontier.corpus)
+            .map_err(frontier_recall)
     }
 }
 
@@ -473,10 +678,65 @@ fn provider_storage(_error: contextdb_storage::StorageError) -> RecallError {
     provider_failure("native storage read failed")
 }
 
-fn provider_service(_error: contextdb_service::ServiceError) -> RecallError {
+fn provider_service(_error: ServiceError) -> RecallError {
     provider_failure("native store integrity check failed")
 }
 
 fn provider_failure(message: &str) -> RecallError {
     RecallError::Provider(message.to_owned())
+}
+
+fn frontier_charge(
+    budget: &mut Option<&mut QueryBudget>,
+    work: u64,
+    bytes: u64,
+) -> FrontierResult<()> {
+    if let Some(shared) = budget.as_deref_mut() {
+        shared
+            .charge(work, bytes)
+            .map_err(super::raw_index::budget_error)?;
+    }
+    Ok(())
+}
+
+fn frontier_bytes<S: ReadSnapshot>(
+    snapshot: &S,
+    keyspace: &contextdb_storage::Keyspace,
+    key: &[u8],
+    budget: &mut Option<&mut QueryBudget>,
+) -> FrontierResult<Option<Vec<u8>>> {
+    frontier_charge(budget, 1, 0)?;
+    let bytes = snapshot.get(keyspace, key).map_err(provider_storage)?;
+    if let Some(bytes) = &bytes {
+        frontier_charge(budget, 0, bytes.len() as u64)?;
+        if budget.is_some() && bytes.len() > super::MAX_JSON_BYTES {
+            return Err(super::exhausted("generic material exceeds the native row limit").into());
+        }
+    }
+    Ok(bytes)
+}
+
+fn frontier_recall(error: FrontierError) -> RecallError {
+    match error {
+        FrontierError::Recall(error) => error,
+        FrontierError::Service(error) => provider_service(error),
+    }
+}
+
+fn frontier_service(error: FrontierError) -> ServiceError {
+    match error {
+        FrontierError::Service(error) => error,
+        FrontierError::Recall(RecallError::DeadlineExceeded) => {
+            super::exhausted("generic recall deadline exceeded")
+        }
+        FrontierError::Recall(_) => ServiceError::new(
+            ErrorCode::IntegrityFailure,
+            "native generic recall frontier failed verification",
+            false,
+        ),
+    }
+}
+
+fn source_denied(error: &ServiceError) -> bool {
+    error.code == ErrorCode::PermissionDenied || super::record_sources::source_unavailable(error)
 }

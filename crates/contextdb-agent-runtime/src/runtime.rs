@@ -40,6 +40,8 @@ pub struct RuntimeSettings {
     /// Default selects all authorized originals. Explicit expansion routes and
     /// mandatory current state remain separate; this is not an access policy.
     pub automatic_recall_filter: RawFilter,
+    /// Required tracing preserves the complete authorized routing inventory.
+    pub router_trace_profile: RouterTraceProfile,
 }
 impl RuntimeSettings {
     fn validate(&self, profile: &ModelProfile) -> ServiceResult<()> {
@@ -622,6 +624,8 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     base,
                     outgoing_budget: self.settings.outgoing_budget,
                     explicit_memory_request: false,
+                    router_trace_profile: self.settings.router_trace_profile,
+                    memory_query: None,
                 };
                 let started = Instant::now();
                 measurement.prepare_attempts += 1;
@@ -641,7 +645,9 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                         if matches!(
                             error.code,
                             ErrorCode::BudgetExhausted | ErrorCode::ResourceExhausted
-                        ) && attempt + 1 < self.settings.rolling.max_prepare_attempts =>
+                        ) && (error.retryable
+                            || self.settings.router_trace_profile == RouterTraceProfile::Off)
+                            && attempt + 1 < self.settings.rolling.max_prepare_attempts =>
                     {
                         charge(budget, 1, 0)?;
                         let evicted = rolling::evict(&mut self.state, self.settings.rolling);
@@ -662,19 +668,30 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 .pending_model
                 .as_ref()
                 .ok_or_else(|| invalid("model intent absent"))?;
-            let manifest = reader.capture_manifest(
+            let mut manifest = reader.capture_manifest(
                 pending.call_id,
                 &prepared.messages,
                 &prepared.outgoing,
                 budget,
             )?;
-            if manifest.model_call_id != pending.call_id
+            if manifest.router_trace.is_some()
+                || manifest.model_call_id != pending.call_id
                 || manifest.wire_digest != prepared.assembly.wire_digest
                 || manifest.byte_length != prepared.outgoing.wire.len() as u64
             {
                 return Err(invalid(
                     "reader capture manifest differs from the prepared wire",
                 ));
+            }
+            if prepared.router_trace.is_some()
+                != (self.settings.router_trace_profile == RouterTraceProfile::Required)
+            {
+                return Err(invalid(
+                    "prepared router trace differs from the required profile",
+                ));
+            }
+            if let Some(trace) = &prepared.router_trace {
+                manifest.router_trace = Some(Box::new(trace.attach(pending.call_id, budget)?));
             }
             telemetry::manifest_counts(&manifest, measurement);
             let mut request = self.event(
