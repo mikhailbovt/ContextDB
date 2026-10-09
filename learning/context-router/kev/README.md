@@ -223,6 +223,9 @@ The trained projection strictly admits 2048 state tokens and 4096 per row; longe
 native owned-conversation gates are not established. Oversize refuses instead of
 silently switching to R0.
 An end-to-end learned eviction and cold-resume run remains unverified.
+Complete reader-request overflow can trigger bounded eviction of closed hot
+exchanges using the remaining parent allowance. Worker, closure and work/deadline
+failures remain refusals.
 
 The typed adapter supports literal Known state, Conflict/Unknown diagnostics and
 exact attributed sources through the same projection. Opaque generic metadata,

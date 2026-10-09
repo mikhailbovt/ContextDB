@@ -10,7 +10,7 @@ use std::{
 };
 
 use contextdb_context::router::{RouterHistoricalReplayResult, RouterReplayUnavailableReason};
-use contextdb_core::{NodeId, OriginalSourceSpan, Purpose};
+use contextdb_core::{EventRole, NodeId, OriginalSourceSpan, Purpose};
 use contextdb_recall::{QueryBudget, QueryCancellation};
 use contextdb_service::{
     AcceptedRouterTracePort, AcceptedRouterTraceReadResult, AssertionMutation,
@@ -24,6 +24,7 @@ struct Observer {
     inputs: Mutex<Vec<serde_json::Value>>,
     revision_changed: AtomicBool,
     unavailable: AtomicBool,
+    budget_exhausted: AtomicBool,
     denial: Mutex<Option<(Weak<NativeService>, Vec<contextdb_core::ObservationId>)>>,
 }
 
@@ -33,6 +34,7 @@ impl Observer {
             inputs: Mutex::new(Vec::new()),
             revision_changed: AtomicBool::new(false),
             unavailable: AtomicBool::new(false),
+            budget_exhausted: AtomicBool::new(false),
             denial: Mutex::new(None),
         })
     }
@@ -84,6 +86,11 @@ impl ContextScorer for Observer {
         if self.unavailable.load(Ordering::SeqCst) {
             return Err(ContextError::RouterScore(
                 "fixture backend unavailable".into(),
+            ));
+        }
+        if self.budget_exhausted.load(Ordering::SeqCst) {
+            return Err(ContextError::BudgetExceeded(
+                "fixture backend allowance exhausted".into(),
             ));
         }
         if let Some((owner, candidates)) = self.denial.lock().expect("fault hook").take() {
@@ -382,6 +389,158 @@ fn direct_plan(
     });
     ids.push(current.event.event_id);
     (plan, ids)
+}
+
+fn captured_hot_message(
+    service: &NativeService,
+    plan: &PrepareContextRequest,
+    sequence: u64,
+    role: OutgoingRole,
+    text: &str,
+) -> OutgoingMessage {
+    let mut original = source(sequence, text);
+    original.context = plan.context.clone();
+    original.event.role = match role {
+        OutgoingRole::User => EventRole::User,
+        OutgoingRole::Assistant => EventRole::Assistant,
+        _ => panic!("closed exchange fixture uses user and assistant originals"),
+    };
+    service
+        .append_event(original.clone())
+        .expect("actual observed hot-history original");
+    let digest = original.event.payload.digest().expect("exact hot digest");
+    OutgoingMessage {
+        id: BlockId::new(format!("captured-hot-{sequence}")).expect("hot id"),
+        zone: OutgoingZone::HotHistory,
+        role,
+        text: text.into(),
+        originals: vec![VisibleOriginal {
+            span: OriginalSourceSpan {
+                event_id: original.event.event_id,
+                payload_digest: digest,
+                start: 0,
+                end: text.len() as u64,
+                span_digest: digest,
+            },
+            text_start: 0,
+            text_end: text.len() as u64,
+        }],
+        tool_calls: Vec::new(),
+        tool_result: None,
+    }
+}
+
+#[test]
+fn protected_complete_capacity_is_retryable_only_for_removable_closed_history() {
+    for profile in [
+        RouterTraceProfile::Required,
+        RouterTraceProfile::RequiredReplayV2,
+    ] {
+        let observer = Observer::new();
+        let f = owner(&observer);
+        let (mut plan, _) = direct_plan(&f.service);
+        plan.router_trace_profile = profile;
+        for (sequence, role, text) in [
+            (4, OutgoingRole::User, "Earlier user request."),
+            (5, OutgoingRole::Assistant, "Earlier visible answer."),
+            (6, OutgoingRole::User, "Recent user request."),
+            (7, OutgoingRole::Assistant, "Recent visible answer."),
+        ] {
+            plan.base.hot.push(captured_hot_message(
+                &f.service, &plan, sequence, role, text,
+            ));
+        }
+        assert!(
+            f.service
+                .project_originals(&plan.context, false, 256, &mut budget())
+                .expect("actual raw frontier after captured exchanges")
+                .caught_up
+        );
+        let raw_queries = std::mem::take(&mut plan.raw_queries);
+        for groups in 0..=2 {
+            let mut retained = plan.clone();
+            retained.base.hot.truncate(groups * 2);
+            let mut allowance = budget();
+            let encoder = ReferenceOutgoingEncoder(&ReferenceTokenizer);
+            let base_messages: Vec<_> = retained
+                .base
+                .hot
+                .iter()
+                .chain(&retained.base.current)
+                .cloned()
+                .collect();
+            let base = encoder
+                .encode(&base_messages, &mut allowance)
+                .expect("actual standalone retained-base price");
+            let complete = f
+                .service
+                .prepare_context(
+                    retained.clone(),
+                    &ReferenceTokenizer,
+                    &encoder,
+                    &mut allowance,
+                )
+                .expect("actual mandatory closure with an ample outgoing ceiling");
+            assert!(complete.outgoing.input_tokens > base.input_tokens);
+            assert!(complete.outgoing.wire.len() > base.wire.len());
+            assert!(!complete.context_pack.sections.situation.is_empty());
+            assert!(!complete.context_pack.sections.unknowns.is_empty());
+            for input_ceiling in [true, false] {
+                let mut too_small = retained.clone();
+                if input_ceiling {
+                    too_small.outgoing_budget.max_input_tokens = base.input_tokens;
+                } else {
+                    too_small.outgoing_budget.max_wire_bytes =
+                        u32::try_from(base.wire.len()).expect("bounded actual base wire");
+                }
+                let before = (allowance.remaining_work(), allowance.remaining_bytes());
+                let error = f
+                    .service
+                    .prepare_context(too_small, &ReferenceTokenizer, &encoder, &mut allowance)
+                    .expect_err(
+                        "base alone fits but the actual mandatory outgoing request does not",
+                    );
+                assert_eq!(
+                    error.code,
+                    if groups == 2 {
+                        ErrorCode::BudgetExhausted
+                    } else {
+                        ErrorCode::ResourceExhausted
+                    }
+                );
+                assert_eq!(error.retryable, groups == 2);
+                assert!(allowance.remaining_work() < before.0);
+                assert!(allowance.remaining_bytes() < before.1);
+                assert!(allowance.check().is_ok());
+                assert_eq!(
+                    observer.calls(),
+                    0,
+                    "overflow precedes every learned callback"
+                );
+            }
+        }
+
+        // The same removable exchanges do not turn a backend allowance failure
+        // into permission to retry or fall back to the scalar scorer.
+        plan.raw_queries = raw_queries;
+        observer.budget_exhausted.store(true, Ordering::SeqCst);
+        let mut allowance = budget();
+        let before = (allowance.remaining_work(), allowance.remaining_bytes());
+        let error = f
+            .service
+            .prepare_context(
+                plan,
+                &ReferenceTokenizer,
+                &ReferenceOutgoingEncoder(&ReferenceTokenizer),
+                &mut allowance,
+            )
+            .expect_err("backend exhaustion must preserve Refuse with eligible hot history");
+        assert_eq!(error.code, ErrorCode::ResourceExhausted);
+        assert!(!error.retryable);
+        assert_eq!(observer.calls(), 1);
+        assert!(allowance.remaining_work() < before.0);
+        assert!(allowance.remaining_bytes() < before.1);
+    }
 }
 
 #[test]

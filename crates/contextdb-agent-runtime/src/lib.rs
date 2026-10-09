@@ -31,7 +31,8 @@ fn exhausted(message: &'static str) -> ServiceError {
 }
 fn context_error(error: contextdb_context::ContextError) -> ServiceError {
     match error {
-        contextdb_context::ContextError::BudgetExceeded(_) => {
+        contextdb_context::ContextError::BudgetExceeded(_)
+        | contextdb_context::ContextError::OutgoingCapacityExceeded { .. } => {
             exhausted("whole-request budget exhausted")
         }
         _ => invalid("reader protocol or source layout is invalid"),

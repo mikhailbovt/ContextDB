@@ -1127,11 +1127,13 @@ fn map_context_error(error: ContextError) -> ServiceError {
             "ContextPack authorization binding failed",
             false,
         ),
-        ContextError::BudgetExceeded(_) => ServiceError::new(
-            ErrorCode::BudgetExhausted,
-            "ContextPack could not satisfy its hard budget",
-            false,
-        ),
+        ContextError::BudgetExceeded(_) | ContextError::OutgoingCapacityExceeded { .. } => {
+            ServiceError::new(
+                ErrorCode::BudgetExhausted,
+                "ContextPack could not satisfy its hard budget",
+                false,
+            )
+        }
         ContextError::InvalidContinuation(_) => invalid_continuation(),
         ContextError::Tokenizer(_) | ContextError::Serialization(_) => ServiceError::new(
             ErrorCode::IntegrityFailure,
