@@ -31,6 +31,8 @@ struct PreparedCandidate {
     use_action: UseAction,
     directive_reason: DirectiveReason,
     block_tokens: u32,
+    // Opt-in replay retains the actual pre-support-override counting input.
+    block_token_handles: Option<BTreeSet<EvidenceHandle>>,
     evidence_tokens: u32,
     generated: bool,
 }
@@ -626,6 +628,7 @@ fn prepare_candidate(
         use_action,
         directive_reason,
         block_tokens,
+        block_token_handles: None,
         evidence_tokens,
         generated: false,
     }))
@@ -890,11 +893,10 @@ fn block_satisfies_requirement(
         )
 }
 
-fn prepare_missing_unknown(
+fn missing_unknown_candidate(
     request: &CompileRequest,
     facet: &str,
-    tokenizer: &dyn TokenCounter,
-) -> Result<PreparedCandidate> {
+) -> Result<(PackCandidate, BlockRepresentation)> {
     let id = BlockId::new(format!(
         "unknown:{}",
         &blake3::hash(facet.as_bytes()).to_hex().to_string()[..16]
@@ -941,6 +943,15 @@ fn prepare_missing_unknown(
         mandatory: true,
     };
     candidate.validate()?;
+    Ok((candidate, representation))
+}
+
+fn prepare_missing_unknown(
+    request: &CompileRequest,
+    facet: &str,
+    tokenizer: &dyn TokenCounter,
+) -> Result<PreparedCandidate> {
+    let (candidate, representation) = missing_unknown_candidate(request, facet)?;
     let block = to_block(&candidate, representation);
     let json = serde_json::to_string(&block)
         .map_err(|error| ContextError::Serialization(error.to_string()))?;
@@ -951,6 +962,7 @@ fn prepare_missing_unknown(
         use_action: UseAction::MentionNaturally,
         directive_reason: DirectiveReason::PolicyAllowsMention,
         block_tokens: tokenizer.count_tokens(&json)?,
+        block_token_handles: None,
         evidence_tokens: 0,
         generated: true,
     })

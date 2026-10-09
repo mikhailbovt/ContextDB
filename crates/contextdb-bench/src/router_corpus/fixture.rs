@@ -56,6 +56,28 @@ pub(crate) fn build_case(
     scenario: Scenario,
     budget: &mut QueryBudget,
 ) -> crate::Result<BuiltinRouterCase> {
+    build_case_inner(group, scenario, false, budget)
+}
+
+pub(crate) fn build_replay_case(
+    group: u32,
+    scenario: Scenario,
+    budget: &mut QueryBudget,
+) -> crate::Result<BuiltinRouterCase> {
+    // A fixed bounded compile allowance makes the retained selector-entry reserve
+    // usable by a batch replay without resetting the enclosing job's deadline.
+    let mut compile_budget = budget.reserve(200_000, 16 * 1024 * 1024).map_err(|_| {
+        crate::BenchError::TelemetryBudget("router compile reserve exhausted".into())
+    })?;
+    build_case_inner(group, scenario, true, &mut compile_budget)
+}
+
+fn build_case_inner(
+    group: u32,
+    scenario: Scenario,
+    replay: bool,
+    budget: &mut QueryBudget,
+) -> crate::Result<BuiltinRouterCase> {
     if group >= 4 {
         return Err(crate::BenchError::InvalidConfiguration {
             field: "router corpus groups",
@@ -284,9 +306,9 @@ pub(crate) fn build_case(
             max_wire_bytes: 2 * 1024 * 1024,
         },
     };
-    let routed = ContextCompiler::new([7; 32])
-        .map_err(|_| invalid())?
-        .compile_assembly_with_router(
+    let compiler = ContextCompiler::new([7; 32]).map_err(|_| invalid())?;
+    let routed = if replay {
+        compiler.compile_assembly_with_router_replay(
             &request,
             &provider,
             &ReferenceTokenizer,
@@ -294,7 +316,23 @@ pub(crate) fn build_case(
             &R0Scorer,
             budget,
         )
-        .map_err(|_| invalid())?;
+    } else {
+        compiler.compile_assembly_with_router(
+            &request,
+            &provider,
+            &ReferenceTokenizer,
+            &ReferenceOutgoingEncoder(&ReferenceTokenizer),
+            &R0Scorer,
+            budget,
+        )
+    }
+    .map_err(|error| {
+        if replay && matches!(error, ContextError::BudgetExceeded(_)) {
+            crate::BenchError::TelemetryBudget("router compile allowance exhausted".into())
+        } else {
+            invalid()
+        }
+    })?;
     Ok(BuiltinRouterCase {
         query,
         routed,

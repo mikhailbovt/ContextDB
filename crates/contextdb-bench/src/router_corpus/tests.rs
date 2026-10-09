@@ -49,6 +49,7 @@ fn built(scenario: fixture::Scenario) -> (RouterQueryTimeRecord, RouterBehaviorR
         manifest: case.routed.manifest,
         attempt: RouterAttemptStatus::Prepared,
         accepted_receipt: None,
+        replay_observation: case.routed.replay_observation,
     };
     let observation = SyntheticObservationBinding {
         generator: fixture::GENERATOR.into(),

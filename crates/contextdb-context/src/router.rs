@@ -26,6 +26,10 @@ pub const MANIFEST_FORMAT: &str = "contextdb.router_manifest.v1";
 pub const FEATURE_SCHEMA: &str = "contextdb.routing_features.r0.v1";
 pub const DESCRIPTOR_SCHEMA: &str = "contextdb.routing_descriptor.v1";
 pub const ROUTER_PREPARED_POLICY_FORMAT: &str = "contextdb.router-prepared-policy.v1";
+pub const ROUTER_REPLAY_PREPARATION_FORMAT: &str = "contextdb.router-replay-preparation.v1";
+pub const ROUTER_REPLAY_OBSERVATION_FORMAT: &str = "contextdb.router-replay-observation.v1";
+pub const MAX_REPLAY_WORK: u64 = 100_000_000;
+pub const MAX_REPLAY_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_UNITS: usize = 512;
 pub const MAX_SCORES: usize = 4096;
 pub const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
@@ -290,6 +294,171 @@ pub struct RouterPreparedMaterial {
 pub struct RouterPreparedPolicy {
     pub format: String,
     pub units: Vec<RouterPreparedUnitPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<RouterReplayPreparation>,
+}
+
+/// Compiler-retained inputs to the shared post-preparation selector. The digest
+/// is integrity metadata, never acceptance authority or permission to use data.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterReplayPreparation {
+    pub format: String,
+    pub compiler: String,
+    pub renderer: String,
+    pub canonical_encoding: String,
+    pub layout: String,
+    pub digest: ContentDigest,
+    pub selector_work: u64,
+    pub selector_bytes: u64,
+    pub prepared_order: Vec<BlockId>,
+    #[serde(deserialize_with = "strict::core_value")]
+    pub omissions: Vec<crate::Omission>,
+    pub units: Vec<RouterReplayUnit>,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterReplayUnit {
+    pub id: BlockId,
+    pub variants: Vec<RouterReplayVariant>,
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterReplayVariant {
+    pub index: u32,
+    pub generated: bool,
+    pub block_tokens: u32,
+    pub evidence_tokens: u32,
+    pub block_token_handles: Vec<EvidenceHandle>,
+    pub evidence_order: Vec<EvidenceHandle>,
+}
+
+impl RouterReplayPreparation {
+    /// Recomputing this hash does not authenticate a caller-supplied record.
+    pub fn commitment(&self, budget: &mut QueryBudget) -> Result<ContentDigest> {
+        canonical_digest(
+            &(
+                &self.format,
+                &self.compiler,
+                &self.renderer,
+                &self.canonical_encoding,
+                &self.layout,
+                self.selector_work,
+                self.selector_bytes,
+                &self.prepared_order,
+                &self.omissions,
+                &self.units,
+            ),
+            budget,
+        )
+    }
+}
+
+/// Behavior observations are deliberately separate from scorer features.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterReplayObservation {
+    pub format: String,
+    pub preparation_digest: ContentDigest,
+    pub attempts: Vec<RouterReplayAttempt>,
+    pub raw_recall_pressure: Option<RouterReplayPressure>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterReplayPressure {
+    pub baseline_input_tokens: u32,
+    pub candidate_input_tokens: u32,
+    pub memory_tokens: u32,
+    pub raw_evidence_tokens: u32,
+    pub history_tokens: u32,
+    pub conflict_tokens: u32,
+}
+
+impl From<&crate::RawRecallPressure> for RouterReplayPressure {
+    fn from(value: &crate::RawRecallPressure) -> Self {
+        Self {
+            baseline_input_tokens: value.baseline_input_tokens,
+            candidate_input_tokens: value.candidate_input_tokens,
+            memory_tokens: value.memory_tokens,
+            raw_evidence_tokens: value.raw_evidence_tokens,
+            history_tokens: value.history_tokens,
+            conflict_tokens: value.conflict_tokens,
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterReplayAttempt {
+    pub evaluation: u32,
+    pub seed_ids: Vec<BlockId>,
+    pub outcome: RouterReplayAttemptOutcome,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouterReplayAttemptOutcome {
+    ClosureRejected,
+    TrialRejected,
+    Scored,
+}
+
+macro_rules! redacted_replay_debug {
+    ($ty:ty, $field:ident) => {
+        impl std::fmt::Debug for $ty {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($ty))
+                    .field("count", &self.$field.len())
+                    .finish_non_exhaustive()
+            }
+        }
+    };
+}
+redacted_replay_debug!(RouterReplayPreparation, units);
+redacted_replay_debug!(RouterReplayUnit, variants);
+redacted_replay_debug!(RouterReplayObservation, attempts);
+redacted_replay_debug!(RouterReplayVariant, evidence_order);
+redacted_replay_debug!(RouterReplayAttempt, seed_ids);
+
+/// Detached computation only: no owner read, dispatch lease or current grant.
+#[derive(Debug)]
+pub enum RouterHistoricalReplayResult {
+    Complete(Box<RouterHistoricalReplay>),
+    Unavailable(RouterReplayUnavailableReason),
+}
+
+pub struct RouterHistoricalReplay {
+    pub assembly: CompiledAssembly,
+    pub inventory: RouterMaterialVerification,
+    pub score_selection: RouterMaterialStatus,
+    pub material_wire: RouterMaterialStatus,
+    pub token_count: RouterMaterialStatus,
+    pub measured_micros: u64,
+}
+
+impl std::fmt::Debug for RouterHistoricalReplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RouterHistoricalReplay")
+            .field("inventory", &self.inventory)
+            .field("score_selection", &self.score_selection)
+            .field("material_wire", &self.material_wire)
+            .field("token_count", &self.token_count)
+            .field("measured_micros", &self.measured_micros)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouterReplayUnavailableReason {
+    MissingReplayPreparation,
+    MissingReplayObservation,
+    UnsupportedScorerProvenance,
+    UnsupportedRuntimeProfile,
+    UnsupportedHistoricalAllowance,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -344,6 +513,9 @@ pub enum RouterMaterialStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RouterMaterialUnavailableReason {
+    /// The replay reproduced an explicitly declared upper bound, not an exact
+    /// tokenizer count of the complete request.
+    NonExactRequestCount,
     /// V1 omits the compiler's prepared use action and directive reason, which
     /// participate in the complete candidate commitment and selection replay.
     MissingPreparedPolicy,
@@ -379,6 +551,7 @@ pub struct RoutedAssembly {
     pub plan: RouterSelectionPlan,
     pub manifest: RouterManifest,
     pub prepared_material: RouterPreparedMaterial,
+    pub replay_observation: Option<RouterReplayObservation>,
 }
 
 /// A bounded floating-point scorer port; it receives the same authorized closure

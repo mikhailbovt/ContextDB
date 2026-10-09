@@ -1,7 +1,8 @@
 use super::*;
 use contextdb_context::OutgoingBase;
 use contextdb_context::router::{
-    AuthorizedRouterRequest, RouterManifest, RouterPreparedMaterial, RouterSelectionPlan,
+    AuthorizedRouterRequest, RouterManifest, RouterPreparedMaterial, RouterReplayObservation,
+    RouterSelectionPlan,
 };
 use contextdb_core::ContentDigest;
 use contextdb_recall::QueryBudget;
@@ -129,6 +130,9 @@ pub struct RouterBehaviorRecord {
     pub manifest: RouterManifest,
     pub attempt: RouterAttemptStatus,
     pub accepted_receipt: Option<CaptureReceipt>,
+    /// Observed selection attempts, excluded from query-time model features.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_observation: Option<RouterReplayObservation>,
 }
 impl std::fmt::Debug for RouterBehaviorRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

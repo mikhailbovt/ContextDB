@@ -15,6 +15,8 @@ use std::sync::{
 mod material;
 #[path = "router_policy.rs"]
 mod policy;
+#[path = "router_replay.rs"]
+mod replay;
 
 fn routed(
     request: &CompileAssemblyRequest,

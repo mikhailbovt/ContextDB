@@ -82,6 +82,18 @@ impl QueryBudget {
         self.remaining_bytes
     }
 
+    /// Reserve a complete nested allowance from this operation. The child keeps
+    /// the same absolute deadline and cancellation; unused allowance is spent.
+    pub fn reserve(&mut self, work: u64, bytes: u64) -> Result<Self, QueryLimit> {
+        self.charge(work, bytes)?;
+        Ok(Self {
+            deadline: self.deadline,
+            cancellation: self.cancellation.clone(),
+            remaining_work: work,
+            remaining_bytes: bytes,
+        })
+    }
+
     /// Remaining cooperative timeout for a nested operation, without resetting
     /// the enclosing deadline or cancellation state.
     pub fn remaining_timeout_micros(&self) -> Result<u64, QueryLimit> {
@@ -95,6 +107,45 @@ impl QueryBudget {
             return Err(QueryLimit::Deadline);
         }
         Ok(micros)
+    }
+}
+
+#[cfg(test)]
+mod budget_reservation_tests {
+    use super::*;
+
+    #[test]
+    fn reservation_spends_parent_allowance_and_preserves_deadline_and_cancellation() {
+        let cancellation = QueryCancellation::default();
+        let mut outer = QueryBudget::new(10, 100, Duration::from_secs(1), cancellation.clone());
+        assert_eq!(
+            outer.reserve(11, 50).expect_err("insufficient work"),
+            QueryLimit::Work
+        );
+        assert_eq!(
+            outer.reserve(5, 101).expect_err("insufficient bytes"),
+            QueryLimit::Bytes
+        );
+        assert_eq!((outer.remaining_work(), outer.remaining_bytes()), (10, 100));
+        let mut child = outer.reserve(6, 60).expect("admitted complete reserve");
+        assert_eq!((outer.remaining_work(), outer.remaining_bytes()), (4, 40));
+        assert_eq!(child.deadline, outer.deadline);
+        assert_eq!(child.charge(7, 0), Err(QueryLimit::Work));
+        child.charge(1, 1).expect("remaining child allowance");
+        cancellation.cancel();
+        assert_eq!(child.check(), Err(QueryLimit::Cancelled));
+        assert_eq!(
+            outer.reserve(0, 0).expect_err("shared cancellation"),
+            QueryLimit::Cancelled
+        );
+
+        let mut expired = QueryBudget::new(1, 1, Duration::ZERO, QueryCancellation::default());
+        assert_eq!(
+            expired
+                .reserve(1, 1)
+                .expect_err("expired enclosing deadline"),
+            QueryLimit::Deadline
+        );
     }
 }
 
