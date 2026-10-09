@@ -531,9 +531,16 @@ impl NativeService {
             self.enable_source_format(&mut transaction)?;
         }
         self.enable_capture_format(&mut transaction)?;
-        if matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.router_trace.is_some())
+        if let EventPayload::Assembly { manifest } = &event.payload
+            && let Some(trace) = &manifest.router_trace
         {
             self.enable_capture_extension(&mut transaction, super::router_trace::TRACE_FEATURE)?;
+            if trace.header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION {
+                self.enable_capture_extension(
+                    &mut transaction,
+                    super::router_trace::TRACE_REPLAY_FEATURE,
+                )?;
+            }
         }
         if matches!(event.provenance, Some(EventProvenance::ModelOutput { .. })) {
             self.enable_capture_extension(
@@ -994,6 +1001,9 @@ impl NativeService {
             if manifest
                 .features
                 .contains(super::router_trace::TRACE_FEATURE)
+                || manifest
+                    .features
+                    .contains(super::router_trace::TRACE_REPLAY_FEATURE)
             {
                 return Err(integrity(
                     "router trace format lacks an accepted protected capture",
@@ -1123,6 +1133,19 @@ impl NativeService {
         {
             return Err(integrity(
                 "router trace format lacks an accepted protected capture",
+            ));
+        }
+        if manifest
+            .features
+            .contains(super::router_trace::TRACE_REPLAY_FEATURE)
+            && !accepted.iter().any(|(_, recovery)| {
+                recovery.router_trace.as_ref().is_some_and(|header| {
+                    header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                })
+            })
+        {
+            return Err(integrity(
+                "router replay format lacks an accepted v2 capture",
             ));
         }
         // Deep verification reconstructs every derived capture row from accepted

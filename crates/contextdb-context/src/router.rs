@@ -519,9 +519,10 @@ pub enum RouterMaterialUnavailableReason {
     /// V1 omits the compiler's prepared use action and directive reason, which
     /// participate in the complete candidate commitment and selection replay.
     MissingPreparedPolicy,
-    /// A complete candidate commitment does not retain all selector-entry,
-    /// generated-marker and omission inputs or execute historical selection.
+    /// Policy-only material omits selector-entry, generated-marker and omission inputs.
     MissingReplayPreparation,
+    /// Prepared replay inputs exist, but this integrity check did not execute R0.
+    HistoricalReplayNotExecuted,
 }
 
 /// Check retained support material with the authoritative compiler's block

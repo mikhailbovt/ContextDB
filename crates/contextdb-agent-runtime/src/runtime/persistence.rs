@@ -160,8 +160,11 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 };
                 if event.event_id != pending.request_event
                     || manifest.model_call_id != pending.call_id
-                    || manifest.router_trace.is_some()
-                        != (self.settings.router_trace_profile == RouterTraceProfile::Required)
+                    || manifest
+                        .router_trace
+                        .as_ref()
+                        .map(|trace| trace.header.version)
+                        != self.settings.router_trace_profile.version()
                 {
                     return Err(invalid("captured request differs from model intent"));
                 }

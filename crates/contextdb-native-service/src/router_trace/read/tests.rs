@@ -226,10 +226,25 @@ fn generic_setup(
     plan.memory_query = Some(memory_query());
 }
 
+fn generic_replay_setup(
+    service: &NativeService,
+    source: &contextdb_service::CaptureRequest,
+    plan: &mut PrepareContextRequest,
+) {
+    generic_setup(service, source, plan);
+    capture::replay_profile(service, source, plan);
+}
+
 #[test]
 fn actual_unselected_generic_retraction_preserves_history_and_current_head_denial_precedes_body() {
+    for setup in [generic_setup as capture::FixtureSetup, generic_replay_setup] {
+        generic_head_for_setup(setup);
+    }
+}
+
+fn generic_head_for_setup(setup: capture::FixtureSetup) {
     let f = fixture("accepted-router-generic-read-denial");
-    let accepted = capture::accepted_fixture_with_setup(&f.service, generic_setup);
+    let accepted = capture::accepted_fixture_with_setup(&f.service, setup);
     let frozen = envelope(&accepted.prepared);
     assert_eq!(frozen.retrieval_origins.records.len(), 2);
     assert_eq!(

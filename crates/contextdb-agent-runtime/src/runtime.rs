@@ -683,8 +683,8 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     "reader capture manifest differs from the prepared wire",
                 ));
             }
-            if prepared.router_trace.is_some()
-                != (self.settings.router_trace_profile == RouterTraceProfile::Required)
+            if prepared.router_trace.as_ref().map(|trace| trace.version)
+                != self.settings.router_trace_profile.version()
             {
                 return Err(invalid(
                     "prepared router trace differs from the required profile",

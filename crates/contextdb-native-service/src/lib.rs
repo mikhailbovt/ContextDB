@@ -3457,6 +3457,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != capture::RECOVERY_FEATURE
                 && feature != custody::CUSTODY_FEATURE
                 && feature != router_trace::TRACE_FEATURE
+                && feature != router_trace::TRACE_REPLAY_FEATURE
                 && feature != owned::OWNED_FEATURE
                 && feature != payload::SOURCE_FEATURE
                 && feature != payload::MODEL_PROTOCOL_FEATURE
@@ -3490,6 +3491,10 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 || !manifest.features.contains(payload::SOURCE_FEATURE)
                 || !manifest.features.contains(encryption::ENCRYPTION_FEATURE)
                 || !manifest.features.contains(capture::CAPTURE_FEATURE)))
+        || (manifest
+            .features
+            .contains(router_trace::TRACE_REPLAY_FEATURE)
+            && !manifest.features.contains(router_trace::TRACE_FEATURE))
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
         || ((manifest.features.contains(record_journal::CONTROL_FEATURE)
             || manifest

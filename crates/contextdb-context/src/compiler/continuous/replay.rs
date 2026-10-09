@@ -96,6 +96,29 @@ pub(super) fn validate_preparation(
 }
 
 impl ContextCompiler {
+    /// Validate only bounded retained observation metadata and its preparation
+    /// association. This invokes no scorer/provider/tokenizer and cannot report
+    /// historical selection Verified or authenticate a caller-supplied history.
+    pub fn validate_router_replay_observation(
+        request: &AuthorizedRouterRequest,
+        manifest: &RouterManifest,
+        preparation: &RouterReplayPreparation,
+        observation: &RouterReplayObservation,
+        budget: &mut QueryBudget,
+    ) -> Result<()> {
+        charge(budget, 1, 0)?;
+        if request.units.len() > router::MAX_UNITS
+            || preparation.units.len() > router::MAX_UNITS
+            || preparation.prepared_order.len() > router::MAX_UNITS
+            || preparation.omissions.len() > 1024
+        {
+            return Err(router::invalid("excessive replay observation inputs"));
+        }
+        validate_observation(request, manifest, preparation, observation, budget)?;
+        router::canonical_bytes(&(request, manifest, preparation, observation), budget)?;
+        Ok(())
+    }
+
     /// Execute pinned R0 over the retained prepared state using the live selector.
     /// Current authorization, source acceptance, export and dispatch stay outside
     /// this detached computation. Timings are fresh measurements, not equality.

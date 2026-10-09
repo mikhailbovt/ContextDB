@@ -249,7 +249,15 @@ impl ContextCompiler {
                 )
             },
             historical_selection: RouterMaterialStatus::Unavailable(if has_policy {
-                RouterMaterialUnavailableReason::MissingReplayPreparation
+                if material
+                    .prepared_policy
+                    .as_ref()
+                    .is_some_and(|policy| policy.replay.is_some())
+                {
+                    RouterMaterialUnavailableReason::HistoricalReplayNotExecuted
+                } else {
+                    RouterMaterialUnavailableReason::MissingReplayPreparation
+                }
             } else {
                 RouterMaterialUnavailableReason::MissingPreparedPolicy
             }),

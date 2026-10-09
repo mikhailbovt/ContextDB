@@ -75,6 +75,10 @@ pub struct AcceptedRouterTraceRead {
     pub verification: RouterMaterialVerification,
     /// Protected all-candidate lineage references; no authority labels are exposed.
     pub lineage: AcceptedRouterTraceLineage,
+    /// V2's accepted behavior observations. Reading these does not execute R0,
+    /// verify historical selection or admit export/training use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_observation: Option<contextdb_context::router::RouterReplayObservation>,
 }
 
 impl fmt::Debug for AcceptedRouterTraceRead {

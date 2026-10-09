@@ -126,8 +126,15 @@ inherits current permissions for selected and inspected source material. Its
 initial encrypted native profile allows 2 MiB across at most eight 256 KiB pages,
 8 MiB native rows and at most 256 KiB of inline Novel request material; exceeding
 a bound refuses without an Off fallback. Larger staged authority support remains
-open. This opt-in observes the existing R0 path; Kev inference, training and
-whole-history semantic recall are separate later stages.
+open. To retain complete prepared selector inputs and separate attempt observations,
+use `"router_trace_profile": "required_replay_v2"` before starting a new run. This
+profile binds header version 2 and the native replay feature; Required continues
+to bind version 1. Switching either profile on resume refuses before the reader
+starts. Replay material uses the same encrypted occurrence and source controls;
+retained recovery headers preserve its version after authorized body pruning.
+An accepted read does not execute replay or authorize training. These opt-ins
+observe R0; Kev inference, training and whole-history semantic recall remain
+separate later stages.
 
 ## Start, pause and resume
 

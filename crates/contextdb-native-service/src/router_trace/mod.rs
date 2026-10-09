@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use contextdb_context::router::{
-    AuthorizedRouterRequest, RouterManifest, RouterSelectionPlan, canonical_bytes,
-    canonical_digest as router_digest,
+    AuthorizedRouterRequest, RouterManifest, RouterReplayObservation, RouterSelectionPlan,
+    canonical_bytes, canonical_digest as router_digest,
 };
 use contextdb_context::{BlockId, ContextError, EvidenceHandle, OutgoingBase};
 use contextdb_core::{ContentDigest, EventEnvelope, EventPayload};
@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::prepare::PrepareFence;
 use crate::{integrity, invalid};
-use contextdb_service::{PrepareRecallQuery, PreparedRouterTrace, ServiceResult};
+use contextdb_service::{
+    PrepareRecallQuery, PreparedRouterTrace, RouterTraceProfile, ServiceResult,
+};
 
 pub(crate) mod controls;
 pub(crate) mod material;
@@ -21,7 +23,9 @@ mod read;
 #[cfg(test)]
 mod tests;
 pub(super) const TRACE_FEATURE: &str = "continuous-router-trace-v1";
+pub(super) const TRACE_REPLAY_FEATURE: &str = "continuous-router-trace-v2";
 const FORMAT: &str = "contextdb.native_router_trace.v1";
+const REPLAY_FORMAT: &str = "contextdb.native_router_trace.v2";
 
 use controls::RouterTraceControls;
 
@@ -58,6 +62,8 @@ pub(super) struct RouterEnvelope {
     pub base_origins: RouterTraceControls,
     pub retrieval_origins: RouterTraceControls,
     pub materials: PreparedMaterials,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_observation: Option<RouterReplayObservation>,
     pub discovery: Vec<IndexedCompletion>,
     pub generic_query: Option<PrepareRecallQuery>,
     pub generic_discovery: Option<material::GenericRecallObservation>,
@@ -80,6 +86,51 @@ impl RouterEnvelope {
         generic_discovery: Option<material::GenericRecallObservation>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<Self> {
+        Self::new_for_profile(
+            RouterTraceProfile::Required,
+            None,
+            request,
+            plan,
+            manifest,
+            native_view,
+            base,
+            unit_origins,
+            evidence_origins,
+            materials,
+            discovery,
+            retrieval_origins,
+            generic_query,
+            generic_discovery,
+            budget,
+        )
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one explicit protected preparation profile"
+    )]
+    pub(super) fn new_for_profile(
+        profile: RouterTraceProfile,
+        replay_observation: Option<RouterReplayObservation>,
+        request: AuthorizedRouterRequest,
+        plan: RouterSelectionPlan,
+        manifest: RouterManifest,
+        native_view: PrepareFence,
+        base: OutgoingBase,
+        unit_origins: BTreeMap<BlockId, UnitOrigin>,
+        evidence_origins: BTreeMap<EvidenceHandle, RouterTraceControls>,
+        materials: PreparedMaterials,
+        discovery: Vec<IndexedCompletion>,
+        retrieval_origins: RouterTraceControls,
+        generic_query: Option<PrepareRecallQuery>,
+        generic_discovery: Option<material::GenericRecallObservation>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Self> {
+        let format = match profile {
+            RouterTraceProfile::Required => FORMAT,
+            RouterTraceProfile::RequiredReplayV2 => REPLAY_FORMAT,
+            RouterTraceProfile::Off => return Err(invalid("Off has no protected router envelope")),
+        };
         let mut base_origins = RouterTraceControls::default();
         base_origins.originals.extend(
             base.working
@@ -97,7 +148,7 @@ impl RouterEnvelope {
             origins.union_checked(evidence)?;
         }
         let envelope = Self {
-            format: FORMAT.into(),
+            format: format.into(),
             request,
             plan,
             manifest,
@@ -109,6 +160,7 @@ impl RouterEnvelope {
             base_origins,
             retrieval_origins,
             materials,
+            replay_observation,
             discovery,
             generic_query,
             generic_discovery,
@@ -136,8 +188,7 @@ impl RouterEnvelope {
                 ));
             }
         }
-        if self.format != FORMAT
-            || self.manifest.request_digest != self.request.digest
+        if self.manifest.request_digest != self.request.digest
             || self.manifest.candidate_digest != self.request.binding.candidates
             || self.manifest.plan_digest
                 != router_digest(&self.plan, budget).map_err(trace_error)?
@@ -283,17 +334,75 @@ impl RouterEnvelope {
         if closure != self.origins {
             return Err(integrity("protected routing origin union is not complete"));
         }
+        if self.trace_version()? == contextdb_core::ROUTER_REPLAY_TRACE_VERSION {
+            // Static retained-material admission does not execute the selector or
+            // establish a fresh wire/tokenizer replay. The owner seal binds it.
+            contextdb_context::router::validate_router_material(
+                &self.request,
+                &self.materials,
+                budget,
+            )
+            .map_err(replay_metadata_error)?;
+            let preparation = self
+                .materials
+                .prepared_policy
+                .as_ref()
+                .and_then(|policy| policy.replay.as_ref())
+                .ok_or_else(|| integrity("native router trace v2 preparation is absent"))?;
+            contextdb_context::ContextCompiler::validate_router_replay_observation(
+                &self.request,
+                &self.manifest,
+                preparation,
+                self.replay_observation
+                    .as_ref()
+                    .ok_or_else(|| integrity("native router trace v2 observation is absent"))?,
+                budget,
+            )
+            .map_err(replay_metadata_error)?;
+        }
         canonical_bytes(self, budget).map_err(trace_error)?;
         Ok(())
     }
 
     fn validate_material_profile(&self) -> ServiceResult<()> {
-        if self.materials.prepared_policy.is_some() {
-            return Err(integrity(
-                "native router trace v1 does not support prepared policy material",
-            ));
+        match self.trace_version()? {
+            contextdb_core::ROUTER_TRACE_VERSION => {
+                if self.materials.prepared_policy.is_some() {
+                    return Err(integrity(
+                        "native router trace v1 does not support prepared policy material",
+                    ));
+                }
+                if self.replay_observation.is_some() {
+                    return Err(integrity(
+                        "native router trace v1 does not support replay observations",
+                    ));
+                }
+            }
+            contextdb_core::ROUTER_REPLAY_TRACE_VERSION => {
+                if self
+                    .materials
+                    .prepared_policy
+                    .as_ref()
+                    .and_then(|policy| policy.replay.as_ref())
+                    .is_none()
+                    || self.replay_observation.is_none()
+                {
+                    return Err(integrity(
+                        "native router trace v2 requires complete replay preparation and observation",
+                    ));
+                }
+            }
+            _ => unreachable!("trace_version admits only the explicit formats"),
         }
         Ok(())
+    }
+
+    pub(super) fn trace_version(&self) -> ServiceResult<u16> {
+        match self.format.as_str() {
+            FORMAT => Ok(contextdb_core::ROUTER_TRACE_VERSION),
+            REPLAY_FORMAT => Ok(contextdb_core::ROUTER_REPLAY_TRACE_VERSION),
+            _ => Err(integrity("native router trace format is unsupported")),
+        }
     }
 }
 
@@ -305,12 +414,16 @@ impl crate::NativeService {
         budget: &mut QueryBudget,
     ) -> ServiceResult<PreparedRouterTrace> {
         envelope.validate_material_profile()?;
+        if envelope.trace_version()? == contextdb_core::ROUTER_REPLAY_TRACE_VERSION {
+            envelope.validate(budget)?;
+        }
         envelope
             .manifest
             .validate(&envelope.request, &envelope.plan, assembly, budget)
             .map_err(trace_error)?;
         let bytes = canonical_bytes(envelope, budget).map_err(trace_error)?;
         Ok(PreparedRouterTrace {
+            version: envelope.trace_version()?,
             pack_id: envelope.request.pack_id,
             wire_digest: assembly.manifest.wire_digest,
             wire_byte_length: assembly.outgoing.wire.len() as u64,
@@ -341,7 +454,8 @@ pub(super) fn prepared_envelope(
         return Err(integrity("prepared router envelope is not canonical"));
     }
     envelope.validate(budget)?;
-    if trace.pack_id != envelope.request.pack_id
+    if trace.version != envelope.trace_version()?
+        || trace.pack_id != envelope.request.pack_id
         || trace.router_request_digest != envelope.request.digest
         || trace.router_plan_digest != router_digest(&envelope.plan, budget).map_err(trace_error)?
         || trace.router_manifest_digest
@@ -368,12 +482,12 @@ pub(super) fn decode_envelope(
     trace
         .validate_for_model_request(manifest)
         .map_err(|_| integrity("protected router attachment is invalid"))?;
+    budget
+        .charge(1, u64::from(trace.header.byte_length))
+        .map_err(crate::raw_index::budget_error)?;
     let text = trace
         .canonical_json()
         .map_err(|_| integrity("protected router pages are invalid"))?;
-    budget
-        .charge(1, text.len() as u64)
-        .map_err(crate::raw_index::budget_error)?;
     let envelope: RouterEnvelope = serde_json::from_str(&text)
         .map_err(|_| integrity("protected router envelope is malformed"))?;
     if canonical_bytes(&envelope, budget).map_err(trace_error)? != text.as_bytes() {
@@ -381,7 +495,8 @@ pub(super) fn decode_envelope(
     }
     envelope.validate(budget)?;
     let header = &trace.header;
-    if header.pack_id != envelope.request.pack_id
+    if header.version != envelope.trace_version()?
+        || header.pack_id != envelope.request.pack_id
         || header.router_request_digest != envelope.request.digest
         || header.router_plan_digest
             != router_digest(&envelope.plan, budget).map_err(trace_error)?
@@ -414,5 +529,12 @@ pub(super) fn trace_error(error: ContextError) -> contextdb_service::ServiceErro
             crate::exhausted("protected trace exceeded its shared profile")
         }
         _ => invalid("protected routing material is inconsistent"),
+    }
+}
+
+fn replay_metadata_error(error: ContextError) -> contextdb_service::ServiceError {
+    match error {
+        ContextError::BudgetExceeded(_) => trace_error(error),
+        _ => integrity("protected replay metadata differs from compiler commitments"),
     }
 }

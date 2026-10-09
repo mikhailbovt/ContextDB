@@ -155,7 +155,8 @@ impl PrepareContextPort for NativeService {
         encoder: &dyn OutgoingEncoder,
         budget: &mut QueryBudget,
     ) -> ServiceResult<PreparedContext> {
-        let traced = request.router_trace_profile == RouterTraceProfile::Required;
+        let trace_profile = request.router_trace_profile;
+        let traced = !trace_profile.is_off();
         if request.memory_query.is_some() && !traced {
             return Err(invalid(
                 "generic preparation requires the protected trace profile",
@@ -627,21 +628,34 @@ impl PrepareContextPort for NativeService {
             budget: request.outgoing_budget,
         };
         let (compiled, mut router_trace) = if traced {
-            let routed = compiler
-                .compile_assembly_with_router(
+            let routed = match trace_profile {
+                RouterTraceProfile::Required => compiler.compile_assembly_with_router(
                     &compile_request,
                     &provider,
                     tokenizer,
                     encoder,
                     &R0Scorer,
                     budget,
-                )
-                .map_err(|error| match error {
-                    ContextError::BudgetExceeded(_) => {
-                        super::exhausted("protected router preparation exceeded its shared profile")
-                    }
-                    other => service_error(other),
-                })?;
+                ),
+                RouterTraceProfile::RequiredReplayV2 => compiler
+                    .compile_assembly_with_router_replay(
+                        &compile_request,
+                        &provider,
+                        tokenizer,
+                        encoder,
+                        &R0Scorer,
+                        budget,
+                    ),
+                RouterTraceProfile::Off => {
+                    unreachable!("traced preparation has an explicit profile")
+                }
+            }
+            .map_err(|error| match error {
+                ContextError::BudgetExceeded(_) => {
+                    super::exhausted("protected router preparation exceeded its shared profile")
+                }
+                other => service_error(other),
+            })?;
             let mut origins = BTreeMap::new();
             for unit in &routed.request.units {
                 let origin = if let Some(origin) = unit_origins.remove(&unit.id) {
@@ -696,21 +710,60 @@ impl PrepareContextPort for NativeService {
                 .cloned()
                 .collect();
             evidence_origins.retain(|id, _| handles.contains(id));
-            let envelope = RouterEnvelope::new(
-                routed.request,
-                routed.plan,
-                routed.manifest,
-                provider.fence.clone(),
-                trace_base.ok_or_else(|| invalid("prepared trace base absent"))?,
-                origins,
-                evidence_origins,
-                routed.prepared_material,
-                discovery.clone(),
-                retrieval_origins,
-                generic_query,
-                generic_discovery,
-                budget,
-            )?;
+            let base = trace_base.ok_or_else(|| invalid("prepared trace base absent"))?;
+            let envelope = match trace_profile {
+                RouterTraceProfile::Required => RouterEnvelope::new(
+                    routed.request,
+                    routed.plan,
+                    routed.manifest,
+                    provider.fence.clone(),
+                    base,
+                    origins,
+                    evidence_origins,
+                    routed.prepared_material,
+                    discovery.clone(),
+                    retrieval_origins,
+                    generic_query,
+                    generic_discovery,
+                    budget,
+                ),
+                RouterTraceProfile::RequiredReplayV2 => {
+                    // Replay retains preparation omissions too. Preserve the
+                    // whole inspected native frontier, before unit filtering.
+                    let frontier = provider
+                        .trace_controls
+                        .as_ref()
+                        .ok_or_else(|| invalid("replay preparation frontier absent"))?;
+                    budget
+                        .charge(
+                            1,
+                            ((retrieval_origins.byte_length()? + frontier.byte_length()?) as u64)
+                                .saturating_mul(4),
+                        )
+                        .map_err(budget_error)?;
+                    retrieval_origins.union_checked(frontier)?;
+                    RouterEnvelope::new_for_profile(
+                        trace_profile,
+                        routed.replay_observation,
+                        routed.request,
+                        routed.plan,
+                        routed.manifest,
+                        provider.fence.clone(),
+                        base,
+                        origins,
+                        evidence_origins,
+                        routed.prepared_material,
+                        discovery.clone(),
+                        retrieval_origins,
+                        generic_query,
+                        generic_discovery,
+                        budget,
+                    )
+                }
+                RouterTraceProfile::Off => {
+                    unreachable!("traced preparation has an explicit profile")
+                }
+            }?;
             let trace = self.prepare_router_envelope(&envelope, &routed.assembly, budget)?;
             (routed.assembly, Some(trace))
         } else {

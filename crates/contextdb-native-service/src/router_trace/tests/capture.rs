@@ -28,6 +28,7 @@ use contextdb_service::{
 use super::*;
 
 mod policy;
+mod replay;
 
 pub(in crate::router_trace) struct TraceCaptureFixture {
     pub context: AuthenticatedRequestContext,
@@ -249,6 +250,28 @@ pub(in crate::router_trace) fn accepted_unselected_fixture(
     service: &Arc<NativeService>,
 ) -> (TraceCaptureFixture, ObservationId) {
     let fixture = planned_fixture_with_raw(service, true);
+    accepted_unselected_from_planned(service, fixture)
+}
+
+pub(in crate::router_trace) fn replay_profile(
+    _: &NativeService,
+    _: &CaptureRequest,
+    plan: &mut PrepareContextRequest,
+) {
+    plan.router_trace_profile = RouterTraceProfile::RequiredReplayV2;
+}
+
+pub(in crate::router_trace) fn accepted_unselected_replay_fixture(
+    service: &Arc<NativeService>,
+) -> (TraceCaptureFixture, ObservationId) {
+    let fixture = planned_fixture_with_setup(service, true, Some(replay_profile));
+    accepted_unselected_from_planned(service, fixture)
+}
+
+fn accepted_unselected_from_planned(
+    service: &Arc<NativeService>,
+    fixture: PlannedFixture,
+) -> (TraceCaptureFixture, ObservationId) {
     let retained = envelope(&fixture.prepared);
     let discarded = retained
         .request
@@ -432,6 +455,15 @@ fn protected_capture_rejects_wrong_owned_intent_and_rehashed_unsealed_material()
 
 #[test]
 fn accepted_protected_request_replays_after_issuer_expiry_and_cold_resume_stays_unknown() {
+    for trace_profile in [
+        RouterTraceProfile::Required,
+        RouterTraceProfile::RequiredReplayV2,
+    ] {
+        cold_retry_for_profile(trace_profile);
+    }
+}
+
+fn cold_retry_for_profile(trace_profile: RouterTraceProfile) {
     let directory = tempfile::tempdir().expect("native directory");
     let (_keys_directory, keys) = crate::encryption::tests::authority("trace-owned-recovery");
     let (_ledger_directory, ledger) = crate::suppression::tests::authority("trace-owned-recovery");
@@ -445,7 +477,13 @@ fn accepted_protected_request_replays_after_issuer_expiry_and_cold_resume_stays_
         )
         .expect("encrypted native owner"),
     );
-    let fixture = accepted_fixture(&service);
+    let fixture = match trace_profile {
+        RouterTraceProfile::Required => accepted_fixture(&service),
+        RouterTraceProfile::RequiredReplayV2 => {
+            accepted_fixture_with_setup(&service, replay_profile)
+        }
+        RouterTraceProfile::Off => unreachable!("protected fixture"),
+    };
     assert!(fixture.acceptance.newly_accepted);
     let replay = service
         .capture_prepared_model_request(
@@ -492,7 +530,11 @@ fn accepted_protected_request_replays_after_issuer_expiry_and_cold_resume_stays_
         Arc::clone(&reopened),
         fixture.context,
         fixture.checkpoint.checkpoint.identity.run_id,
-        runtime_settings(&fixture.request),
+        {
+            let mut settings = runtime_settings(&fixture.request);
+            settings.router_trace_profile = trace_profile;
+            settings
+        },
         TimestampMicros(2_000_000),
         &mut budget(),
     )
@@ -517,6 +559,15 @@ fn accepted_protected_request_replays_after_issuer_expiry_and_cold_resume_stays_
 
 #[test]
 fn revoking_unselected_trace_origin_restricts_request_output_and_owned_checkpoint() {
+    for trace_profile in [
+        RouterTraceProfile::Required,
+        RouterTraceProfile::RequiredReplayV2,
+    ] {
+        revocation_for_profile(trace_profile);
+    }
+}
+
+fn revocation_for_profile(trace_profile: RouterTraceProfile) {
     let directory = tempfile::tempdir().expect("native directory");
     let (_keys_directory, keys) = crate::encryption::tests::authority("trace-unselected-custody");
     let (_ledger_directory, ledger) =
@@ -531,7 +582,13 @@ fn revoking_unselected_trace_origin_restricts_request_output_and_owned_checkpoin
         )
         .expect("encrypted native owner"),
     );
-    let fixture = planned_fixture_with_raw(&service, true);
+    let fixture = match trace_profile {
+        RouterTraceProfile::Required => planned_fixture_with_raw(&service, true),
+        RouterTraceProfile::RequiredReplayV2 => {
+            planned_fixture_with_setup(&service, true, Some(replay_profile))
+        }
+        RouterTraceProfile::Off => unreachable!("protected fixture"),
+    };
     let retained = envelope(&fixture.prepared);
     let discarded = retained
         .request
@@ -763,6 +820,15 @@ impl PreparationHook for ProjectOriginals {
 
 #[test]
 fn required_owned_runtime_captures_fences_exact_wire_and_inherits_trace_into_output_checkpoint() {
+    for trace_profile in [
+        RouterTraceProfile::Required,
+        RouterTraceProfile::RequiredReplayV2,
+    ] {
+        owned_runtime_for_profile(trace_profile);
+    }
+}
+
+fn owned_runtime_for_profile(trace_profile: RouterTraceProfile) {
     let directory = tempfile::tempdir().expect("native directory");
     let (_keys_directory, keys) = crate::encryption::tests::authority("trace-live-runtime");
     let (_ledger_directory, ledger) = crate::suppression::tests::authority("trace-live-runtime");
@@ -798,7 +864,11 @@ fn required_owned_runtime_captures_fences_exact_wire_and_inherits_trace_into_out
             model_profile: profile.clone(),
             recorded_at: TimestampMicros(1_000_000),
         },
-        runtime_settings(&input),
+        {
+            let mut settings = runtime_settings(&input);
+            settings.router_trace_profile = trace_profile;
+            settings
+        },
         &mut budget(),
     )
     .expect("actual runtime starts durably");
@@ -838,6 +908,7 @@ fn required_owned_runtime_captures_fences_exact_wire_and_inherits_trace_into_out
         !wire.contains(FORMAT),
         "protected envelope stays outside reader wire"
     );
+    assert!(!wire.contains(REPLAY_FORMAT));
     let retained = envelope(&completed.prepared);
     assert!(retained.origins.originals.contains(&original.event_id));
     assert!(retained.base_origins.originals.contains(&original.event_id));
@@ -881,6 +952,15 @@ fn required_owned_runtime_captures_fences_exact_wire_and_inherits_trace_into_out
             .as_ref()
             .expect("prepared trace")
             .trace_digest
+    );
+    assert_eq!(
+        manifest
+            .router_trace
+            .as_ref()
+            .expect("profile trace")
+            .header
+            .version,
+        trace_profile.version().expect("explicit protected profile"),
     );
     let saved = service
         .load_run_checkpoint(&input.context, identity.run_id, &mut budget())
