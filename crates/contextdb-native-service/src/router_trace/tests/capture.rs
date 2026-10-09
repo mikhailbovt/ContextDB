@@ -87,6 +87,17 @@ fn planned_fixture(service: &NativeService) -> PlannedFixture {
 }
 
 fn planned_fixture_with_raw(service: &NativeService, raw: bool) -> PlannedFixture {
+    planned_fixture_with_setup(service, raw, None)
+}
+
+pub(in crate::router_trace) type FixtureSetup =
+    fn(&NativeService, &CaptureRequest, &mut PrepareContextRequest);
+
+fn planned_fixture_with_setup(
+    service: &NativeService,
+    raw: bool,
+    setup: Option<FixtureSetup>,
+) -> PlannedFixture {
     let session = SessionId::new();
     let run = AgentRunId::new();
     let mut original = source(
@@ -124,6 +135,9 @@ fn planned_fixture_with_raw(service: &NativeService, raw: bool) -> PlannedFixtur
             neighbor_of: None,
             selection: IndexedSelection::TopK { limit: 2 },
         });
+    }
+    if let Some(setup) = setup {
+        setup(service, &original, &mut plan);
     }
     prepare_catalog(service, &original, raw);
     let source_span = OriginalSourceSpan {
@@ -217,6 +231,16 @@ pub(in crate::router_trace) fn accepted_fixture(
 ) -> TraceCaptureFixture {
     let fixture = planned_fixture(service);
     accepted_from_planned(service, fixture)
+}
+
+pub(in crate::router_trace) fn accepted_fixture_with_setup(
+    service: &Arc<NativeService>,
+    setup: FixtureSetup,
+) -> TraceCaptureFixture {
+    accepted_from_planned(
+        service,
+        planned_fixture_with_setup(service, false, Some(setup)),
+    )
 }
 
 pub(in crate::router_trace) fn accepted_unselected_fixture(

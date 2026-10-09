@@ -296,9 +296,95 @@ impl NativeService {
         context: &AuthenticatedRequestContext,
         id: ObservationId,
     ) -> ServiceResult<()> {
+        self.authorize_derived_custody_with_budget(snapshot, context, id, &mut trace_budget())
+            .map(|_| ())
+    }
+
+    pub(crate) fn authorize_derived_custody_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Option<crate::router_trace::controls::RouterTraceControls>> {
+        self.authorize_derived_custody_inputs(snapshot, context, id, None, budget)
+    }
+
+    pub(crate) fn authorize_derived_custody_with_inputs<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        inputs: &Inputs,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Option<crate::router_trace::controls::RouterTraceControls>> {
+        self.authorize_derived_custody_inputs(snapshot, context, id, Some(inputs), budget)
+    }
+
+    fn authorize_derived_custody_inputs<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        expected: Option<&Inputs>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Option<crate::router_trace::controls::RouterTraceControls>> {
+        let controls =
+            self.admit_derived_custody_inputs(snapshot, context, id, expected, budget)?;
+        if let Some(controls) = &controls {
+            self.authorize_router_trace_controls(snapshot, context, controls, budget)?;
+        }
+        Ok(controls)
+    }
+
+    /// Current copied labels only; the enclosing control frontier verifies all
+    /// immutable material after every direct and inherited label is admitted.
+    pub(crate) fn admit_derived_custody_controls<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Option<crate::router_trace::controls::RouterTraceControls>> {
+        self.admit_derived_custody_inputs(snapshot, context, id, None, budget)
+    }
+
+    fn admit_derived_custody_inputs<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        expected: Option<&Inputs>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Option<crate::router_trace::controls::RouterTraceControls>> {
+        budget.check().map_err(budget_error)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
         self.require_custody_ready(snapshot, &workspace)?;
-        let record = self.custody_record(snapshot, id)?;
+        let record = self.custody_record_inner(snapshot, id, Some(budget))?;
+        if expected.is_some_and(|inputs| *inputs != record.inputs) {
+            return Err(integrity(
+                "accepted trace custody inputs differ from recovery",
+            ));
+        }
+        if let Some(direct) = &record.inputs.trace_controls {
+            let retained = record
+                .trace_controls
+                .as_ref()
+                .ok_or_else(|| integrity("accepted trace lacks its complete origin custody"))?;
+            budget
+                .charge(1, (retained.byte_length()? as u64).saturating_mul(2))
+                .map_err(budget_error)?;
+            let mut whole = record
+                .trace_controls
+                .clone()
+                .ok_or_else(|| integrity("accepted trace lacks its complete origin custody"))?;
+            whole.union_checked(direct)?;
+            if Some(&whole) != record.trace_controls.as_ref() {
+                return Err(integrity(
+                    "accepted trace custody omits direct protected origins",
+                ));
+            }
+        }
         if record.workspace != workspace
             || record
                 .policies
@@ -307,10 +393,7 @@ impl NativeService {
         {
             return Err(permission_denied());
         }
-        if let Some(controls) = &record.trace_controls {
-            self.authorize_router_trace_controls(snapshot, context, controls, &mut trace_budget())?;
-        }
-        Ok(())
+        Ok(record.trace_controls)
     }
 
     // Administrative reconstruction of an archived prefix is independent of
@@ -321,6 +404,17 @@ impl NativeService {
         id: ObservationId,
     ) -> ServiceResult<Vec<AccessPolicy>> {
         Ok(self.custody_record(snapshot, id)?.policies)
+    }
+
+    pub(crate) fn stored_custody_policies_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Vec<AccessPolicy>> {
+        Ok(self
+            .custody_record_inner(snapshot, id, Some(budget))?
+            .policies)
     }
 
     pub(crate) fn stored_router_trace_controls<S: ReadSnapshot>(
@@ -490,10 +584,34 @@ impl NativeService {
         snapshot: &S,
         id: ObservationId,
     ) -> ServiceResult<CustodyRecord> {
-        let record: CustodyRecord = self
-            .raw_value(snapshot, &record_key(id))?
+        self.custody_record_inner(snapshot, id, None)
+    }
+
+    fn custody_record_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        mut budget: Option<&mut QueryBudget>,
+    ) -> ServiceResult<CustodyRecord> {
+        if let Some(shared) = budget.as_deref_mut() {
+            shared.check().map_err(budget_error)?;
+        }
+        let bytes = snapshot
+            .get(&self.keyspaces.continuous, &record_key(id))
+            .map_err(storage_error)?
             .ok_or_else(pending)?;
-        let receipt = self.captured_receipt_metadata(snapshot, id)?;
+        if bytes.len() > MAX_RECORD_BYTES {
+            return Err(integrity("custody record exceeds its stored byte bound"));
+        }
+        if let Some(shared) = budget.as_deref_mut() {
+            shared.charge(0, bytes.len() as u64).map_err(budget_error)?;
+        }
+        let record: CustodyRecord = decode(&bytes, "custody source record")?;
+        let receipt = if let Some(shared) = budget {
+            self.capture_recovery_metadata(snapshot, id, shared)?.0
+        } else {
+            self.captured_receipt_metadata(snapshot, id)?
+        };
         if record.version
             != if record.trace_controls.is_some() {
                 2
@@ -582,6 +700,13 @@ impl NativeService {
 }
 
 pub(super) fn inputs(event: &EventEnvelope) -> ServiceResult<Inputs> {
+    inputs_with_trace_controls(event, crate::router_trace::trace_controls(event)?)
+}
+
+pub(crate) fn inputs_with_trace_controls(
+    event: &EventEnvelope,
+    mut trace_controls: Option<crate::router_trace::controls::RouterTraceControls>,
+) -> ServiceResult<Inputs> {
     let mut inputs = Inputs::default();
     // A declared revision is not a declassification grant, even when the host
     // retains full replacement bytes. Safe transformation needs its own proof.
@@ -599,7 +724,8 @@ pub(super) fn inputs(event: &EventEnvelope) -> ServiceResult<Inputs> {
                 }
             }
             if manifest.router_trace.is_some() {
-                let controls = crate::router_trace::trace_controls(event)?
+                let controls = trace_controls
+                    .take()
                     .ok_or_else(|| integrity("router trace input controls are absent"))?;
                 controls.validate()?;
                 inputs.sources.extend(&controls.originals);
@@ -645,6 +771,9 @@ pub(super) fn inputs(event: &EventEnvelope) -> ServiceResult<Inputs> {
     }
     if inputs.sources.contains(&event.event_id) {
         return Err(invalid("capture custody cannot depend on itself"));
+    }
+    if trace_controls.is_some() {
+        return Err(integrity("non-router event was supplied trace controls"));
     }
     Ok(inputs)
 }

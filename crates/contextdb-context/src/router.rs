@@ -279,6 +279,42 @@ pub struct RouterPreparedMaterial {
     pub evidence: Vec<crate::PackEvidence>,
 }
 
+/// Independent integrity results over retained prepared material. This is not
+/// source acceptance, current authorization or a successful historical replay.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterMaterialVerification {
+    pub support_material: RouterMaterialStatus,
+    pub unit_semantics: RouterMaterialStatus,
+    pub candidate_commitment: RouterMaterialStatus,
+    pub historical_selection: RouterMaterialStatus,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", content = "reason", rename_all = "snake_case")]
+pub enum RouterMaterialStatus {
+    Verified,
+    Unavailable(RouterMaterialUnavailableReason),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouterMaterialUnavailableReason {
+    /// V1 omits the compiler's prepared use action and directive reason, which
+    /// participate in the complete candidate commitment and selection replay.
+    MissingPreparedPolicy,
+}
+
+/// Check retained support material with the authoritative compiler's block
+/// construction. Hash consistency grants no access and does not run a scorer.
+pub fn validate_router_material(
+    request: &AuthorizedRouterRequest,
+    material: &RouterPreparedMaterial,
+    budget: &mut QueryBudget,
+) -> Result<RouterMaterialVerification> {
+    crate::ContextCompiler::validate_router_material(request, material, budget)
+}
+
 impl std::fmt::Debug for RouterPreparedMaterial {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RouterPreparedMaterial")
@@ -452,30 +488,133 @@ impl RouterManifest {
         assembly: &CompiledAssembly,
         budget: &mut QueryBudget,
     ) -> Result<()> {
-        plan.validate(request, budget)?;
+        self.validate_observation(request, plan, budget)?;
         crate::ContextCompiler::validate_router_plan_result(request, plan, assembly, budget)?;
-        if self.format != MANIFEST_FORMAT
-            || self.request_digest != request.digest
-            || self.candidate_digest != request.binding.candidates
-            || self.plan_digest != canonical_digest(plan, budget)?
-            || self.assembly != assembly.manifest
+        if self.assembly != assembly.manifest
             || self.selection_evaluations != assembly.selection_evaluations
-            || self.trained_weights.is_some()
-            || self.training_dataset.is_some()
-            || self.fallback_from.is_some() != self.fallback_revision.is_some()
-            || self.fallback_from.is_some()
-                != (self.score_provenance == ScoreProvenance::ObservedR0Fallback)
             || self.scorer_micros != assembly.scorer_micros
-            || (self.score_provenance == ScoreProvenance::UntrustedProposal
-                && self.scorer_micros != 0)
-            || (self.score_provenance == ScoreProvenance::ObservedR0Fallback
-                && (self.fallback_from.is_none() || self.assembly.scorer != crate::R0Scorer.id()))
         {
             return Err(invalid(
                 "manifest does not describe the accepted compiler result",
             ));
         }
+        Ok(())
+    }
+
+    /// Structural agreement of retained observation metadata. This cannot verify
+    /// historical selection, actual wire bytes or current source authority; use
+    /// `validate` when the complete compiler result is available.
+    pub fn validate_observation(
+        &self,
+        request: &AuthorizedRouterRequest,
+        plan: &RouterSelectionPlan,
+        budget: &mut QueryBudget,
+    ) -> Result<()> {
+        charge(budget, 1, 0)?;
         canonical_bytes(&(request, plan, self), budget)?;
+        plan.validate(request, budget)?;
+        let assembly = &self.assembly;
+        if self.format != MANIFEST_FORMAT
+            || self.request_digest != request.digest
+            || self.candidate_digest != request.binding.candidates
+            || self.plan_digest != canonical_digest(plan, budget)?
+            || assembly.layout != crate::OUTGOING_LAYOUT
+            || assembly.encoder != request.binding.encoder
+            || assembly.model_profile_digest != request.binding.reader_profile
+            || assembly.scorer != request.binding.scorer
+            || assembly.read_set.binding != request.binding.owner
+            || assembly.read_set.scopes != request.context.scopes
+            || assembly
+                .read_set
+                .selected_blocks
+                .iter()
+                .ne(plan.selected_ids.iter())
+            || assembly.wire_digest != plan.wire_digest
+            || assembly.input_tokens != plan.input_tokens
+            || assembly.count_kind != plan.count_kind
+            || assembly.reserved_output_tokens
+                != request.context.model_profile.reserved_output_tokens
+            || assembly.safety_tokens != request.outgoing_budget.safety_tokens
+            || self.selection_evaluations != plan.usage.selection_evaluations
+            || self.selection_evaluations > request.binding.max_evaluations
+            || plan
+                .scores
+                .last()
+                .is_some_and(|score| score.evaluation > self.selection_evaluations)
+            || self.trained_weights.is_some()
+            || self.training_dataset.is_some()
+            || self.fallback_from.is_some() != self.fallback_revision.is_some()
+            || self.fallback_from.is_some()
+                != (self.score_provenance == ScoreProvenance::ObservedR0Fallback)
+            || (self.score_provenance == ScoreProvenance::UntrustedProposal
+                && self.scorer_micros != 0)
+            || (self.score_provenance == ScoreProvenance::ObservedR0Fallback
+                && assembly.scorer != crate::R0Scorer.id())
+            || self
+                .fallback_from
+                .iter()
+                .chain(&self.fallback_revision)
+                .any(|value| {
+                    value.trim().is_empty()
+                        || value.len() > 16384
+                        || value.chars().any(char::is_control)
+                })
+        {
+            return Err(invalid("manifest observation commitments disagree"));
+        }
+        let mut identities = BTreeSet::new();
+        let mut visible = Vec::new();
+        for occurrence in &assembly.occurrences {
+            charge(budget, occurrence.originals.len() as u64 + 1, 0)?;
+            if !identities.insert(&occurrence.id) {
+                return Err(invalid("manifest observation has duplicate occurrences"));
+            }
+            visible.extend(
+                occurrence
+                    .originals
+                    .iter()
+                    .map(|original| original.span.clone()),
+            );
+        }
+        normalize_spans(&mut visible);
+        if visible != plan.visible_originals {
+            return Err(invalid("manifest observation visible originals disagree"));
+        }
+        for expected in [
+            &request.working_state,
+            &request.hot_window,
+            &request.current_turn,
+        ] {
+            charge(
+                budget,
+                (expected.len() + assembly.occurrences.len()) as u64,
+                0,
+            )?;
+            let ids: BTreeSet<_> = expected.iter().map(|occurrence| &occurrence.id).collect();
+            let observed = assembly
+                .occurrences
+                .iter()
+                .filter(|occurrence| ids.contains(&occurrence.id));
+            if observed.ne(expected.iter()) {
+                return Err(invalid("manifest observation base occurrences disagree"));
+            }
+        }
+        let mut originals = visible;
+        charge(budget, request.units.len() as u64, 0)?;
+        let units: BTreeMap<_, _> = request.units.iter().map(|unit| (&unit.id, unit)).collect();
+        for choice in &plan.choices {
+            charge(budget, 1, 0)?;
+            let unit = units
+                .get(&choice.id)
+                .ok_or_else(|| invalid("unknown observation choice"))?;
+            let support = &unit.support_alternatives[choice.alternative_index as usize];
+            charge(budget, support.originals.len() as u64, 0)?;
+            originals.extend(support.originals.iter().cloned());
+        }
+        normalize_spans(&mut originals);
+        if originals != assembly.read_set.originals {
+            return Err(invalid("manifest observation read-set originals disagree"));
+        }
         Ok(())
     }
 }

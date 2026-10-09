@@ -11,6 +11,9 @@ use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
+#[path = "router_material.rs"]
+mod material;
+
 fn routed(
     request: &CompileAssemblyRequest,
     provider: &dyn AssemblyProvider,
