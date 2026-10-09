@@ -5,7 +5,7 @@ Qwen3.5-0.8B-Base. Utility is an independent
 `sigmoid(useful_logit - not_useful_logit)` with masked multi-label BCE.
 It accepts two exact built-in public synthetic corpora. The initial-context
 profile has 32 examples: eight train, eight development, eight test and eight
-quarantined. The rendered-closure profile has 48 histories and 268 actual
+quarantined. The rendered-closure profile has 48 cases and 268 actual
 compiler callbacks. Only train and development reach the formatter, tokenizer
 or model. Arbitrary or private corpus intake and training-purpose admission are
 unsupported.
@@ -104,8 +104,9 @@ The public artifact allowlist is installed only after actual generation and cold
 verification; a self-declared synthetic/private directory is not accepted.
 The pinned conditional manifest is
 `ef04265b868160f81902b5144a0115934fe0af10bcd6a59843eae20f3a286eac`:
-48 cases and 268 callbacks, with 12 cases/67 callbacks per fold. Its admitted
-population is 24 supervised train and 24 development base groups; 134 held-out
+48 cases and 268 callbacks, with 12 cases/67 callbacks per fold and one
+independent connected source group per fold. Its admitted population is 24
+supervised train and 24 development base groups; 134 held-out
 callbacks and two train/development all-unknown groups never reach the model.
 
 `check.py` uses only the standard library: three grouped gates cover input/label
