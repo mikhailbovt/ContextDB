@@ -1,8 +1,9 @@
 # Context router corpus
 
 The learned router will use independent sigmoid utility scores and masked
-multi-label BCE targets. Kev-0.8B is the intended warm start; its released
-softmax task head is not this scoring contract. No weights are trained here.
+multi-label BCE targets. The optional [local Kev trainer](kev/README.md) warm-starts
+the pinned Kev-0.8B adapter and pointer head; its released softmax task is separate
+from this utility objective. Native production scoring remains R0.
 
 Generate the built-in local synthetic corpus, then verify it in a fresh process:
 
@@ -29,9 +30,9 @@ only built-in synthetic originals. It does not export private native traces.
 - `targets.json`: independent source-set labels; unknown means masked, not false.
 - `lineage.json`: source versions, derivation parents and connected time splits.
 
-IDs, digests and fixture names are association metadata. A future Kev input
-renderer must exclude them and use opaque candidate slots; serializing this
-whole record directly into a training prompt would permit fixture shortcuts.
+IDs, digests and fixture names are association metadata. The Kev input renderer
+excludes them and uses opaque candidate slots; serializing this whole record
+directly into a training prompt would permit fixture shortcuts.
 
 Four distinct synthetic source groups cover early and corrected facts, a local
 constraint, complementary memories, an irrelevant query, Russian/English queries
@@ -48,8 +49,9 @@ ordered wire and token counts. Each compile reserves 200,000 work units and 16 M
 from the batch; replay reserves the recorded remaining selector allowance with the
 same enclosing deadline and cancellation. Completed retry reuses existing bytes.
 
-Behavior observations and labels never enter the feature builder. Selected-base
-semantic scoring and calibrated utility remain unavailable. Synthetic artifacts
+Behavior observations and labels never enter the feature builder. This corpus
+and trainer use initial context, without the live compiler's selected-base/trial
+semantic scoring view; calibrated utility remains unavailable. Synthetic artifacts
 have no native acceptance or current source-wire proof. Native v1 refuses prepared
 policy extensions. These columns stay separate from historical integrity; hashes
 and synthetic markers grant no rights.
@@ -61,4 +63,6 @@ The explicit `required_replay_v2` native profile retains full prepared state and
 separate behavior observations under encrypted custody. Accepted reads check
 current rights and retained metadata; historical selection is unavailable until
 the consumer executes detached R0 replay. Real corpus export, training-purpose
-admission, Kev training, rollout and paired memory benchmarks remain later work.
+admission, learned production rollout and paired memory benchmarks remain later
+work. The bounded public synthetic trainer is development infrastructure; its
+metrics and cold reload do not establish generalization or reader benefit.
