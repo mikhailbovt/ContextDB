@@ -5,6 +5,9 @@ use super::*;
 use crate::assembly::{
     OriginalInventory, charge, digest, serialization, validate_message, validate_protocol,
 };
+use crate::router::{
+    self, AuthorizedRouterRequest, RoutedAssembly, RouterScore, RouterSelectionPlan,
+};
 use crate::{
     AssemblyProvider, AssemblyReadSet, CompileAssemblyRequest, CompiledAssembly, ContextScorer,
     EncodedOutgoing, EvidenceDependencies, OUTGOING_LAYOUT, OutgoingAssemblyManifest,
@@ -13,6 +16,14 @@ use crate::{
 };
 use contextdb_core::{ContentDigest, OriginalSourceSpan};
 use contextdb_recall::QueryBudget;
+
+mod routing;
+use routing::{finish, make_request, score_record};
+
+struct RouterRecord {
+    request: AuthorizedRouterRequest,
+    scores: Vec<RouterScore>,
+}
 
 #[derive(Clone)]
 struct Unit {
@@ -49,6 +60,45 @@ struct SelectionWinner {
 }
 
 impl ContextCompiler {
+    pub(crate) fn validate_router_plan_result(
+        request: &AuthorizedRouterRequest,
+        plan: &RouterSelectionPlan,
+        assembly: &CompiledAssembly,
+        budget: &mut QueryBudget,
+    ) -> Result<()> {
+        let context = &request.context;
+        let pack = &assembly.context.pack;
+        if request.binding.owner != assembly.manifest.read_set.binding
+            || request.pack_id != pack.id
+            || context.snapshot != pack.snapshot
+            || context.purpose != pack.purpose
+            || context.scopes != assembly.manifest.read_set.scopes
+            || pack.scope_manifest
+                != (ScopeManifest {
+                    workspace: context.principal.workspace.clone(),
+                    subject: context.principal.subject.clone(),
+                    scopes: context.scopes.clone(),
+                    purpose: context.purpose,
+                    temporal_view: context.temporal_view,
+                    filter_digest: context.filter_digest.clone(),
+                })
+            || context.budgets != pack.compilation.budget
+            || request.binding.reader_profile != assembly.manifest.model_profile_digest
+            || request.binding.encoder != assembly.manifest.encoder
+            || request.binding.tokenizer != assembly.outgoing.tokenizer
+            || request.binding.scorer != assembly.manifest.scorer
+            || context.model_profile.reserved_output_tokens
+                != assembly.manifest.reserved_output_tokens
+            || request.outgoing_budget.safety_tokens != assembly.manifest.safety_tokens
+            || &routing::make_plan(assembly, request, &plan.scores, budget)? != plan
+        {
+            return Err(router::invalid(
+                "plan does not describe the compiler result",
+            ));
+        }
+        Ok(())
+    }
+
     /// Compile the complete request after hot-window eviction. The scorer can
     /// only select optional authorized units; mandatory closure is always retained.
     pub fn compile_assembly(
@@ -60,6 +110,225 @@ impl ContextCompiler {
         scorer: &dyn ContextScorer,
         budget: &mut QueryBudget,
     ) -> Result<CompiledAssembly> {
+        Ok(self
+            .compile_assembly_inner(
+                request,
+                provider,
+                tokenizer,
+                encoder,
+                scorer,
+                budget,
+                false,
+                None,
+                std::time::Instant::now(),
+            )?
+            .0)
+    }
+
+    /// Observe the actual R0/scorer path without an additional scoring call.
+    pub fn compile_assembly_with_router(
+        &self,
+        request: &CompileAssemblyRequest,
+        provider: &dyn AssemblyProvider,
+        tokenizer: &dyn TokenCounter,
+        encoder: &dyn OutgoingEncoder,
+        scorer: &dyn ContextScorer,
+        budget: &mut QueryBudget,
+    ) -> Result<RoutedAssembly> {
+        let started = std::time::Instant::now();
+        let work = budget.remaining_work();
+        let bytes = budget.remaining_bytes();
+        let result = self.compile_assembly_inner(
+            request, provider, tokenizer, encoder, scorer, budget, true, None, started,
+        );
+        let (assembly, record, fallback) = match result {
+            Ok((assembly, record)) => (assembly, record, false),
+            Err(ContextError::RouterScore(_))
+                if budget.check().is_err()
+                    || budget.remaining_work() == 0
+                    || budget.remaining_bytes() == 0 =>
+            {
+                return Err(ContextError::BudgetExceeded(
+                    "shared router allowance exhausted before fallback".into(),
+                ));
+            }
+            Err(ContextError::RouterScore(_))
+                if scorer.id() != crate::R0Scorer.id()
+                    && budget.check().is_ok()
+                    && budget.remaining_work() > 0
+                    && budget.remaining_bytes() > 0 =>
+            {
+                require_router_deadline(started, budget)?;
+                let (assembly, record) = self.compile_assembly_inner(
+                    request,
+                    provider,
+                    tokenizer,
+                    encoder,
+                    &crate::R0Scorer,
+                    budget,
+                    true,
+                    None,
+                    started,
+                )?;
+                (assembly, record, true)
+            }
+            Err(error) => return Err(error),
+        };
+        let mut result = finish(
+            assembly,
+            record.ok_or_else(|| router::invalid("missing compiler record"))?,
+            budget,
+        )?;
+        if fallback {
+            result.manifest.fallback_from = Some(scorer.id().into());
+            result.manifest.fallback_revision = Some(scorer.revision().into());
+            result.manifest.score_provenance = router::ScoreProvenance::ObservedR0Fallback;
+        }
+        result.manifest.compilation_work_units = work - budget.remaining_work();
+        result.manifest.compilation_bytes_processed = bytes - budget.remaining_bytes();
+        result.manifest.compilation_micros = elapsed_micros(started);
+        router::canonical_bytes(&(&result.request, &result.plan, &result.manifest), budget)?;
+        require_router_deadline(started, budget)?;
+        Ok(result)
+    }
+
+    /// Rebuild current authority and execute a proposal through the same closure,
+    /// union rendering, tokenizer and owner read-set checks. No scorer is called.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "fresh owner and encoding dependencies are explicit"
+    )]
+    pub fn compile_router_plan(
+        &self,
+        request: &CompileAssemblyRequest,
+        provider: &dyn AssemblyProvider,
+        tokenizer: &dyn TokenCounter,
+        encoder: &dyn OutgoingEncoder,
+        expected_scorer: &dyn ContextScorer,
+        plan: &RouterSelectionPlan,
+        budget: &mut QueryBudget,
+    ) -> Result<RoutedAssembly> {
+        let started = std::time::Instant::now();
+        let work = budget.remaining_work();
+        let bytes = budget.remaining_bytes();
+        let (assembly, record) = self.compile_assembly_inner(
+            request,
+            provider,
+            tokenizer,
+            encoder,
+            expected_scorer,
+            budget,
+            true,
+            Some(plan),
+            started,
+        )?;
+        let mut result = finish(
+            assembly,
+            record.ok_or_else(|| router::invalid("missing compiler record"))?,
+            budget,
+        )?;
+        // Timing is local execution evidence, not a replayed score or caller cost.
+        if result.plan != *plan {
+            return Err(ContextError::RouterProposal(
+                "proposal differs from actual compiler result".into(),
+            ));
+        }
+        result.manifest.scorer_micros = 0;
+        result.manifest.score_provenance = router::ScoreProvenance::UntrustedProposal;
+        result.manifest.compilation_work_units = work - budget.remaining_work();
+        result.manifest.compilation_bytes_processed = bytes - budget.remaining_bytes();
+        result.manifest.compilation_micros = elapsed_micros(started);
+        router::canonical_bytes(&(&result.request, &result.plan, &result.manifest), budget)?;
+        require_router_deadline(started, budget)?;
+        Ok(result)
+    }
+
+    /// Explicit host fallback policy: a malformed/stale proposal is rejected,
+    /// then at most one R0 compile reauthorizes the original request using only
+    /// the remaining shared allowance. Owner/provider/global failures propagate.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "explicit original owner and encoding dependencies"
+    )]
+    pub fn compile_router_plan_or_r0(
+        &self,
+        request: &CompileAssemblyRequest,
+        provider: &dyn AssemblyProvider,
+        tokenizer: &dyn TokenCounter,
+        encoder: &dyn OutgoingEncoder,
+        expected_scorer: &dyn ContextScorer,
+        plan: &RouterSelectionPlan,
+        budget: &mut QueryBudget,
+    ) -> Result<RoutedAssembly> {
+        let work = budget.remaining_work();
+        let bytes = budget.remaining_bytes();
+        let started = std::time::Instant::now();
+        match self.compile_router_plan(
+            request,
+            provider,
+            tokenizer,
+            encoder,
+            expected_scorer,
+            plan,
+            budget,
+        ) {
+            Ok(result) => Ok(result),
+            Err(ContextError::RouterProposal(_))
+                if budget.check().is_ok()
+                    && budget.remaining_work() > 0
+                    && budget.remaining_bytes() > 0 =>
+            {
+                require_router_deadline(started, budget)?;
+                let (assembly, record) = self.compile_assembly_inner(
+                    request,
+                    provider,
+                    tokenizer,
+                    encoder,
+                    &crate::R0Scorer,
+                    budget,
+                    true,
+                    None,
+                    started,
+                )?;
+                let mut result = finish(
+                    assembly,
+                    record.ok_or_else(|| router::invalid("missing compiler record"))?,
+                    budget,
+                )?;
+                result.manifest.fallback_from = Some(expected_scorer.id().into());
+                result.manifest.fallback_revision = Some(expected_scorer.revision().into());
+                result.manifest.score_provenance = router::ScoreProvenance::ObservedR0Fallback;
+                result.manifest.compilation_work_units = work - budget.remaining_work();
+                result.manifest.compilation_bytes_processed = bytes - budget.remaining_bytes();
+                result.manifest.compilation_micros = elapsed_micros(started);
+                router::canonical_bytes(
+                    &(&result.request, &result.plan, &result.manifest),
+                    budget,
+                )?;
+                require_router_deadline(started, budget)?;
+                Ok(result)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "single authoritative pipeline for legacy and router entries"
+    )]
+    fn compile_assembly_inner(
+        &self,
+        request: &CompileAssemblyRequest,
+        provider: &dyn AssemblyProvider,
+        tokenizer: &dyn TokenCounter,
+        encoder: &dyn OutgoingEncoder,
+        scorer: &dyn ContextScorer,
+        budget: &mut QueryBudget,
+        capture: bool,
+        proposal: Option<&RouterSelectionPlan>,
+        prepare_started: std::time::Instant,
+    ) -> Result<(CompiledAssembly, Option<RouterRecord>)> {
+        let entry_allowance = (budget.remaining_work(), budget.remaining_bytes());
         let context = &request.context;
         context.validate()?;
         charge(budget, 1, 0)?;
@@ -303,7 +572,36 @@ impl ContextCompiler {
                 prepared.push(unknown);
             }
         }
-        selected = closure(&selected, &units, &prepared)?;
+        selected = if capture {
+            closure_bounded(&selected, &units, &prepared, budget)?
+        } else {
+            closure(&selected, &units, &prepared)?
+        };
+        let mut router_record = if capture {
+            Some(RouterRecord {
+                request: make_request(
+                    request,
+                    &binding,
+                    &units,
+                    &selected,
+                    &base_outgoing,
+                    scorer,
+                    encoder,
+                    entry_allowance,
+                    budget,
+                )?,
+                scores: Vec::new(),
+            })
+        } else {
+            None
+        };
+        if let (Some(plan), Some(record)) = (proposal, &router_record) {
+            plan.validate(&record.request, budget)
+                .map_err(|error| match error {
+                    ContextError::InvalidRequest(message) => ContextError::RouterProposal(message),
+                    other => other,
+                })?;
+        }
         let mut evaluations = 0;
         let mut best = trial(
             request,
@@ -322,7 +620,13 @@ impl ContextCompiler {
         let mut scorer_duration = std::time::Duration::ZERO;
         let mut raw_recall_pressure: Option<RawRecallPressure> = None;
         let mut selected_raw_original = false;
+        let mut scorer_work = 0_u64;
         loop {
+            if capture && elapsed_micros(prepare_started) > 30_000_000 {
+                return Err(ContextError::BudgetExceeded(
+                    "router prepare deadline exceeded".into(),
+                ));
+            }
             let mut units_to_score: BTreeSet<BTreeSet<BlockId>> = BTreeSet::new();
             let mut pairs = 0;
             for (id, unit) in &units {
@@ -347,8 +651,14 @@ impl ContextCompiler {
                 evaluations += 1;
                 let mut trial_ids = selected.clone();
                 trial_ids.extend(seeds.iter().cloned());
-                let Ok(trial_ids) = closure(&trial_ids, &units, &prepared) else {
-                    continue;
+                let trial_ids = match if capture {
+                    closure_bounded(&trial_ids, &units, &prepared, budget)
+                } else {
+                    closure(&trial_ids, &units, &prepared)
+                } {
+                    Ok(ids) => ids,
+                    Err(error @ ContextError::BudgetExceeded(_)) if capture => return Err(error),
+                    Err(_) => continue,
                 };
                 let trial = match trial(
                     request,
@@ -393,9 +703,60 @@ impl ContextCompiler {
                     }),
                 };
                 let started = std::time::Instant::now();
-                let score = scorer.score(&unit, budget);
-                scorer_duration += started.elapsed();
-                let Some(value) = score? else {
+                let score = if let (Some(plan), Some(record)) = (proposal, &router_record) {
+                    let saved = plan
+                        .scores
+                        .iter()
+                        .find(|score| score.evaluation == evaluations)
+                        .ok_or_else(|| {
+                            ContextError::RouterProposal("missing score evaluation".into())
+                        })?;
+                    let actual = score_record(
+                        &record.request,
+                        &selected,
+                        &best,
+                        &unit,
+                        &trial,
+                        evaluations,
+                        saved.utility_micros,
+                        budget,
+                    )?;
+                    if actual != *saved {
+                        return Err(ContextError::RouterProposal(
+                            "stale score base or trial material".into(),
+                        ));
+                    }
+                    saved.utility_micros
+                } else {
+                    let before_work = budget.remaining_work();
+                    let value = scorer.score(&unit, budget)?;
+                    scorer_duration += started.elapsed();
+                    scorer_work = scorer_work.saturating_add(before_work - budget.remaining_work());
+                    if capture
+                        && (scorer_duration.as_micros() > u128::from(scorer.latency_limit_micros())
+                            || scorer_work
+                                > u64::from(context.budgets.max_selection_evaluations) * 1024)
+                    {
+                        return Err(ContextError::RouterScore(
+                            "scorer work or cooperative subdeadline exceeded".into(),
+                        ));
+                    }
+                    value
+                };
+                if let Some(record) = &mut router_record {
+                    let score = score_record(
+                        &record.request,
+                        &selected,
+                        &best,
+                        &unit,
+                        &trial,
+                        evaluations,
+                        score,
+                        budget,
+                    )?;
+                    record.scores.push(score);
+                }
+                let Some(value) = score else {
                     continue;
                 };
                 if value == 0 {
@@ -489,6 +850,11 @@ impl ContextCompiler {
             binding,
         };
         provider.validate_read_set(&read_set, budget)?;
+        if capture && elapsed_micros(prepare_started) > 30_000_000 {
+            return Err(ContextError::BudgetExceeded(
+                "router prepare deadline exceeded".into(),
+            ));
+        }
         best.fit.pack.validate()?;
         let canonical_json = CanonicalSerializer::to_json(&best.fit.pack)?;
         let canonical_protobuf = CanonicalSerializer::to_protobuf(&best.fit.pack)?;
@@ -521,7 +887,7 @@ impl ContextCompiler {
             wire_digest: ContentDigest::from_bytes(*blake3::hash(&best.outgoing.wire).as_bytes()),
         };
         charge(budget, 1, 0)?;
-        Ok(CompiledAssembly {
+        let assembly = CompiledAssembly {
             context: CompiledContext {
                 pack: best.fit.pack,
                 rendered: best.fit.rendered,
@@ -540,14 +906,49 @@ impl ContextCompiler {
             } else {
                 raw_recall_pressure
             },
-        })
+        };
+        Ok((assembly, router_record))
     }
+}
+
+fn elapsed_micros(started: std::time::Instant) -> u64 {
+    u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
+}
+
+fn require_router_deadline(started: std::time::Instant, budget: &QueryBudget) -> Result<()> {
+    budget.check().map_err(|reason| {
+        ContextError::BudgetExceeded(format!("shared router allowance: {reason:?}"))
+    })?;
+    if elapsed_micros(started) > 30_000_000 {
+        return Err(ContextError::BudgetExceeded(
+            "router prepare deadline exceeded".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn closure(
     seeds: &BTreeSet<BlockId>,
     units: &BTreeMap<BlockId, Unit>,
     prepared: &[PreparedCandidate],
+) -> Result<BTreeSet<BlockId>> {
+    closure_inner(seeds, units, prepared, None)
+}
+
+fn closure_bounded(
+    seeds: &BTreeSet<BlockId>,
+    units: &BTreeMap<BlockId, Unit>,
+    prepared: &[PreparedCandidate],
+    budget: &mut QueryBudget,
+) -> Result<BTreeSet<BlockId>> {
+    closure_inner(seeds, units, prepared, Some(budget))
+}
+
+fn closure_inner(
+    seeds: &BTreeSet<BlockId>,
+    units: &BTreeMap<BlockId, Unit>,
+    prepared: &[PreparedCandidate],
+    mut budget: Option<&mut QueryBudget>,
 ) -> Result<BTreeSet<BlockId>> {
     let mut result = seeds.clone();
     loop {
@@ -558,7 +959,13 @@ fn closure(
                     "hard dependency is not authorized or available".into(),
                 ));
             };
+            if let Some(budget) = &mut budget {
+                charge(budget, unit.dependencies.hard.len() as u64 + 1, 0)?;
+            }
             result.extend(unit.dependencies.hard.iter().cloned());
+        }
+        if let Some(budget) = &mut budget {
+            charge(budget, (result.len() * prepared.len()) as u64 + 1, 0)?;
         }
         close_conflicts(prepared, &mut result)?;
         if result.len() == before {

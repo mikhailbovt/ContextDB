@@ -143,6 +143,14 @@ pub struct ScoringUnit {
 
 pub trait ContextScorer: std::fmt::Debug + Send + Sync {
     fn id(&self) -> &str;
+    /// Immutable implementation/weights revision used by opt-in router bindings.
+    fn revision(&self) -> &str {
+        self.id()
+    }
+    /// Cooperative aggregate scorer deadline for the opt-in router stage.
+    fn latency_limit_micros(&self) -> u64 {
+        1_000_000
+    }
     /// None means STOP for this optional unit, without removing mandatory closure.
     fn score(&self, unit: &ScoringUnit, budget: &mut QueryBudget) -> Result<Option<u64>>;
 }
