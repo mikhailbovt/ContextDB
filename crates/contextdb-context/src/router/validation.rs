@@ -68,8 +68,14 @@ impl RouterBinding {
         ] {
             text(value)?;
         }
-        if self.feature_schema != FEATURE_SCHEMA
-            || self.descriptor_schema != DESCRIPTOR_SCHEMA
+        let text_calls = if self.feature_schema == FEATURE_SCHEMA {
+            0
+        } else if self.feature_schema == crate::SEMANTIC_SCORING_FEATURE_SCHEMA {
+            self.max_evaluations
+        } else {
+            return Err(invalid("unsupported semantic feature profile"));
+        };
+        if self.descriptor_schema != DESCRIPTOR_SCHEMA
             || self.max_evaluations == 0
             || self.max_evaluations as usize > MAX_SCORES
             || self.max_record_bytes as usize != MAX_RECORD_BYTES
@@ -80,7 +86,7 @@ impl RouterBinding {
             || self.max_scorer_micros == 0
             || self.max_scorer_micros > 10_000_000
             || self.max_prepare_micros != 30_000_000
-            || self.max_text_rerank_pairs != 0
+            || self.max_text_rerank_pairs != text_calls
         {
             return Err(invalid("unsupported scorer work or latency profile"));
         }

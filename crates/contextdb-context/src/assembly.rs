@@ -8,6 +8,8 @@ use contextdb_recall::QueryBudget;
 use serde::{Deserialize, Serialize};
 
 mod replay;
+mod scoring;
+pub use scoring::*;
 
 use crate::{BlockId, CompileRequest, CompiledContext, ContextProvider, EvidenceHandle, Result};
 
@@ -150,6 +152,20 @@ pub trait ContextScorer: std::fmt::Debug + Send + Sync {
     /// Cooperative aggregate scorer deadline for the opt-in router stage.
     fn latency_limit_micros(&self) -> u64 {
         1_000_000
+    }
+    /// Explicit semantic opt-in. None preserves the scalar path and its costs.
+    fn semantic_profile(&self) -> Option<SemanticScoringProfile> {
+        None
+    }
+    /// Actual selected and proposed material, with no scalar prior or labels.
+    fn score_semantic(
+        &self,
+        _unit: &SemanticScoringUnit<'_>,
+        _budget: &mut QueryBudget,
+    ) -> Result<Option<u64>> {
+        Err(crate::ContextError::RouterScore(
+            "semantic scorer profile has no implementation".into(),
+        ))
     }
     /// None means STOP for this optional unit, without removing mandatory closure.
     fn score(&self, unit: &ScoringUnit, budget: &mut QueryBudget) -> Result<Option<u64>>;

@@ -27,6 +27,14 @@ pub struct StepMeasurement {
     pub prepare_micros: u64,
     /// Number of actual compiler invocations.
     pub prepare_attempts: u32,
+    /// Text bytes inspected for automatic user/tool/working/assistant search cues,
+    /// summed across prepare attempts; this is not archive retrieval coverage.
+    #[serde(default)]
+    pub automatic_recall_inspected_bytes: u64,
+    /// Bytes outside the bounded cue windows. They remain in the original archive
+    /// and, when resident, in the model base; no full semantic recall is implied.
+    #[serde(default)]
+    pub automatic_recall_omitted_bytes: u64,
     /// Scorer-only time when every prepare attempt returned measurements.
     /// Failed compiler attempts make this unknown, not free.
     pub scorer_micros: Option<u64>,

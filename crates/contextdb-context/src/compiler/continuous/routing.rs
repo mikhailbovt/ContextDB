@@ -170,7 +170,12 @@ pub(super) fn make_request(
         encoder: encoder.id().into(),
         scorer: scorer.id().into(),
         scorer_revision: scorer.revision().into(),
-        feature_schema: FEATURE_SCHEMA.into(),
+        feature_schema: if scorer.semantic_profile().is_some() {
+            crate::SEMANTIC_SCORING_FEATURE_SCHEMA
+        } else {
+            FEATURE_SCHEMA
+        }
+        .into(),
         descriptor_schema: DESCRIPTOR_SCHEMA.into(),
         budgets: canonical_digest(
             &(
@@ -189,7 +194,11 @@ pub(super) fn make_request(
         max_prepare_micros: 30_000_000,
         shared_work_at_entry: entry_allowance.0,
         shared_bytes_at_entry: entry_allowance.1,
-        max_text_rerank_pairs: 0,
+        max_text_rerank_pairs: if scorer.semantic_profile().is_some() {
+            request.context.budgets.max_selection_evaluations
+        } else {
+            0
+        },
     };
     AuthorizedRouterRequest {
         format: REQUEST_FORMAT.into(),

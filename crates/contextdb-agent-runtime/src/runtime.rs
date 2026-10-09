@@ -10,7 +10,7 @@ use contextdb_service::*;
 use super::{
     CacheResidencyController, CacheResidencyPolicy, ModelDispatchFence, ModelReconciliation,
     PreparationHook, ReaderAdapter, ReaderOutcome, ReaderReply, RollingPolicy, RuntimeMeasurements,
-    StepMeasurement, charge, context_error, conversation_routes, exhausted, invalid, rolling,
+    StepMeasurement, charge, context_error, exhausted, invalid, rolling,
     telemetry::{self, Telemetry},
 };
 
@@ -601,7 +601,10 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 measurement.preparation_hook_micros += telemetry::elapsed(started);
                 hook_result?;
                 let mut routes = extra_routes.to_vec();
-                for mut route in conversation_routes(&base) {
+                let cues = rolling::current_step_routes(&base, budget)?;
+                measurement.automatic_recall_inspected_bytes += cues.inspected_bytes;
+                measurement.automatic_recall_omitted_bytes += cues.omitted_bytes;
+                for mut route in cues.routes {
                     route.filter = self.settings.automatic_recall_filter.clone();
                     if routes.len() == 8 {
                         break;

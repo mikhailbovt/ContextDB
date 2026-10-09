@@ -14,6 +14,7 @@ use crate::{
     AssemblyBinding, BlockId, CompiledAssembly, CompressionLevel, ContextBudgetUsage, ContextError,
     ContextScorer, EvidenceHandle, InstructionCapability, InterpretationRule,
     OutgoingAssemblyManifest, PackBlockKind, RequestCountKind, Result, ScoringUnit,
+    SemanticScoringProfile, SemanticScoringUnit,
 };
 
 mod strict;
@@ -62,7 +63,7 @@ pub struct RouterBinding {
     pub max_prepare_micros: u64,
     pub shared_work_at_entry: u64,
     pub shared_bytes_at_entry: u64,
-    /// This feature-only profile has no cross-encoder text pairs.
+    /// Zero for scalar features; semantic callbacks are bounded by evaluations.
     pub max_text_rerank_pairs: u32,
 }
 
@@ -565,6 +566,20 @@ pub trait FiniteContextScorer: std::fmt::Debug + Send + Sync {
     fn latency_limit_micros(&self) -> u64 {
         1_000_000
     }
+    /// Explicit semantic opt-in; scalar scorers keep their existing path.
+    fn semantic_profile(&self) -> Option<SemanticScoringProfile> {
+        None
+    }
+    /// Actual prepared selection material, excluding legacy scalar priors.
+    fn score_semantic(
+        &self,
+        _unit: &SemanticScoringUnit<'_>,
+        _budget: &mut QueryBudget,
+    ) -> Result<Option<f64>> {
+        Err(ContextError::RouterScore(
+            "semantic finite scorer profile has no implementation".into(),
+        ))
+    }
     fn score(&self, unit: &ScoringUnit, budget: &mut QueryBudget) -> Result<Option<f64>>;
 }
 
@@ -580,6 +595,21 @@ impl<T: FiniteContextScorer> ContextScorer for FiniteScoreAdapter<T> {
     }
     fn latency_limit_micros(&self) -> u64 {
         self.0.latency_limit_micros()
+    }
+    fn semantic_profile(&self) -> Option<SemanticScoringProfile> {
+        self.0.semantic_profile()
+    }
+    fn score_semantic(
+        &self,
+        unit: &SemanticScoringUnit<'_>,
+        budget: &mut QueryBudget,
+    ) -> Result<Option<u64>> {
+        Ok(self
+            .0
+            .score_semantic(unit, budget)?
+            .map(finite_micros)
+            .transpose()?
+            .filter(|value| *value > 0))
     }
     fn score(&self, unit: &ScoringUnit, budget: &mut QueryBudget) -> Result<Option<u64>> {
         Ok(self

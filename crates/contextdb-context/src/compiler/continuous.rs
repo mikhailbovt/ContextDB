@@ -12,7 +12,8 @@ use crate::{
     AssemblyProvider, AssemblyReadSet, CompileAssemblyRequest, CompiledAssembly, ContextScorer,
     EncodedOutgoing, EvidenceDependencies, OUTGOING_LAYOUT, OutgoingAssemblyManifest,
     OutgoingEncoder, OutgoingMessage, OutgoingOccurrence, OutgoingRole, OutgoingZone,
-    RawRecallPressure, RequestCountKind, ScoringUnit, VisibleOriginal,
+    RawRecallPressure, RequestCountKind, ScoringUnit, SemanticAssemblyView, SemanticScoringBudget,
+    SemanticScoringIdentity, SemanticScoringUnit, SemanticVariantChoice, VisibleOriginal,
 };
 use contextdb_core::{ContentDigest, OriginalSourceSpan};
 use contextdb_recall::QueryBudget;
@@ -49,9 +50,21 @@ struct Trial {
     outgoing: EncodedOutgoing,
     added_bytes: u64,
     outgoing_overflow: bool,
+    chosen_variants: Option<Vec<SemanticVariantChoice>>,
 }
 
 impl Trial {
+    fn semantic_view(&self) -> SemanticAssemblyView<'_> {
+        SemanticAssemblyView {
+            pack: &self.fit.pack,
+            messages: &self.messages,
+            chosen_variants: self.chosen_variants.as_deref().unwrap_or_default(),
+            input_tokens: self.outgoing.input_tokens,
+            count_kind: self.outgoing.count_kind,
+            wire_bytes: self.outgoing.wire.len() as u64,
+            added_original_bytes: self.added_bytes,
+        }
+    }
     fn require_outgoing_fit(self) -> Result<Self> {
         if self.outgoing_overflow {
             return Err(ContextError::BudgetExceeded(
@@ -838,6 +851,8 @@ fn select_prepared(
         mut router_record,
     } = preparation;
     let context = &request.context;
+    let semantic = scorer.semantic_profile().is_some();
+    let retain_semantics = semantic && proposal.is_none();
     let mut evaluations = 0;
     let mut best = trial(
         request,
@@ -849,6 +864,7 @@ fn select_prepared(
         evaluations,
         tokenizer,
         encoder,
+        retain_semantics,
         budget,
     )?
     .require_outgoing_fit()?;
@@ -858,7 +874,7 @@ fn select_prepared(
     let mut selected_raw_original = false;
     let mut scorer_work = 0_u64;
     loop {
-        if capture && elapsed_micros(prepare_started) > 30_000_000 {
+        if (capture || semantic) && elapsed_micros(prepare_started) > 30_000_000 {
             return Err(ContextError::BudgetExceeded(
                 "router prepare deadline exceeded".into(),
             ));
@@ -915,6 +931,7 @@ fn select_prepared(
                 evaluations,
                 tokenizer,
                 encoder,
+                retain_semantics,
                 budget,
             ) {
                 Ok(trial) => trial,
@@ -981,10 +998,68 @@ fn select_prepared(
                 saved.utility_micros
             } else {
                 let before_work = budget.remaining_work();
-                let value = scorer.score(&unit, budget)?;
+                let value = if semantic {
+                    charge(budget, 1, 0)?;
+                    let timeout = budget.remaining_timeout_micros().map_err(|reason| {
+                        ContextError::BudgetExceeded(format!(
+                            "shared semantic allowance: {reason:?}"
+                        ))
+                    })?;
+                    let view = SemanticScoringUnit {
+                        base: &request.base,
+                        selected: best.semantic_view(),
+                        trial: trial.semantic_view(),
+                        identity: SemanticScoringIdentity {
+                            seed_ids: &unit.seeds,
+                            closure_ids: &unit.closure,
+                        },
+                        budget: SemanticScoringBudget {
+                            memory: context.budgets,
+                            outgoing: request.budget,
+                            selected_usage: best.fit.pack.compilation.usage,
+                            trial_usage: trial.fit.pack.compilation.usage,
+                            remaining_work: budget.remaining_work(),
+                            remaining_bytes: budget.remaining_bytes(),
+                            remaining_timeout_micros: timeout.min(
+                                30_000_000_u64.saturating_sub(elapsed_micros(prepare_started)),
+                            ),
+                            remaining_scorer_work: (u64::from(
+                                context.budgets.max_selection_evaluations,
+                            ) * 1024)
+                                .saturating_sub(
+                                    scorer_work
+                                        .saturating_add(before_work - budget.remaining_work()),
+                                ),
+                            remaining_scorer_micros: scorer.latency_limit_micros().saturating_sub(
+                                u64::try_from((scorer_duration + started.elapsed()).as_micros())
+                                    .unwrap_or(u64::MAX),
+                            ),
+                            remaining_evaluations: context
+                                .budgets
+                                .max_selection_evaluations
+                                .saturating_sub(evaluations),
+                            exact_marginal_input_tokens: (best.outgoing.count_kind
+                                == RequestCountKind::Exact
+                                && trial.outgoing.count_kind == RequestCountKind::Exact)
+                                .then_some(
+                                    i64::from(trial.outgoing.input_tokens)
+                                        - i64::from(best.outgoing.input_tokens),
+                                ),
+                            outgoing_fits: !trial.outgoing_overflow,
+                            added_original_bytes: trial
+                                .added_bytes
+                                .saturating_sub(best.added_bytes),
+                        },
+                    };
+                    let value = scorer.score_semantic(&view, budget)?;
+                    charge(budget, 0, 0)?;
+                    value
+                } else {
+                    scorer.score(&unit, budget)?
+                };
                 scorer_duration += started.elapsed();
                 scorer_work = scorer_work.saturating_add(before_work - budget.remaining_work());
-                if capture
+                if (capture || semantic)
                     && (scorer_duration.as_micros() > u128::from(scorer.latency_limit_micros())
                         || scorer_work
                             > u64::from(context.budgets.max_selection_evaluations) * 1024)
@@ -1084,6 +1159,7 @@ fn select_prepared(
         evaluations,
         tokenizer,
         encoder,
+        retain_semantics,
         budget,
     )?
     .require_outgoing_fit()?;
@@ -1110,7 +1186,7 @@ fn select_prepared(
     if let Some(provider) = provider {
         provider.validate_read_set(&read_set, budget)?;
     }
-    if capture && elapsed_micros(prepare_started) > 30_000_000 {
+    if (capture || semantic) && elapsed_micros(prepare_started) > 30_000_000 {
         return Err(ContextError::BudgetExceeded(
             "router prepare deadline exceeded".into(),
         ));
@@ -1293,6 +1369,8 @@ fn choose_variants(
     selected: &BTreeSet<BlockId>,
     units: &BTreeMap<BlockId, Unit>,
     visible: &OriginalInventory,
+    mut choices: Option<&mut Vec<SemanticVariantChoice>>,
+    budget: &mut QueryBudget,
 ) -> Result<Vec<PreparedCandidate>> {
     let mut inventory = visible.clone();
     let mut result = Vec::new();
@@ -1325,6 +1403,18 @@ fn choose_variants(
             ));
         };
         inventory = next;
+        if let Some(choices) = choices.as_deref_mut() {
+            charge(
+                budget,
+                1,
+                (size_of::<SemanticVariantChoice>() + id.as_str().len()) as u64,
+            )?;
+            choices.push(SemanticVariantChoice {
+                block_id: id.clone(),
+                alternative_index: index as u32,
+                generated: unit.variants[index].generated,
+            });
+        }
         let variant = unit.variants[index].clone();
         shared.extend(variant.evidence.iter().map(|item| item.id.clone()));
         result.push(variant);
@@ -1346,10 +1436,12 @@ fn trial(
     evaluations: u32,
     tokenizer: &dyn TokenCounter,
     encoder: &dyn OutgoingEncoder,
+    retain_semantics: bool,
     budget: &mut QueryBudget,
 ) -> Result<Trial> {
     charge(budget, selected.len() as u64 + 1, 0)?;
-    let mut prepared = choose_variants(selected, units, visible)?;
+    let mut chosen_variants = retain_semantics.then(Vec::new);
+    let mut prepared = choose_variants(selected, units, visible, chosen_variants.as_mut(), budget)?;
     prepared.sort_by(|left, right| {
         (left.block.kind, &left.block.id).cmp(&(right.block.kind, &right.block.id))
     });
@@ -1503,6 +1595,7 @@ fn trial(
         outgoing,
         added_bytes,
         outgoing_overflow,
+        chosen_variants,
     })
 }
 

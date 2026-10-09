@@ -151,6 +151,8 @@ impl ContextCompiler {
         };
         if request.binding.scorer != crate::R0Scorer.id()
             || request.binding.scorer_revision != crate::R0Scorer.revision()
+            || request.binding.feature_schema != router::FEATURE_SCHEMA
+            || request.binding.max_text_rerank_pairs != 0
             || manifest.score_provenance != router::ScoreProvenance::ObservedScorer
             || manifest.fallback_from.is_some()
             || manifest.fallback_revision.is_some()
