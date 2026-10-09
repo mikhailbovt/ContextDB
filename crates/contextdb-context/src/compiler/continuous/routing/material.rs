@@ -8,9 +8,9 @@ use contextdb_recall::QueryBudget;
 use crate::assembly::charge;
 use crate::compiler::to_block;
 use crate::router::{
-    self, AuthorizedRouterRequest, MAX_UNITS, MemoryUnit, RouterMaterialStatus,
-    RouterMaterialUnavailableReason, RouterMaterialVerification, RouterPreparedMaterial,
-    canonical_bytes, canonical_digest, normalize_spans,
+    self, AuthorizedRouterRequest, MAX_UNITS, MemoryUnit, ROUTER_PREPARED_POLICY_FORMAT,
+    RouterMaterialStatus, RouterMaterialUnavailableReason, RouterMaterialVerification,
+    RouterPreparedMaterial, canonical_bytes, canonical_digest, normalize_spans,
 };
 use crate::{ContextBlock, ContextCompiler, Result};
 
@@ -19,8 +19,8 @@ const MAX_PREPARED_EVIDENCE: usize = 2048;
 
 impl ContextCompiler {
     /// Verify every retained sufficient support and its unit semantics under one
-    /// shared allowance. V1 lacks prepared action/reason, so the complete candidate
-    /// commitment and historical selection remain explicitly unavailable.
+    /// shared allowance. The explicit policy extension also verifies the complete
+    /// candidate commitment. Historical selection remains unavailable.
     ///
     /// Unused representation bytes and candidate-only flags are not authenticated
     /// by a support commitment. Acceptance and current rights remain owner checks.
@@ -46,6 +46,36 @@ impl ContextCompiler {
             return Err(router::invalid(
                 "duplicate, unordered or excessive prepared inventory",
             ));
+        }
+        if let Some(policy) = &material.prepared_policy {
+            // Reject unsupported shape before any reconstruction or payload copy.
+            if policy.format != ROUTER_PREPARED_POLICY_FORMAT
+                || policy.units.len() != request.units.len()
+                || policy.units.len() > MAX_UNITS
+                || policy.units.windows(2).any(|pair| pair[0].id >= pair[1].id)
+            {
+                return Err(router::invalid(
+                    "invalid prepared policy inventory or format",
+                ));
+            }
+            for (policy, unit) in policy.units.iter().zip(&request.units) {
+                charge(budget, policy.alternatives.len() as u64 + 1, 0)?;
+                if policy.id != unit.id
+                    || policy.id.as_str().len() > 16384
+                    || policy.alternatives.is_empty()
+                    || policy.alternatives.len() > 8
+                    || policy.alternatives.len() != unit.support_alternatives.len()
+                    || policy
+                        .alternatives
+                        .iter()
+                        .enumerate()
+                        .any(|(index, alternative)| alternative.index as usize != index)
+                {
+                    return Err(router::invalid(
+                        "prepared policy support identities disagree",
+                    ));
+                }
+            }
         }
         // Stream borrowed inputs through the existing ceiling before cloning any
         // block/representation or building temporary support inventories.
@@ -97,7 +127,9 @@ impl ContextCompiler {
             }
             evidence.insert(&item.id, item);
         }
-        for (unit, candidate) in request.units.iter().zip(&material.candidates) {
+        for (unit_index, (unit, candidate)) in
+            request.units.iter().zip(&material.candidates).enumerate()
+        {
             charge(budget, 1, 0)?;
             candidate
                 .validate()
@@ -114,6 +146,25 @@ impl ContextCompiler {
                 ));
             }
             let candidate_bytes = canonical_bytes(candidate, budget)?.len() as u64;
+            let policy = material
+                .prepared_policy
+                .as_ref()
+                .map(|policy| &policy.units[unit_index]);
+            let mut committed_candidates = if policy.is_some() {
+                charge(
+                    budget,
+                    1,
+                    (unit.support_alternatives.len()
+                        * size_of::<(
+                            crate::PackCandidate,
+                            crate::UseAction,
+                            crate::DirectiveReason,
+                        )>()) as u64,
+                )?;
+                Some(Vec::with_capacity(unit.support_alternatives.len()))
+            } else {
+                None
+            };
             let mut representations = BTreeMap::new();
             for representation in &candidate.representations {
                 charge(budget, 1, 0)?;
@@ -163,17 +214,42 @@ impl ContextCompiler {
                         "retained support material or original spans disagree",
                     ));
                 }
+                if let (Some(policy), Some(committed)) = (policy, &mut committed_candidates) {
+                    // This is the original complete prepared candidate, with only
+                    // its exact support handles replaced. Unused representations
+                    // and candidate-only flags remain inside the commitment.
+                    charge(budget, 1, candidate_bytes)?;
+                    let mut variant = candidate.clone();
+                    variant.evidence_handles =
+                        alternative.evidence_handles.iter().cloned().collect();
+                    let decision = policy.alternatives[alternative.index as usize];
+                    committed.push((variant, decision.use_action, decision.directive_reason));
+                }
+            }
+            if let Some(committed) = committed_candidates
+                && canonical_digest(&committed, budget)? != unit.candidate_digest
+            {
+                return Err(router::invalid(
+                    "complete prepared candidate commitment disagrees",
+                ));
             }
         }
+        let has_policy = material.prepared_policy.is_some();
         Ok(RouterMaterialVerification {
             support_material: RouterMaterialStatus::Verified,
             unit_semantics: RouterMaterialStatus::Verified,
-            candidate_commitment: RouterMaterialStatus::Unavailable(
-                RouterMaterialUnavailableReason::MissingPreparedPolicy,
-            ),
-            historical_selection: RouterMaterialStatus::Unavailable(
-                RouterMaterialUnavailableReason::MissingPreparedPolicy,
-            ),
+            candidate_commitment: if has_policy {
+                RouterMaterialStatus::Verified
+            } else {
+                RouterMaterialStatus::Unavailable(
+                    RouterMaterialUnavailableReason::MissingPreparedPolicy,
+                )
+            },
+            historical_selection: RouterMaterialStatus::Unavailable(if has_policy {
+                RouterMaterialUnavailableReason::MissingReplayPreparation
+            } else {
+                RouterMaterialUnavailableReason::MissingPreparedPolicy
+            }),
         })
     }
 }

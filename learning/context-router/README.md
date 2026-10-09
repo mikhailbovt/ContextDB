@@ -32,9 +32,11 @@ and fully resident originals. Connected groups stay together; a boundary-crossin
 group is quarantined. Labels are synthetic source-set supervision, not measured
 reader benefit or calibrated marginal utility. R0 can select irrelevant memories.
 
-The compiler verifies support material and unit semantics. V1 lacks a complete
-prepared-policy commitment, selected-base semantic views and intermediate trials;
-historical selection replay remains unavailable. Synthetic artifacts have no native
+The compiler verifies support material and unit semantics. Its separate explicit
+policy capture entry can also verify the complete candidate commitment; default
+material and this synthetic job omit that extension. Native v1 refuses it.
+Selected-base semantic views and replay preparation are still missing, so historical
+selection replay remains unavailable. Synthetic artifacts have no native
 acceptance, so current source-wire verification is unavailable. These columns stay
 separate from integrity checks. Hashes and synthetic markers grant no rights.
 

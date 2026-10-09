@@ -24,6 +24,7 @@ struct RouterRecord {
     request: AuthorizedRouterRequest,
     scores: Vec<RouterScore>,
     prepared_units: BTreeMap<BlockId, Unit>,
+    capture_prepared_policy: bool,
 }
 
 #[derive(Clone)]
@@ -120,6 +121,7 @@ impl ContextCompiler {
                 scorer,
                 budget,
                 false,
+                false,
                 None,
                 std::time::Instant::now(),
             )?
@@ -136,11 +138,56 @@ impl ContextCompiler {
         scorer: &dyn ContextScorer,
         budget: &mut QueryBudget,
     ) -> Result<RoutedAssembly> {
+        self.compile_assembly_with_router_inner(
+            request, provider, tokenizer, encoder, scorer, budget, false,
+        )
+    }
+
+    /// Explicitly retain the actual prepared render decisions, enabling complete
+    /// candidate commitment verification. This does not enable historical replay
+    /// or change current authorization. Legacy trace owners must opt in separately.
+    pub fn compile_assembly_with_router_policy(
+        &self,
+        request: &CompileAssemblyRequest,
+        provider: &dyn AssemblyProvider,
+        tokenizer: &dyn TokenCounter,
+        encoder: &dyn OutgoingEncoder,
+        scorer: &dyn ContextScorer,
+        budget: &mut QueryBudget,
+    ) -> Result<RoutedAssembly> {
+        self.compile_assembly_with_router_inner(
+            request, provider, tokenizer, encoder, scorer, budget, true,
+        )
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "explicit opt-in over the same compiler entry"
+    )]
+    fn compile_assembly_with_router_inner(
+        &self,
+        request: &CompileAssemblyRequest,
+        provider: &dyn AssemblyProvider,
+        tokenizer: &dyn TokenCounter,
+        encoder: &dyn OutgoingEncoder,
+        scorer: &dyn ContextScorer,
+        budget: &mut QueryBudget,
+        capture_prepared_policy: bool,
+    ) -> Result<RoutedAssembly> {
         let started = std::time::Instant::now();
         let work = budget.remaining_work();
         let bytes = budget.remaining_bytes();
         let result = self.compile_assembly_inner(
-            request, provider, tokenizer, encoder, scorer, budget, true, None, started,
+            request,
+            provider,
+            tokenizer,
+            encoder,
+            scorer,
+            budget,
+            true,
+            capture_prepared_policy,
+            None,
+            started,
         );
         let (assembly, record, fallback) = match result {
             Ok((assembly, record)) => (assembly, record, false),
@@ -168,6 +215,7 @@ impl ContextCompiler {
                     &crate::R0Scorer,
                     budget,
                     true,
+                    capture_prepared_policy,
                     None,
                     started,
                 )?;
@@ -228,6 +276,7 @@ impl ContextCompiler {
             expected_scorer,
             budget,
             true,
+            false,
             Some(plan),
             started,
         )?;
@@ -304,6 +353,7 @@ impl ContextCompiler {
                     &crate::R0Scorer,
                     budget,
                     true,
+                    false,
                     None,
                     started,
                 )?;
@@ -347,6 +397,7 @@ impl ContextCompiler {
         scorer: &dyn ContextScorer,
         budget: &mut QueryBudget,
         capture: bool,
+        capture_prepared_policy: bool,
         proposal: Option<&RouterSelectionPlan>,
         prepare_started: std::time::Instant,
     ) -> Result<(CompiledAssembly, Option<RouterRecord>)> {
@@ -614,6 +665,7 @@ impl ContextCompiler {
                 )?,
                 scores: Vec::new(),
                 prepared_units: BTreeMap::new(),
+                capture_prepared_policy,
             })
         } else {
             None

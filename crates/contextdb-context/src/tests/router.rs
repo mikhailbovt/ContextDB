@@ -13,6 +13,8 @@ use std::sync::{
 
 #[path = "router_material.rs"]
 mod material;
+#[path = "router_policy.rs"]
+mod policy;
 
 fn routed(
     request: &CompileAssemblyRequest,

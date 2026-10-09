@@ -4,9 +4,10 @@
 use super::*;
 use crate::router::{
     DESCRIPTOR_SCHEMA, FEATURE_SCHEMA, MANIFEST_FORMAT, MAX_RECORD_BYTES, MAX_SCORES, MemoryUnit,
-    PLAN_FORMAT, REQUEST_FORMAT, RouterBinding, RouterChoice, RouterDecision, RouterManifest,
-    RouterPreparedMaterial, RouterRenderRole, RouterStopReason, RoutingDescriptor,
-    SupportAlternative, canonical_digest, normalize_spans,
+    PLAN_FORMAT, REQUEST_FORMAT, ROUTER_PREPARED_POLICY_FORMAT, RouterBinding, RouterChoice,
+    RouterDecision, RouterManifest, RouterPreparedAlternativePolicy, RouterPreparedMaterial,
+    RouterPreparedPolicy, RouterPreparedUnitPolicy, RouterRenderRole, RouterStopReason,
+    RoutingDescriptor, SupportAlternative, canonical_digest, normalize_spans,
 };
 
 mod material;
@@ -394,6 +395,18 @@ fn prepared_material(
     struct MaterialView<'a> {
         candidates: Vec<&'a PackCandidate>,
         evidence: Vec<&'a PackEvidence>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        prepared_policy: Option<PolicyView<'a>>,
+    }
+    #[derive(serde::Serialize)]
+    struct PolicyView<'a> {
+        format: &'static str,
+        units: Vec<UnitPolicyView<'a>>,
+    }
+    #[derive(serde::Serialize)]
+    struct UnitPolicyView<'a> {
+        id: &'a BlockId,
+        alternatives: Vec<RouterPreparedAlternativePolicy>,
     }
     let candidates: Vec<_> = record
         .prepared_units
@@ -426,9 +439,47 @@ fn prepared_material(
             }
         }
     }
+    let prepared_policy = if record.capture_prepared_policy {
+        // Admit bounded metadata containers before allocating. The full borrowed
+        // envelope below precedes ID and candidate/evidence payload copies.
+        let alternatives = record
+            .prepared_units
+            .values()
+            .map(|unit| unit.variants.len())
+            .sum::<usize>();
+        charge(
+            budget,
+            (record.prepared_units.len() + alternatives + 1) as u64,
+            (record.prepared_units.len() * size_of::<UnitPolicyView<'_>>()
+                + alternatives * size_of::<RouterPreparedAlternativePolicy>()) as u64,
+        )?;
+        Some(PolicyView {
+            format: ROUTER_PREPARED_POLICY_FORMAT,
+            units: record
+                .prepared_units
+                .iter()
+                .map(|(id, unit)| UnitPolicyView {
+                    id,
+                    alternatives: unit
+                        .variants
+                        .iter()
+                        .enumerate()
+                        .map(|(index, variant)| RouterPreparedAlternativePolicy {
+                            index: index as u32,
+                            use_action: variant.use_action,
+                            directive_reason: variant.directive_reason,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        })
+    } else {
+        None
+    };
     let material = MaterialView {
         candidates,
         evidence: evidence.into_values().collect(),
+        prepared_policy,
     };
     // Borrow actual prepared values while checking the complete envelope. No
     // extra candidate/evidence payload is cloned before this bounded check.
@@ -436,6 +487,17 @@ fn prepared_material(
     Ok(RouterPreparedMaterial {
         candidates: material.candidates.into_iter().cloned().collect(),
         evidence: material.evidence.into_iter().cloned().collect(),
+        prepared_policy: material.prepared_policy.map(|policy| RouterPreparedPolicy {
+            format: policy.format.into(),
+            units: policy
+                .units
+                .into_iter()
+                .map(|unit| RouterPreparedUnitPolicy {
+                    id: unit.id.clone(),
+                    alternatives: unit.alternatives,
+                })
+                .collect(),
+        }),
     })
 }
 
