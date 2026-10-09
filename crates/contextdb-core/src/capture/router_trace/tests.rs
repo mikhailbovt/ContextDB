@@ -131,3 +131,52 @@ fn absent_trace_preserves_legacy_manifest_json_exactly() {
     assert!(decoded.router_trace.is_none());
     assert_eq!(decoded, request);
 }
+
+#[test]
+fn explicit_replay_version_preserves_pages_and_legacy_constructor_bytes() {
+    let text = format!(
+        "{}Ж🙂protected-replay",
+        "x".repeat(MAX_ROUTER_TRACE_PAGE_BYTES - 1)
+    );
+    let legacy = trace(&text);
+    let header = &legacy.header;
+    let make = |version| {
+        RouterTraceAttachment::new_with_version(
+            version,
+            header.model_call_id,
+            header.pack_id,
+            header.wire_digest,
+            header.wire_byte_length,
+            header.router_request_digest,
+            header.router_plan_digest,
+            header.router_manifest_digest,
+            header.origin_closure_digest,
+            &text,
+        )
+    };
+    let explicit_v1 = make(ROUTER_TRACE_VERSION).expect("explicit legacy contract");
+    assert_eq!(
+        serde_json::to_vec(&explicit_v1).expect("v1 bytes"),
+        serde_json::to_vec(&legacy).expect("legacy bytes")
+    );
+    let replay = make(ROUTER_REPLAY_TRACE_VERSION).expect("explicit replay pages");
+    assert_eq!(replay.header.version, 2);
+    assert_eq!(replay.pages, legacy.pages);
+    assert_eq!(replay.header.pages, legacy.header.pages);
+    assert_eq!(replay.header.trace_digest, legacy.header.trace_digest);
+    assert_eq!(replay.canonical_json().expect("complete UTF-8"), text);
+    replay
+        .validate_for_model_request(&manifest(Some(replay.clone())))
+        .expect("same model wire");
+    let encoded = serde_json::to_vec(&replay).expect("replay transport");
+    let decoded: RouterTraceAttachment =
+        serde_json::from_slice(&encoded).expect("cold replay pages");
+    assert_eq!(decoded, replay);
+    assert!(!format!("{replay:?}").contains("protected-replay"));
+    for version in [0, 3, u16::MAX] {
+        assert!(make(version).is_err());
+        let mut changed = replay.clone();
+        changed.header.version = version;
+        assert!(changed.validate().is_err());
+    }
+}

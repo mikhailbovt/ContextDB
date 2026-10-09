@@ -42,6 +42,9 @@ pub(super) struct PreparationSeal {
     trace_digest: Option<ContentDigest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     origin_digest: Option<ContentDigest>,
+    /// Only v2 adds this field; existing Off/v1 seal encodings remain unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trace_version: Option<u16>,
 }
 
 #[derive(Clone, Debug)]
@@ -106,6 +109,10 @@ impl NativeService {
                 capability_digest,
                 trace_digest: trace.map(|trace| trace.trace_digest),
                 origin_digest: trace.map(|trace| trace.origin_closure_digest),
+                trace_version: trace.and_then(|trace| {
+                    (trace.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION)
+                        .then_some(trace.version)
+                }),
             },
         )
     }
@@ -163,6 +170,9 @@ impl NativeService {
                     || trace.seal != prepared.admission_token
                     || trace.wire_digest != seal.wire_digest
                     || trace.wire_byte_length != seal.wire_bytes
+                    || seal.trace_version
+                        != (trace.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION)
+                            .then_some(trace.version)
                 {
                     return Err(invalid(
                         "prepared trace differs from its native admission seal",
@@ -176,7 +186,12 @@ impl NativeService {
                 trace_bytes = trace.canonical_json.len() as u64;
                 Some(envelope.origins)
             }
-            None if seal.trace_digest.is_none() && seal.origin_digest.is_none() => None,
+            None if seal.trace_digest.is_none()
+                && seal.origin_digest.is_none()
+                && seal.trace_version.is_none() =>
+            {
+                None
+            }
             None => {
                 return Err(invalid(
                     "prepared trace was stripped from its sealed assembly",

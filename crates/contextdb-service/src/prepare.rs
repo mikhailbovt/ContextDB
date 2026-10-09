@@ -10,8 +10,8 @@ use contextdb_context::{
     PackPurpose, TokenCounter,
 };
 use contextdb_core::{
-    ContentDigest, ContextPackId, MAX_ROUTER_TRACE_BYTES, ModelCallId, RawSource, RecallIntent,
-    RouterTraceAttachment, TimestampMicros,
+    ContentDigest, ContextPackId, MAX_ROUTER_TRACE_BYTES, ModelCallId, ROUTER_REPLAY_TRACE_VERSION,
+    ROUTER_TRACE_VERSION, RawSource, RecallIntent, RouterTraceAttachment, TimestampMicros,
 };
 use contextdb_recall::{
     IndexedCompletion, IndexedQuery, QueryBudget, RecallLimits, RecallMode, SuppliedVector,
@@ -19,6 +19,8 @@ use contextdb_recall::{
 use serde::{Deserialize, Serialize};
 
 mod recall;
+#[cfg(test)]
+mod tests;
 pub use recall::deterministic_prepare_recall;
 
 /// Explicit protected trace mode. Required never falls back to an omitted trace.
@@ -30,6 +32,8 @@ pub enum RouterTraceProfile {
     Off,
     /// Retain a complete bounded query-time trace through native owner admission.
     Required,
+    /// Retain explicit prepared-state replay inputs and behavior observations.
+    RequiredReplayV2,
 }
 
 impl RouterTraceProfile {
@@ -37,6 +41,22 @@ impl RouterTraceProfile {
     pub const fn is_off(&self) -> bool {
         matches!(self, Self::Off)
     }
+
+    /// Required attachment contract. Off retains the legacy absent field.
+    pub const fn version(&self) -> Option<u16> {
+        match self {
+            Self::Off => None,
+            Self::Required => Some(ROUTER_TRACE_VERSION),
+            Self::RequiredReplayV2 => Some(ROUTER_REPLAY_TRACE_VERSION),
+        }
+    }
+}
+
+fn legacy_trace_version() -> u16 {
+    ROUTER_TRACE_VERSION
+}
+fn is_legacy_trace_version(version: &u16) -> bool {
+    *version == ROUTER_TRACE_VERSION
 }
 
 /// Bounded generic memory discovery cue, under the enclosing preparation authority.
@@ -131,6 +151,12 @@ pub struct PreparedContext {
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreparedRouterTrace {
+    /// Explicit v2 contract; omitted v1 preserves the original transport bytes.
+    #[serde(
+        default = "legacy_trace_version",
+        skip_serializing_if = "is_legacy_trace_version"
+    )]
+    pub version: u16,
     /// Exact prepared pack identity.
     pub pack_id: ContextPackId,
     /// Exact model wire digest.
@@ -156,6 +182,7 @@ pub struct PreparedRouterTrace {
 impl std::fmt::Debug for PreparedRouterTrace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PreparedRouterTrace")
+            .field("version", &self.version)
             .field("byte_length", &self.canonical_json.len())
             .field("trace_digest", &self.trace_digest)
             .field("origin_closure_digest", &self.origin_closure_digest)
@@ -166,7 +193,10 @@ impl std::fmt::Debug for PreparedRouterTrace {
 impl PreparedRouterTrace {
     /// Check bounded local consistency; this does not validate native authority.
     pub fn validate(&self) -> ServiceResult<()> {
-        if self.canonical_json.is_empty()
+        if !matches!(
+            self.version,
+            ROUTER_TRACE_VERSION | ROUTER_REPLAY_TRACE_VERSION
+        ) || self.canonical_json.is_empty()
             || self.canonical_json.len() > MAX_ROUTER_TRACE_BYTES
             || self.wire_byte_length == 0
             || self.seal.is_empty()
@@ -209,7 +239,8 @@ impl PreparedRouterTrace {
                 )
             })?;
         self.validate()?;
-        RouterTraceAttachment::new(
+        RouterTraceAttachment::new_with_version(
+            self.version,
             model_call_id,
             self.pack_id,
             self.wire_digest,

@@ -85,6 +85,15 @@ impl CaptureRecovery {
         if let Some(header) = &self.router_trace {
             Validate::validate(header)
                 .map_err(|_| integrity("capture recovery router trace header is invalid"))?;
+            if header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                && !manifest
+                    .features
+                    .contains(crate::router_trace::TRACE_REPLAY_FEATURE)
+            {
+                return Err(integrity(
+                    "capture recovery router replay feature is absent",
+                ));
+            }
             if self.payload.model_call != Some(header.model_call_id)
                 || self.payload.digest != Some(header.wire_digest)
                 || self.payload.bytes != Some(header.wire_byte_length)

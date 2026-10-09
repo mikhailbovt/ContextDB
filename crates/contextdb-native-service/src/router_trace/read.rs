@@ -227,6 +227,7 @@ impl AcceptedRouterTracePort for NativeService {
             manifest: envelope.manifest,
             base: envelope.base,
             material: envelope.materials,
+            replay_observation: envelope.replay_observation,
             verification,
             lineage,
         };

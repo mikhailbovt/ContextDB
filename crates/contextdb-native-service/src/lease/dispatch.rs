@@ -47,11 +47,19 @@ impl NativeService {
                 &manifest.router_trace,
                 record.seal.trace_digest,
                 record.seal.origin_digest,
+                record.seal.trace_version,
             ) {
-                (None, None, None) => true,
-                (Some(trace), Some(digest), Some(origins)) => {
+                (None, None, None, None) => true,
+                (Some(trace), Some(digest), Some(origins), version) => {
                     trace.header.trace_digest == digest
                         && trace.header.origin_closure_digest == origins
+                        && match version {
+                            None => trace.header.version == contextdb_core::ROUTER_TRACE_VERSION,
+                            Some(contextdb_core::ROUTER_REPLAY_TRACE_VERSION) => {
+                                trace.header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                            }
+                            Some(_) => false,
+                        }
                 }
                 _ => false,
             },

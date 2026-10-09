@@ -41,16 +41,16 @@ struct TraceSettingsBinding {
 }
 
 impl TraceSettingsBinding {
-    fn required() -> Self {
-        Self {
-            profile: RouterTraceProfile::Required,
-            version: 1,
+    fn for_profile(profile: RouterTraceProfile) -> Option<Self> {
+        profile.version().map(|version| Self {
+            profile,
+            version,
             max_trace_bytes: MAX_ROUTER_TRACE_BYTES,
             max_pages: MAX_ROUTER_TRACE_PAGES,
             max_page_bytes: MAX_ROUTER_TRACE_PAGE_BYTES,
             max_native_row_bytes: 8 * 1024 * 1024,
             max_inline_novel_bytes: 256 * 1024,
-        }
+        })
     }
 }
 
@@ -195,8 +195,7 @@ impl HostConfig {
             tools: "no-external-tools",
             preparation: preparation::PROFILE,
             raw_projection_limits: (preparation::BATCH_EVENTS, preparation::MAX_BATCHES),
-            router_trace: (!self.router_trace_profile.is_off())
-                .then(TraceSettingsBinding::required),
+            router_trace: TraceSettingsBinding::for_profile(self.router_trace_profile),
         };
         serde_json::to_vec(&(self, binding))
             .map_err(|_| invalid("conversation configuration cannot be bound"))

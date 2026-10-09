@@ -173,7 +173,38 @@ fn required_binds_the_fixed_profile_and_rejects_unknown_or_overridden_limits() {
 }
 
 #[test]
+fn replay_v2_binds_its_own_profile_without_changing_required_v1() {
+    let required = config(Some(RouterTraceProfile::Required));
+    let replay = config(Some(RouterTraceProfile::RequiredReplayV2));
+    assert_ne!(
+        replay.digest().expect("v2 digest"),
+        required.digest().expect("v1 digest")
+    );
+    let bound: Value = serde_json::from_slice(&replay.binding_bytes().expect("v2 binding"))
+        .expect("parsed v2 binding");
+    assert_eq!(bound[0]["router_trace_profile"], "required_replay_v2");
+    assert_eq!(
+        bound[1]["router_trace"],
+        json!({
+            "profile":"required_replay_v2","version":2,"max_trace_bytes":2*1024*1024,
+            "max_pages":8,"max_page_bytes":256*1024,"max_native_row_bytes":8*1024*1024,
+            "max_inline_novel_bytes":256*1024
+        })
+    );
+}
+
+#[test]
 fn accepted_config_binding_survives_cold_open_and_refuses_a_trace_profile_switch() {
+    for profile in [
+        RouterTraceProfile::Off,
+        RouterTraceProfile::Required,
+        RouterTraceProfile::RequiredReplayV2,
+    ] {
+        cold_configuration_profile_refusal(profile);
+    }
+}
+
+fn cold_configuration_profile_refusal(profile: RouterTraceProfile) {
     let directory = tempfile::tempdir().expect("native fixture directory");
     let authority_directory = tempfile::tempdir().expect("retained authorities");
     let ledger =
@@ -195,12 +226,12 @@ fn accepted_config_binding_survives_cold_open_and_refuses_a_trace_profile_switch
         )
         .expect("actual encrypted native owner"),
     );
-    let off = config(None);
-    let identity = off.identity();
-    let off_digest = off.digest().expect("Off digest");
+    let original = config(Some(profile));
+    let identity = original.identity();
+    let original_digest = original.digest().expect("accepted profile digest");
     let key = TokenKey::new([11; 32]).expect("host authority key");
-    let context = authority(&key, &identity, &off_digest).expect("actual host principal");
-    let accepted = binding::require_binding(&owner, &context, &identity, &off_digest, true)
+    let context = authority(&key, &identity, &original_digest).expect("actual host principal");
+    let accepted = binding::require_binding(&owner, &context, &identity, &original_digest, true)
         .expect("accepted original config binding");
     drop(owner);
     let reopened = Arc::new(
@@ -213,20 +244,29 @@ fn accepted_config_binding_survives_cold_open_and_refuses_a_trace_profile_switch
         )
         .expect("cold native owner"),
     );
-    let cold = binding::require_binding(&reopened, &context, &identity, &off_digest, false)
+    let cold = binding::require_binding(&reopened, &context, &identity, &original_digest, false)
         .expect("same retained configuration");
     assert_eq!(cold.receipt, accepted.receipt);
-    let required = config(Some(RouterTraceProfile::Required));
-    let new_digest = required.digest().expect("Required digest");
-    let changed_context =
-        authority(&key, &identity, &new_digest).expect("new authenticated config");
-    let error =
-        binding::require_binding(&reopened, &changed_context, &identity, &new_digest, false)
-            .err()
-            .expect("profile change refused by actual retained binding");
-    assert_eq!(error.0.code, contextdb_service::ErrorCode::InvalidArgument);
+    for other in [
+        RouterTraceProfile::Off,
+        RouterTraceProfile::Required,
+        RouterTraceProfile::RequiredReplayV2,
+    ] {
+        if other == profile {
+            continue;
+        }
+        let changed = config(Some(other));
+        let new_digest = changed.digest().expect("changed profile digest");
+        let changed_context =
+            authority(&key, &identity, &new_digest).expect("new authenticated config");
+        let error =
+            binding::require_binding(&reopened, &changed_context, &identity, &new_digest, false)
+                .err()
+                .expect("profile change refused by actual retained binding");
+        assert_eq!(error.0.code, contextdb_service::ErrorCode::InvalidArgument);
+    }
     assert_eq!(
-        binding::require_binding(&reopened, &context, &identity, &off_digest, false)
+        binding::require_binding(&reopened, &context, &identity, &original_digest, false)
             .expect("failed switch did not replace accepted configuration")
             .receipt,
         accepted.receipt

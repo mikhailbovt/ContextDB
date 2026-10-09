@@ -118,6 +118,58 @@ fn explicit_policy_cold_roundtrip_verifies_every_variant_and_actual_directive() 
         );
     }
 
+    let replay = must(
+        must(ContextCompiler::new([7; 32])).compile_assembly_with_router_replay(
+            &input(),
+            &shared_fixture(false),
+            &ReferenceTokenizer,
+            &ReferenceOutgoingEncoder(&ReferenceTokenizer),
+            &R0Scorer,
+            &mut allowance(),
+        ),
+    );
+    let verification = must(ContextCompiler::validate_router_material(
+        &replay.request,
+        &replay.prepared_material,
+        &mut allowance(),
+    ));
+    assert_eq!(
+        verification.candidate_commitment,
+        RouterMaterialStatus::Verified
+    );
+    assert_eq!(
+        verification.historical_selection,
+        RouterMaterialStatus::Unavailable(
+            RouterMaterialUnavailableReason::HistoricalReplayNotExecuted
+        )
+    );
+    let preparation = replay
+        .prepared_material
+        .prepared_policy
+        .as_ref()
+        .and_then(|policy| policy.replay.as_ref())
+        .expect("actual replay preparation");
+    let observation = replay.replay_observation.as_ref().expect("actual behavior");
+    must(ContextCompiler::validate_router_replay_observation(
+        &replay.request,
+        &replay.manifest,
+        preparation,
+        observation,
+        &mut allowance(),
+    ));
+    let mut mismatched = observation.clone();
+    mismatched.preparation_digest = ContentDigest::from_bytes([81; 32]);
+    assert!(
+        ContextCompiler::validate_router_replay_observation(
+            &replay.request,
+            &replay.manifest,
+            preparation,
+            &mismatched,
+            &mut allowance()
+        )
+        .is_err()
+    );
+
     // These policies are independently chosen by the real provider/prepare path,
     // rather than inferred from roles by the retained-material validator.
     for (interpretation, disclosure, action, reason) in [

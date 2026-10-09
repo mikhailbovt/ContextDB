@@ -56,7 +56,8 @@ support are accounted for by the existing union renderer; actual complete
 protocol encoding determines token/byte fit.
 
 The router profile allows at most 512 units, 4096 evaluations, 32 scopes and a
-2 MiB combined request/plan/manifest/material envelope. Identity lists are ordered and
+2 MiB combined request/plan/manifest/material envelope; replay also includes its
+frozen base and observations in that ceiling. Identity lists are ordered and
 unique, support choices are explicit, and hard dependency cycles or unavailable
 members are rejected. This stricter opt-in graph validation can reject malformed
 optional graphs that the legacy entry point leaves unselected.
@@ -107,7 +108,12 @@ acquire the port implicitly.
 Compiler validation separately reports support material, unit semantics and the
 complete candidate commitment. The explicit `compile_assembly_with_router_policy`
 entry retains versioned prepared actions/reasons for the last column; the default
-entry and native v1 traces omit it. Native v1 refuses this extension.
+entry and native v1 traces omit it. Native v1 refuses this extension. The explicit
+`required_replay_v2` native profile retains the complete preparation and separate
+attempt observation in encrypted pages with header version 2. Its feature marker,
+owner seal, accepted receipt and retained recovery header bind the same version;
+neither legacy Required nor Off silently upgrades. Cold reads validate retained
+material and observation metadata; they do not execute historical selection.
 
 The replay entry captures actual variant costs, generated markers, support order,
 ordered omissions and the remaining selector-entry work/bytes. Replay reserves that
@@ -120,7 +126,7 @@ Missing preparation/observations or unsupported runtime/scorer profiles
 return unavailable. Changed material or behavior fails integrity verification.
 
 Detached replay performs no provider authorization, source read or dispatch, and
-does not grant current rights. Current source-wire verification and native v2
-custody are separate work. The [synthetic corpus](../../learning/context-router/README.md)
+does not grant current rights. Current source-wire verification remains
+separate work. The [synthetic corpus](../../learning/context-router/README.md)
 keeps query-time features, R0 behavior, labels and lineage distinct. Scoring remains
 R0; real export and Kev training remain later work.

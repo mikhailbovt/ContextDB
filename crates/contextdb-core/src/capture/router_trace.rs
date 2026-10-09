@@ -9,8 +9,10 @@ use crate::{
     ValidationResult,
 };
 
-/// Supported protected router attachment version.
+/// Original protected attachment contract, preserved by the legacy constructor.
 pub const ROUTER_TRACE_VERSION: u16 = 1;
+/// Explicit prepared-state replay attachment contract, on the same page layout.
+pub const ROUTER_REPLAY_TRACE_VERSION: u16 = 2;
 /// Aggregate unescaped UTF-8 envelope ceiling.
 pub const MAX_ROUTER_TRACE_BYTES: usize = 2 * 1024 * 1024;
 /// Maximum number of complete UTF-8 pages.
@@ -134,6 +136,38 @@ impl RouterTraceAttachment {
         origin_closure_digest: ContentDigest,
         canonical_json: &str,
     ) -> ValidationResult<Self> {
+        Self::new_with_version(
+            ROUTER_TRACE_VERSION,
+            model_call_id,
+            pack_id,
+            wire_digest,
+            wire_byte_length,
+            router_request_digest,
+            router_plan_digest,
+            router_manifest_digest,
+            origin_closure_digest,
+            canonical_json,
+        )
+    }
+
+    /// Page an explicitly supported owner envelope. The version is retained in
+    /// the header; native admission must also verify its exact envelope profile.
+    #[allow(clippy::too_many_arguments, reason = "explicit occurrence commitments")]
+    pub fn new_with_version(
+        version: u16,
+        model_call_id: ModelCallId,
+        pack_id: ContextPackId,
+        wire_digest: ContentDigest,
+        wire_byte_length: u64,
+        router_request_digest: ContentDigest,
+        router_plan_digest: ContentDigest,
+        router_manifest_digest: ContentDigest,
+        origin_closure_digest: ContentDigest,
+        canonical_json: &str,
+    ) -> ValidationResult<Self> {
+        if !matches!(version, ROUTER_TRACE_VERSION | ROUTER_REPLAY_TRACE_VERSION) {
+            return Err(invalid("unsupported router trace attachment version"));
+        }
         if canonical_json.is_empty() || canonical_json.len() > MAX_ROUTER_TRACE_BYTES {
             return Err(invalid("router trace envelope exceeds its byte ceiling"));
         }
@@ -157,7 +191,7 @@ impl RouterTraceAttachment {
             offset = end;
         }
         let header = RouterTraceHeader {
-            version: ROUTER_TRACE_VERSION,
+            version,
             model_call_id,
             pack_id,
             wire_digest,
@@ -208,8 +242,10 @@ impl RouterTracePage {
 
 impl Validate for RouterTraceHeader {
     fn validate(&self) -> ValidationResult {
-        if self.version != ROUTER_TRACE_VERSION
-            || self.wire_byte_length == 0
+        if !matches!(
+            self.version,
+            ROUTER_TRACE_VERSION | ROUTER_REPLAY_TRACE_VERSION
+        ) || self.wire_byte_length == 0
             || self.byte_length == 0
             || self.byte_length as usize > MAX_ROUTER_TRACE_BYTES
             || self.pages.is_empty()

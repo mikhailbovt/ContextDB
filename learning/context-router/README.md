@@ -57,5 +57,8 @@ and synthetic markers grant no rights.
 The native accepted-trace reader independently checks current capabilities,
 purpose, custody and origin controls before returning protected material. It
 performs no model call or write and does not grant training or export permission.
-Native v2 custody, real corpus export, Kev training, rollout and paired memory
-benchmarks remain later work.
+The explicit `required_replay_v2` native profile retains full prepared state and
+separate behavior observations under encrypted custody. Accepted reads check
+current rights and retained metadata; historical selection is unavailable until
+the consumer executes detached R0 replay. Real corpus export, training-purpose
+admission, Kev training, rollout and paired memory benchmarks remain later work.
