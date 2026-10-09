@@ -126,7 +126,22 @@ Missing preparation/observations or unsupported runtime/scorer profiles
 return unavailable. Changed material or behavior fails integrity verification.
 
 Detached replay performs no provider authorization, source read or dispatch, and
-does not grant current rights. Current source-wire verification remains
-separate work. The [synthetic corpus](../../learning/context-router/README.md)
-keeps query-time features, R0 behavior, labels and lineage distinct. Scoring remains
-R0; real export and Kev training remain later work.
+does not grant current rights. The embedded `AcceptedRouterSourceWirePort`
+authorizes the exact receipt and whole retained custody, then reconstructs the
+accepted request from its actual source spans, JSON transforms and stored parts
+in that same latest snapshot and shared budget. It returns commitments and
+separate current-custody, source-wire, historical-selection and exact-count
+columns, without request plaintext, a dispatch lease or training/export rights.
+Discarded origins are authorized; their bytes are not all rematerialized.
+
+An optional trusted tokenizer/encoder requires `ModelProcessing` before protected
+reads and runs the existing v2 R0 replay. Its complete output must equal the newly
+reconstructed native wire. Missing runtime or v1 preparation leaves historical
+selection/count unavailable while source-byte verification can succeed. A
+conservative count remains unavailable as an exact count. Off and legitimately
+pruned traces remain distinct unavailable results; current denial, stale custody,
+corruption and budget exhaustion remain errors.
+
+The [synthetic corpus](../../learning/context-router/README.md) keeps query-time
+features, R0 behavior, labels and lineage distinct. Production scoring remains R0;
+private training admission and a learned runtime remain later work.

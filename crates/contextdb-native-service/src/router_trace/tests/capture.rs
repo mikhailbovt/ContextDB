@@ -101,16 +101,45 @@ fn planned_fixture_with_setup(
     raw: bool,
     setup: Option<FixtureSetup>,
 ) -> PlannedFixture {
+    planned_fixture_with_ports(
+        service,
+        raw,
+        setup,
+        "Current original remains a source, never a synthetic summary.",
+        &ReferenceOutgoingEncoder(&ReferenceTokenizer),
+    )
+}
+
+fn planned_fixture_with_ports(
+    service: &NativeService,
+    raw: bool,
+    setup: Option<FixtureSetup>,
+    source_text: &str,
+    encoder: &dyn OutgoingEncoder,
+) -> PlannedFixture {
     let session = SessionId::new();
     let run = AgentRunId::new();
-    let mut original = source(
-        1,
-        "Current original remains a source, never a synthetic summary.",
-    );
+    let mut original = source(1, source_text);
     original.context = request(&original).context;
     original.context.session_id = Some(session.to_string());
     original.event.session_id = Some(session);
     original.event.run_id = Some(run);
+    if source_text.len() > crate::CAPTURE_MAX_INLINE_BYTES {
+        let payload = contextdb_service::PayloadPort::stage_payload(
+            service,
+            contextdb_service::StagePayloadRequest {
+                context: original.context.clone(),
+                idempotency_key: "protected-fixture-staged-source".into(),
+                block_id: contextdb_core::ContentBlockId::new(),
+                bytes: source_text.as_bytes().to_vec(),
+            },
+        )
+        .expect("actual staged source fixture");
+        original.event.payload = EventPayload::Staged {
+            reference: payload.reference,
+            media_type: "text/plain; charset=utf-8".into(),
+        };
+    }
     service
         .append_event(original.clone())
         .expect("original capture");
@@ -147,12 +176,7 @@ fn planned_fixture_with_setup(
         event_id: original.event.event_id,
         payload_digest: original.event.payload.digest().expect("original digest"),
         start: 0,
-        end: original
-            .event
-            .payload
-            .original_bytes()
-            .expect("source bytes")
-            .len() as u64,
+        end: source_text.len() as u64,
         span_digest: original.event.payload.digest().expect("span digest"),
     };
     let checkpoint = service
@@ -204,7 +228,9 @@ fn planned_fixture_with_setup(
             &mut budget(),
         )
         .expect("actual owned checkpoint");
-    let prepared = prepare(service, plan);
+    let prepared = service
+        .prepare_context(plan, &ReferenceTokenizer, encoder, &mut budget())
+        .expect("actual fixture preparation with its trusted encoder");
     let request = capture_request(&original, &checkpoint, &prepared);
     PlannedFixture {
         source: original,
@@ -244,6 +270,30 @@ pub(in crate::router_trace) fn accepted_fixture_with_setup(
         service,
         planned_fixture_with_setup(service, false, Some(setup)),
     )
+}
+
+pub(in crate::router_trace) fn accepted_fixture_with_ports(
+    service: &Arc<NativeService>,
+    source_text: &str,
+    setup: FixtureSetup,
+    encoder: &dyn OutgoingEncoder,
+) -> TraceCaptureFixture {
+    accepted_from_planned(
+        service,
+        planned_fixture_with_ports(service, false, Some(setup), source_text, encoder),
+    )
+}
+
+pub(in crate::router_trace) fn accepted_fixture_with_manifest(
+    service: &Arc<NativeService>,
+    source_text: &str,
+    setup: FixtureSetup,
+    encoder: &dyn OutgoingEncoder,
+    manifest_setup: fn(&NativeService, &mut CaptureRequest),
+) -> TraceCaptureFixture {
+    let mut fixture = planned_fixture_with_ports(service, false, Some(setup), source_text, encoder);
+    manifest_setup(service, &mut fixture.request);
+    accepted_from_planned(service, fixture)
 }
 
 pub(in crate::router_trace) fn accepted_unselected_fixture(

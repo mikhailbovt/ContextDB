@@ -30,12 +30,62 @@ const MAX_CAPTURE_CONTROL_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CAPTURE_BODY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = MAX_ROUTER_TRACE_BYTES + 128 * 1024;
 
+pub(super) struct LoadedAcceptedRouterTrace {
+    pub header: contextdb_core::RouterTraceHeader,
+    pub envelope: super::RouterEnvelope,
+    pub actual_model_request: contextdb_core::ModelRequestManifest,
+    pub controls: RouterTraceControls,
+    pub verification: contextdb_context::router::RouterMaterialVerification,
+}
+
+pub(super) enum AcceptedRouterTraceAt {
+    Complete(Box<LoadedAcceptedRouterTrace>),
+    Unavailable(AcceptedRouterTraceUnavailable),
+}
+
 impl AcceptedRouterTracePort for NativeService {
     fn read_accepted_router_trace(
         &self,
         request: ReadAcceptedRouterTraceRequest,
         budget: &mut QueryBudget,
     ) -> ServiceResult<AcceptedRouterTraceReadResult> {
+        self.check_accepted_router_trace_request(&request, budget)?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        let loaded = match self.load_accepted_router_trace_at(&snapshot, &request, budget)? {
+            AcceptedRouterTraceAt::Unavailable(reason) => {
+                return Ok(AcceptedRouterTraceReadResult::Unavailable(reason));
+            }
+            AcceptedRouterTraceAt::Complete(loaded) => loaded,
+        };
+        let lineage = lineage(&loaded.controls, budget)?;
+        let envelope = loaded.envelope;
+        let result = AcceptedRouterTraceRead {
+            receipt: request.receipt,
+            header: loaded.header,
+            request: envelope.request,
+            plan: envelope.plan,
+            manifest: envelope.manifest,
+            base: envelope.base,
+            material: envelope.materials,
+            replay_observation: envelope.replay_observation,
+            verification: loaded.verification,
+            lineage,
+        };
+        bounded_size(&result, MAX_RESPONSE_BYTES)?;
+        budget.check().map_err(budget_error)?;
+        Ok(AcceptedRouterTraceReadResult::Complete(Box::new(result)))
+    }
+}
+
+impl NativeService {
+    pub(super) fn check_accepted_router_trace_request(
+        &self,
+        request: &ReadAcceptedRouterTraceRequest,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
         // These are the existing original-read and exact-receipt capabilities.
         // Admin alone supplies none of them and the caller's purpose is unchanged.
         for capability in [
@@ -62,13 +112,22 @@ impl AcceptedRouterTracePort for NativeService {
                 false,
             ));
         }
-        let snapshot = self
-            .engine
-            .begin_read(SnapshotSelector::Latest)
-            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    /// One owner snapshot and complete current custody admission; no public-port
+    /// composition, lease, training grant or cached permission is constructed.
+    pub(super) fn load_accepted_router_trace_at<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        request: &ReadAcceptedRouterTraceRequest,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<AcceptedRouterTraceAt> {
+        let context = &request.context;
+        let receipt = &request.receipt;
         budget.charge(1, 0).map_err(budget_error)?;
         let policy = self.authorized_capture_policy_with_budget(
-            &snapshot,
+            snapshot,
             context,
             receipt.event_id,
             budget,
@@ -90,9 +149,9 @@ impl AcceptedRouterTracePort for NativeService {
         budget
             .charge(1, metadata.len() as u64)
             .map_err(budget_error)?;
-        let stored = self.captured_receipt_metadata(&snapshot, receipt.event_id)?;
+        let stored = self.captured_receipt_metadata(snapshot, receipt.event_id)?;
         let (global, _) = self.select_snapshot(
-            &snapshot,
+            snapshot,
             &context.request.workspace_id,
             Some(receipt.workspace_commit),
         )?;
@@ -113,7 +172,7 @@ impl AcceptedRouterTracePort for NativeService {
             .charge(1, journal_bytes.len() as u64)
             .map_err(budget_error)?;
         let journal: StoredEvent = decode(&journal_bytes, "accepted trace journal")?;
-        let work = self.capture_work_for_receipt(&snapshot, receipt)?;
+        let work = self.capture_work_for_receipt(snapshot, receipt)?;
         if journal.operation != "capture"
             || journal.global_commit != global
             || journal.workspace_commit != receipt.workspace_commit
@@ -126,9 +185,9 @@ impl AcceptedRouterTracePort for NativeService {
                 "accepted trace receipt has no matching native journal",
             ));
         }
-        self.verify_capture_journal_reference(&snapshot, &journal)?;
+        self.verify_capture_journal_reference(snapshot, &journal)?;
         let (metadata_receipt, recovery) =
-            self.capture_recovery_metadata(&snapshot, receipt.event_id, budget)?;
+            self.capture_recovery_metadata(snapshot, receipt.event_id, budget)?;
         if metadata_receipt != *receipt {
             return Err(integrity("accepted trace recovery receipt differs"));
         }
@@ -143,19 +202,14 @@ impl AcceptedRouterTracePort for NativeService {
         }
         let controls = if let Some(recovery) = &recovery {
             self.authorize_derived_custody_with_inputs(
-                &snapshot,
+                snapshot,
                 context,
                 receipt.event_id,
                 &recovery.inputs,
                 budget,
             )?
         } else {
-            self.authorize_derived_custody_with_budget(
-                &snapshot,
-                context,
-                receipt.event_id,
-                budget,
-            )?
+            self.authorize_derived_custody_with_budget(snapshot, context, receipt.event_id, budget)?
         };
 
         // Conservative bounded admission precedes the owner's body decoder and
@@ -173,19 +227,19 @@ impl AcceptedRouterTracePort for NativeService {
                 "accepted trace original exceeds its native row bound",
             ));
         }
-        let control = self.verified_capture_control(&snapshot, receipt.event_id, budget)?;
+        let control = self.verified_capture_control(snapshot, receipt.event_id, budget)?;
         if control.receipt != *receipt {
             return Err(integrity(
                 "accepted trace control differs from its exact receipt",
             ));
         }
         let Some(event) = control.original else {
-            return Ok(AcceptedRouterTraceReadResult::Unavailable(
+            return Ok(AcceptedRouterTraceAt::Unavailable(
                 AcceptedRouterTraceUnavailable::Pruned,
             ));
         };
         let Some(header) = control.recovery.router_trace else {
-            return Ok(AcceptedRouterTraceReadResult::Unavailable(
+            return Ok(AcceptedRouterTraceAt::Unavailable(
                 AcceptedRouterTraceUnavailable::LegacyOff,
             ));
         };
@@ -218,22 +272,20 @@ impl AcceptedRouterTracePort for NativeService {
                 contextdb_context::ContextError::BudgetExceeded(_) => trace_error(error),
                 _ => integrity("accepted router material differs from compiler commitments"),
             })?;
-        let lineage = lineage(&controls, budget)?;
-        let result = AcceptedRouterTraceRead {
-            receipt: request.receipt,
-            header,
-            request: envelope.request,
-            plan: envelope.plan,
-            manifest: envelope.manifest,
-            base: envelope.base,
-            material: envelope.materials,
-            replay_observation: envelope.replay_observation,
-            verification,
-            lineage,
+        let EventPayload::Assembly { manifest } = event.payload else {
+            return Err(integrity(
+                "accepted trace occurrence lost its model request",
+            ));
         };
-        bounded_size(&result, MAX_RESPONSE_BYTES)?;
-        budget.check().map_err(budget_error)?;
-        Ok(AcceptedRouterTraceReadResult::Complete(Box::new(result)))
+        Ok(AcceptedRouterTraceAt::Complete(Box::new(
+            LoadedAcceptedRouterTrace {
+                header,
+                envelope,
+                actual_model_request: manifest,
+                controls,
+                verification,
+            },
+        )))
     }
 }
 
