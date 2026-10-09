@@ -354,6 +354,7 @@ pub(super) fn make_plan(
 pub(super) fn finish(
     assembly: CompiledAssembly,
     record: RouterRecord,
+    replay_base: Option<&crate::OutgoingBase>,
     budget: &mut QueryBudget,
 ) -> Result<RoutedAssembly> {
     let plan = make_plan(&assembly, &record.request, &record.scores, budget)?;
@@ -375,13 +376,32 @@ pub(super) fn finish(
         compilation_bytes_processed: 0,
         compilation_micros: 0,
     };
-    let prepared_material = prepared_material(&record, &plan, &manifest, budget)?;
+    let prepared_material = prepared_material(
+        &record,
+        &plan,
+        &manifest,
+        replay_base,
+        assembly.raw_recall_pressure.as_ref(),
+        budget,
+    )?;
+    let replay_observation = record.replay.map(|replay| router::RouterReplayObservation {
+        format: router::ROUTER_REPLAY_OBSERVATION_FORMAT.into(),
+        preparation_digest: prepared_material
+            .prepared_policy
+            .as_ref()
+            .and_then(|policy| policy.replay.as_ref())
+            .expect("captured replay preparation")
+            .digest,
+        attempts: replay.attempts,
+        raw_recall_pressure: assembly.raw_recall_pressure.as_ref().map(Into::into),
+    });
     Ok(RoutedAssembly {
         assembly,
         request: record.request,
         plan,
         manifest,
         prepared_material,
+        replay_observation,
     })
 }
 
@@ -389,6 +409,8 @@ fn prepared_material(
     record: &RouterRecord,
     plan: &RouterSelectionPlan,
     manifest: &RouterManifest,
+    replay_base: Option<&crate::OutgoingBase>,
+    pressure: Option<&RawRecallPressure>,
     budget: &mut QueryBudget,
 ) -> Result<RouterPreparedMaterial> {
     #[derive(serde::Serialize)]
@@ -402,11 +424,48 @@ fn prepared_material(
     struct PolicyView<'a> {
         format: &'static str,
         units: Vec<UnitPolicyView<'a>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        replay: Option<ReplayView<'a>>,
     }
     #[derive(serde::Serialize)]
     struct UnitPolicyView<'a> {
         id: &'a BlockId,
         alternatives: Vec<RouterPreparedAlternativePolicy>,
+    }
+    #[derive(serde::Serialize)]
+    struct ReplayView<'a> {
+        format: &'static str,
+        compiler: &'static str,
+        renderer: &'static str,
+        canonical_encoding: &'static str,
+        layout: &'static str,
+        digest: ContentDigest,
+        selector_work: u64,
+        selector_bytes: u64,
+        prepared_order: &'a [BlockId],
+        omissions: &'a [Omission],
+        units: Vec<ReplayUnitView<'a>>,
+    }
+    #[derive(serde::Serialize)]
+    struct ReplayUnitView<'a> {
+        id: &'a BlockId,
+        variants: Vec<ReplayVariantView<'a>>,
+    }
+    #[derive(serde::Serialize)]
+    struct ReplayVariantView<'a> {
+        index: u32,
+        generated: bool,
+        block_tokens: u32,
+        evidence_tokens: u32,
+        block_token_handles: Vec<&'a EvidenceHandle>,
+        evidence_order: Vec<&'a EvidenceHandle>,
+    }
+    #[derive(serde::Serialize)]
+    struct ObservationView<'a> {
+        format: &'static str,
+        preparation_digest: ContentDigest,
+        attempts: &'a [router::RouterReplayAttempt],
+        raw_recall_pressure: Option<router::RouterReplayPressure>,
     }
     let candidates: Vec<_> = record
         .prepared_units
@@ -453,6 +512,79 @@ fn prepared_material(
             (record.prepared_units.len() * size_of::<UnitPolicyView<'_>>()
                 + alternatives * size_of::<RouterPreparedAlternativePolicy>()) as u64,
         )?;
+        let replay = if let Some(replay) = &record.replay {
+            let metadata = record
+                .prepared_units
+                .values()
+                .map(|unit| {
+                    unit.variants
+                        .iter()
+                        .map(|variant| variant.evidence.len() + 1)
+                        .sum::<usize>()
+                        + 1
+                })
+                .sum::<usize>();
+            charge(
+                budget,
+                metadata as u64,
+                (metadata * size_of::<ReplayVariantView<'_>>()) as u64,
+            )?;
+            let units: Vec<_> = record
+                .prepared_units
+                .iter()
+                .map(|(id, unit)| ReplayUnitView {
+                    id,
+                    variants: unit
+                        .variants
+                        .iter()
+                        .enumerate()
+                        .map(|(index, variant)| ReplayVariantView {
+                            index: index as u32,
+                            generated: variant.generated,
+                            block_tokens: variant.block_tokens,
+                            evidence_tokens: variant.evidence_tokens,
+                            block_token_handles: variant
+                                .block_token_handles
+                                .as_ref()
+                                .unwrap_or(&variant.block.evidence_handles)
+                                .iter()
+                                .collect(),
+                            evidence_order: variant.evidence.iter().map(|item| &item.id).collect(),
+                        })
+                        .collect(),
+                })
+                .collect();
+            let digest = canonical_digest(
+                &(
+                    router::ROUTER_REPLAY_PREPARATION_FORMAT,
+                    CONTEXT_COMPILER_VERSION,
+                    replay::RENDERER,
+                    crate::CONTEXT_PACK_CANONICAL_ENCODING,
+                    OUTGOING_LAYOUT,
+                    replay.selector_allowance.0,
+                    replay.selector_allowance.1,
+                    &replay.prepared_order,
+                    &replay.omissions,
+                    &units,
+                ),
+                budget,
+            )?;
+            Some(ReplayView {
+                format: router::ROUTER_REPLAY_PREPARATION_FORMAT,
+                compiler: CONTEXT_COMPILER_VERSION,
+                renderer: replay::RENDERER,
+                canonical_encoding: crate::CONTEXT_PACK_CANONICAL_ENCODING,
+                layout: OUTGOING_LAYOUT,
+                digest,
+                selector_work: replay.selector_allowance.0,
+                selector_bytes: replay.selector_allowance.1,
+                prepared_order: &replay.prepared_order,
+                omissions: &replay.omissions,
+                units,
+            })
+        } else {
+            None
+        };
         Some(PolicyView {
             format: ROUTER_PREPARED_POLICY_FORMAT,
             units: record
@@ -472,6 +604,7 @@ fn prepared_material(
                         .collect(),
                 })
                 .collect(),
+            replay,
         })
     } else {
         None
@@ -483,7 +616,35 @@ fn prepared_material(
     };
     // Borrow actual prepared values while checking the complete envelope. No
     // extra candidate/evidence payload is cloned before this bounded check.
-    router::canonical_bytes(&(&record.request, plan, manifest, &material), budget)?;
+    if let Some(replay) = &record.replay {
+        let base =
+            replay_base.ok_or_else(|| router::invalid("missing replay base for joint bound"))?;
+        let preparation_digest = material
+            .prepared_policy
+            .as_ref()
+            .and_then(|policy| policy.replay.as_ref())
+            .ok_or_else(|| router::invalid("missing replay preparation for joint bound"))?
+            .digest;
+        let observation = ObservationView {
+            format: router::ROUTER_REPLAY_OBSERVATION_FORMAT,
+            preparation_digest,
+            attempts: &replay.attempts,
+            raw_recall_pressure: pressure.map(Into::into),
+        };
+        router::canonical_bytes(
+            &(
+                &record.request,
+                plan,
+                manifest,
+                base,
+                &material,
+                observation,
+            ),
+            budget,
+        )?;
+    } else {
+        router::canonical_bytes(&(&record.request, plan, manifest, &material), budget)?;
+    }
     Ok(RouterPreparedMaterial {
         candidates: material.candidates.into_iter().cloned().collect(),
         evidence: material.evidence.into_iter().cloned().collect(),
@@ -497,6 +658,45 @@ fn prepared_material(
                     alternatives: unit.alternatives,
                 })
                 .collect(),
+            replay: policy.replay.map(|replay| router::RouterReplayPreparation {
+                format: replay.format.into(),
+                compiler: replay.compiler.into(),
+                renderer: replay.renderer.into(),
+                canonical_encoding: replay.canonical_encoding.into(),
+                layout: replay.layout.into(),
+                digest: replay.digest,
+                selector_work: replay.selector_work,
+                selector_bytes: replay.selector_bytes,
+                prepared_order: replay.prepared_order.to_vec(),
+                omissions: replay.omissions.to_vec(),
+                units: replay
+                    .units
+                    .into_iter()
+                    .map(|unit| router::RouterReplayUnit {
+                        id: unit.id.clone(),
+                        variants: unit
+                            .variants
+                            .into_iter()
+                            .map(|variant| router::RouterReplayVariant {
+                                index: variant.index,
+                                generated: variant.generated,
+                                block_tokens: variant.block_tokens,
+                                evidence_tokens: variant.evidence_tokens,
+                                block_token_handles: variant
+                                    .block_token_handles
+                                    .into_iter()
+                                    .cloned()
+                                    .collect(),
+                                evidence_order: variant
+                                    .evidence_order
+                                    .into_iter()
+                                    .cloned()
+                                    .collect(),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            }),
         }),
     })
 }

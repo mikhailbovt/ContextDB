@@ -17,6 +17,7 @@ use crate::{
 use contextdb_core::{ContentDigest, OriginalSourceSpan};
 use contextdb_recall::QueryBudget;
 
+mod replay;
 mod routing;
 use routing::{finish, make_request, score_record};
 
@@ -25,6 +26,15 @@ struct RouterRecord {
     scores: Vec<RouterScore>,
     prepared_units: BTreeMap<BlockId, Unit>,
     capture_prepared_policy: bool,
+    replay: Option<ReplayCapture>,
+}
+
+struct ReplayCapture {
+    selector_allowance: (u64, u64),
+    prepared_order: Vec<BlockId>,
+    omissions: Vec<Omission>,
+    attempts: Vec<router::RouterReplayAttempt>,
+    attempt_bytes: usize,
 }
 
 #[derive(Clone)]
@@ -59,6 +69,29 @@ struct SelectionWinner {
     selected: BTreeSet<BlockId>,
     trial: Trial,
     adds_raw_original: bool,
+}
+
+struct PreparedSelection {
+    units: BTreeMap<BlockId, Unit>,
+    prepared: Vec<PreparedCandidate>,
+    selected: BTreeSet<BlockId>,
+    visible: OriginalInventory,
+    omissions: Vec<Omission>,
+    base_outgoing: EncodedOutgoing,
+    binding: crate::AssemblyBinding,
+    router_record: Option<RouterRecord>,
+}
+
+struct SelectionExecution<'a> {
+    request: &'a CompileAssemblyRequest,
+    provider: Option<&'a dyn AssemblyProvider>,
+    tokenizer: &'a dyn TokenCounter,
+    encoder: &'a dyn OutgoingEncoder,
+    scorer: &'a dyn ContextScorer,
+    budget: &'a mut QueryBudget,
+    capture: bool,
+    proposal: Option<&'a RouterSelectionPlan>,
+    started: std::time::Instant,
 }
 
 impl ContextCompiler {
@@ -122,6 +155,7 @@ impl ContextCompiler {
                 budget,
                 false,
                 false,
+                false,
                 None,
                 std::time::Instant::now(),
             )?
@@ -139,7 +173,7 @@ impl ContextCompiler {
         budget: &mut QueryBudget,
     ) -> Result<RoutedAssembly> {
         self.compile_assembly_with_router_inner(
-            request, provider, tokenizer, encoder, scorer, budget, false,
+            request, provider, tokenizer, encoder, scorer, budget, false, false,
         )
     }
 
@@ -156,7 +190,23 @@ impl ContextCompiler {
         budget: &mut QueryBudget,
     ) -> Result<RoutedAssembly> {
         self.compile_assembly_with_router_inner(
-            request, provider, tokenizer, encoder, scorer, budget, true,
+            request, provider, tokenizer, encoder, scorer, budget, true, false,
+        )
+    }
+
+    /// Retain the exact post-preparation inputs and compact behavior observations
+    /// for detached historical R0 verification. This grants no export rights.
+    pub fn compile_assembly_with_router_replay(
+        &self,
+        request: &CompileAssemblyRequest,
+        provider: &dyn AssemblyProvider,
+        tokenizer: &dyn TokenCounter,
+        encoder: &dyn OutgoingEncoder,
+        scorer: &dyn ContextScorer,
+        budget: &mut QueryBudget,
+    ) -> Result<RoutedAssembly> {
+        self.compile_assembly_with_router_inner(
+            request, provider, tokenizer, encoder, scorer, budget, true, true,
         )
     }
 
@@ -173,6 +223,7 @@ impl ContextCompiler {
         scorer: &dyn ContextScorer,
         budget: &mut QueryBudget,
         capture_prepared_policy: bool,
+        capture_replay: bool,
     ) -> Result<RoutedAssembly> {
         let started = std::time::Instant::now();
         let work = budget.remaining_work();
@@ -186,6 +237,7 @@ impl ContextCompiler {
             budget,
             true,
             capture_prepared_policy,
+            capture_replay,
             None,
             started,
         );
@@ -216,6 +268,7 @@ impl ContextCompiler {
                     budget,
                     true,
                     capture_prepared_policy,
+                    capture_replay,
                     None,
                     started,
                 )?;
@@ -226,6 +279,7 @@ impl ContextCompiler {
         let mut result = finish(
             assembly,
             record.ok_or_else(|| router::invalid("missing compiler record"))?,
+            capture_replay.then_some(&request.base),
             budget,
         )?;
         if fallback {
@@ -236,15 +290,29 @@ impl ContextCompiler {
         result.manifest.compilation_work_units = work - budget.remaining_work();
         result.manifest.compilation_bytes_processed = bytes - budget.remaining_bytes();
         result.manifest.compilation_micros = elapsed_micros(started);
-        router::canonical_bytes(
-            &(
-                &result.request,
-                &result.plan,
-                &result.manifest,
-                &result.prepared_material,
-            ),
-            budget,
-        )?;
+        if let Some(observation) = &result.replay_observation {
+            router::canonical_bytes(
+                &(
+                    &result.request,
+                    &result.plan,
+                    &result.manifest,
+                    &request.base,
+                    &result.prepared_material,
+                    observation,
+                ),
+                budget,
+            )?;
+        } else {
+            router::canonical_bytes(
+                &(
+                    &result.request,
+                    &result.plan,
+                    &result.manifest,
+                    &result.prepared_material,
+                ),
+                budget,
+            )?;
+        }
         require_router_deadline(started, budget)?;
         Ok(result)
     }
@@ -277,12 +345,14 @@ impl ContextCompiler {
             budget,
             true,
             false,
+            false,
             Some(plan),
             started,
         )?;
         let mut result = finish(
             assembly,
             record.ok_or_else(|| router::invalid("missing compiler record"))?,
+            None,
             budget,
         )?;
         // Timing is local execution evidence, not a replayed score or caller cost.
@@ -354,12 +424,14 @@ impl ContextCompiler {
                     budget,
                     true,
                     false,
+                    false,
                     None,
                     started,
                 )?;
                 let mut result = finish(
                     assembly,
                     record.ok_or_else(|| router::invalid("missing compiler record"))?,
+                    None,
                     budget,
                 )?;
                 result.manifest.fallback_from = Some(expected_scorer.id().into());
@@ -398,6 +470,7 @@ impl ContextCompiler {
         budget: &mut QueryBudget,
         capture: bool,
         capture_prepared_policy: bool,
+        capture_replay: bool,
         proposal: Option<&RouterSelectionPlan>,
         prepare_started: std::time::Instant,
     ) -> Result<(CompiledAssembly, Option<RouterRecord>)> {
@@ -583,6 +656,20 @@ impl ContextCompiler {
                         &required_names,
                         tokenizer,
                     )? {
+                        if capture_replay {
+                            charge(
+                                budget,
+                                1,
+                                prepared
+                                    .block
+                                    .evidence_handles
+                                    .iter()
+                                    .map(|handle| handle.as_str().len())
+                                    .sum::<usize>() as u64,
+                            )?;
+                            prepared.block_token_handles =
+                                Some(prepared.block.evidence_handles.clone());
+                        }
                         if !dependencies.supports.is_empty() {
                             prepared.evidence = support
                                 .iter()
@@ -633,7 +720,10 @@ impl ContextCompiler {
         select_required_facets(context, &prepared, &mut selected);
         for requirement in &context.required_facets {
             if !requirement_satisfied(requirement, &prepared, &selected) {
-                let unknown = prepare_missing_unknown(context, &requirement.name, tokenizer)?;
+                let mut unknown = prepare_missing_unknown(context, &requirement.name, tokenizer)?;
+                if capture_replay {
+                    unknown.block_token_handles = Some(unknown.block.evidence_handles.clone());
+                }
                 selected.insert(unknown.block.id.clone());
                 units.insert(
                     unknown.block.id.clone(),
@@ -666,6 +756,7 @@ impl ContextCompiler {
                 scores: Vec::new(),
                 prepared_units: BTreeMap::new(),
                 capture_prepared_policy,
+                replay: None,
             })
         } else {
             None
@@ -677,316 +768,455 @@ impl ContextCompiler {
                     other => other,
                 })?;
         }
-        let mut evaluations = 0;
-        let mut best = trial(
-            request,
-            &base_outgoing,
-            &selected,
-            &units,
-            &visible,
-            &omissions,
-            evaluations,
-            tokenizer,
-            encoder,
-            budget,
-        )?
-        .require_outgoing_fit()?;
-        let mut optional_seeds = BTreeSet::new();
-        let mut scorer_duration = std::time::Duration::ZERO;
-        let mut raw_recall_pressure: Option<RawRecallPressure> = None;
-        let mut selected_raw_original = false;
-        let mut scorer_work = 0_u64;
-        loop {
-            if capture && elapsed_micros(prepare_started) > 30_000_000 {
-                return Err(ContextError::BudgetExceeded(
-                    "router prepare deadline exceeded".into(),
-                ));
+        if capture_replay {
+            if omissions.len() > 1024 || prepared.len() > router::MAX_UNITS {
+                return Err(router::invalid("excessive replay preparation inventory"));
             }
-            let mut units_to_score: BTreeSet<BTreeSet<BlockId>> = BTreeSet::new();
-            let mut pairs = 0;
-            for (id, unit) in &units {
-                if selected.contains(id) {
-                    continue;
-                }
-                units_to_score.insert(BTreeSet::from([id.clone()]));
-                for partner in &unit.dependencies.complements {
-                    if pairs < 64 && units.contains_key(partner) && !selected.contains(partner) {
-                        pairs += 1;
-                        units_to_score.insert(BTreeSet::from([id.clone(), partner.clone()]));
-                    }
-                }
-            }
-            let covered = covered_facets(&prepared, &selected);
-            let mut winner: Option<SelectionWinner> = None;
-            for seeds in units_to_score {
-                if evaluations >= context.budgets.max_selection_evaluations {
-                    break;
-                }
-                charge(budget, 1, 0)?;
-                evaluations += 1;
-                let mut trial_ids = selected.clone();
-                trial_ids.extend(seeds.iter().cloned());
-                let trial_ids = match if capture {
-                    closure_bounded(&trial_ids, &units, &prepared, budget)
-                } else {
-                    closure(&trial_ids, &units, &prepared)
-                } {
-                    Ok(ids) => ids,
-                    Err(error @ ContextError::BudgetExceeded(_)) if capture => return Err(error),
-                    Err(_) => continue,
-                };
-                let trial = match trial(
-                    request,
-                    &base_outgoing,
-                    &trial_ids,
-                    &units,
-                    &visible,
-                    &omissions,
-                    evaluations,
-                    tokenizer,
-                    encoder,
-                    budget,
-                ) {
-                    Ok(trial) => trial,
-                    Err(ContextError::BudgetExceeded(_))
-                        if budget.check().is_ok()
-                            && budget.remaining_work() > 0
-                            && budget.remaining_bytes() > 0 =>
-                    {
-                        continue;
-                    }
-                    Err(error) => return Err(error),
-                };
-                let marginal = trial
-                    .outgoing
-                    .input_tokens
-                    .saturating_sub(best.outgoing.input_tokens);
-                let unit = ScoringUnit {
-                    seeds: seeds.clone(),
-                    closure: trial_ids.difference(&selected).cloned().collect(),
-                    marginal_tokens: marginal,
-                    prior_utility_micros: seeds.iter().fold(0_u64, |sum, id| {
-                        sum.saturating_add(units[id].variants[0].candidate.utility_micros)
-                    }),
-                    new_facets: covered_facets(&prepared, &trial_ids)
-                        .difference(&covered)
-                        .cloned()
-                        .collect(),
-                    adds_original_bytes: trial.added_bytes > best.added_bytes,
-                    raw_only: seeds.iter().all(|id| {
-                        units[id].variants[0].block.kind == PackBlockKind::RawObservation
-                    }),
-                };
-                let started = std::time::Instant::now();
-                let score = if let (Some(plan), Some(record)) = (proposal, &router_record) {
-                    let saved = plan
-                        .scores
-                        .iter()
-                        .find(|score| score.evaluation == evaluations)
-                        .ok_or_else(|| {
-                            ContextError::RouterProposal("missing score evaluation".into())
-                        })?;
-                    let actual = score_record(
-                        &record.request,
-                        &selected,
-                        &best,
-                        &unit,
-                        &trial,
-                        evaluations,
-                        saved.utility_micros,
-                        budget,
-                    )?;
-                    if actual != *saved {
-                        return Err(ContextError::RouterProposal(
-                            "stale score base or trial material".into(),
-                        ));
-                    }
-                    saved.utility_micros
-                } else {
-                    let before_work = budget.remaining_work();
-                    let value = scorer.score(&unit, budget)?;
-                    scorer_duration += started.elapsed();
-                    scorer_work = scorer_work.saturating_add(before_work - budget.remaining_work());
-                    if capture
-                        && (scorer_duration.as_micros() > u128::from(scorer.latency_limit_micros())
-                            || scorer_work
-                                > u64::from(context.budgets.max_selection_evaluations) * 1024)
-                    {
-                        return Err(ContextError::RouterScore(
-                            "scorer work or cooperative subdeadline exceeded".into(),
-                        ));
-                    }
-                    value
-                };
-                if let Some(record) = &mut router_record {
-                    let score = score_record(
-                        &record.request,
-                        &selected,
-                        &best,
-                        &unit,
-                        &trial,
-                        evaluations,
-                        score,
-                        budget,
-                    )?;
-                    record.scores.push(score);
-                }
-                let Some(value) = score else {
-                    continue;
-                };
-                if value == 0 {
-                    continue;
-                }
-                let adds_raw_original = unit.raw_only && unit.adds_original_bytes;
-                if trial.outgoing_overflow {
-                    // All closure/category/serialization limits have passed, and
-                    // the real scorer priced the actual encoded marginal cost.
-                    if adds_raw_original
-                        && raw_recall_pressure.as_ref().is_none_or(|old| {
-                            trial.outgoing.input_tokens < old.candidate_input_tokens
-                        })
-                    {
-                        let usage = trial.fit.pack.compilation.usage;
-                        raw_recall_pressure = Some(RawRecallPressure {
-                            baseline_input_tokens: best.outgoing.input_tokens,
-                            candidate_input_tokens: trial.outgoing.input_tokens,
-                            memory_tokens: usage.rendered_tokens,
-                            raw_evidence_tokens: usage.raw_evidence_tokens,
-                            history_tokens: usage.history_tokens,
-                            conflict_tokens: usage.conflict_tokens,
-                        });
-                    }
-                    continue;
-                }
-                let cost = marginal.max(1);
-                let replace = winner.as_ref().is_none_or(|old| {
-                    u128::from(value) * u128::from(old.cost)
-                        > u128::from(old.value) * u128::from(cost)
-                        || (u128::from(value) * u128::from(old.cost)
-                            == u128::from(old.value) * u128::from(cost)
-                            && seeds < old.seeds)
-                });
-                if replace {
-                    winner = Some(SelectionWinner {
-                        value,
-                        cost,
-                        seeds,
-                        selected: trial_ids,
-                        trial,
-                        adds_raw_original,
-                    });
-                }
-            }
-            let Some(winner) = winner else {
-                break;
-            };
-            selected = winner.selected;
-            optional_seeds.extend(winner.seeds);
-            selected_raw_original |= winner.adds_raw_original;
-            best = winner.trial;
-            if evaluations >= context.budgets.max_selection_evaluations
-                || best.fit.pack.compilation.usage.rendered_tokens >= context.budgets.soft_tokens
-            {
-                break;
-            }
+            let order: Vec<_> = prepared.iter().map(|item| &item.block.id).collect();
+            router::canonical_bytes(&(&order, &omissions), budget)?;
+            charge(budget, 1, (order.len() * size_of::<BlockId>()) as u64)?;
+            router_record
+                .as_mut()
+                .ok_or_else(|| router::invalid("missing replay record"))?
+                .replay = Some(ReplayCapture {
+                selector_allowance: (budget.remaining_work(), budget.remaining_bytes()),
+                prepared_order: order.into_iter().cloned().collect(),
+                omissions: omissions.clone(),
+                attempts: Vec::new(),
+                attempt_bytes: 0,
+            });
         }
-        // Re-render after selection accounting; this is the exact request returned.
-        best = trial(
-            request,
-            &base_outgoing,
-            &selected,
-            &units,
-            &visible,
-            &omissions,
-            evaluations,
-            tokenizer,
-            encoder,
-            budget,
-        )?
-        .require_outgoing_fit()?;
-        let mut originals: Vec<_> = best
-            .fit
-            .pack
-            .evidence
-            .iter()
-            .filter_map(|item| item.original_span.clone())
-            .collect();
-        originals.extend(
-            best.messages
-                .iter()
-                .flat_map(|message| message.originals.iter().map(|value| value.span.clone())),
-        );
-        originals.sort_by_key(|span| (span.event_id, span.payload_digest, span.start, span.end));
-        originals.dedup();
-        let read_set = AssemblyReadSet {
-            scopes: context.scopes.clone(),
-            originals,
-            selected_blocks: selected,
-            binding,
-        };
-        provider.validate_read_set(&read_set, budget)?;
+        select_prepared(
+            SelectionExecution {
+                request,
+                provider: Some(provider),
+                tokenizer,
+                encoder,
+                scorer,
+                budget,
+                capture,
+                proposal,
+                started: prepare_started,
+            },
+            PreparedSelection {
+                units,
+                prepared,
+                selected,
+                visible,
+                omissions,
+                base_outgoing,
+                binding,
+                router_record,
+            },
+        )
+    }
+}
+
+fn select_prepared(
+    execution: SelectionExecution<'_>,
+    preparation: PreparedSelection,
+) -> Result<(CompiledAssembly, Option<RouterRecord>)> {
+    let SelectionExecution {
+        request,
+        provider,
+        tokenizer,
+        encoder,
+        scorer,
+        budget,
+        capture,
+        proposal,
+        started: prepare_started,
+    } = execution;
+    let PreparedSelection {
+        units,
+        prepared,
+        mut selected,
+        visible,
+        omissions,
+        base_outgoing,
+        binding,
+        mut router_record,
+    } = preparation;
+    let context = &request.context;
+    let mut evaluations = 0;
+    let mut best = trial(
+        request,
+        &base_outgoing,
+        &selected,
+        &units,
+        &visible,
+        &omissions,
+        evaluations,
+        tokenizer,
+        encoder,
+        budget,
+    )?
+    .require_outgoing_fit()?;
+    let mut optional_seeds = BTreeSet::new();
+    let mut scorer_duration = std::time::Duration::ZERO;
+    let mut raw_recall_pressure: Option<RawRecallPressure> = None;
+    let mut selected_raw_original = false;
+    let mut scorer_work = 0_u64;
+    loop {
         if capture && elapsed_micros(prepare_started) > 30_000_000 {
             return Err(ContextError::BudgetExceeded(
                 "router prepare deadline exceeded".into(),
             ));
         }
-        best.fit.pack.validate()?;
-        let canonical_json = CanonicalSerializer::to_json(&best.fit.pack)?;
-        let canonical_protobuf = CanonicalSerializer::to_protobuf(&best.fit.pack)?;
-        let canonical_digest = blake3::hash(&canonical_protobuf).to_hex().to_string();
-        let manifest = OutgoingAssemblyManifest {
-            layout: OUTGOING_LAYOUT.into(),
-            encoder: encoder.id().into(),
-            model_profile_digest: digest(&context.model_profile)?,
-            base_digest: digest(&request.base)?,
-            pack_digest: canonical_digest.clone(),
-            scorer: scorer.id().into(),
-            occurrences: best
-                .messages
-                .iter()
-                .map(|message| {
-                    Ok(OutgoingOccurrence {
-                        id: message.id.clone(),
-                        zone: message.zone,
-                        role: message.role,
-                        digest: digest(message)?,
-                        originals: message.originals.clone(),
-                    })
-                })
-                .collect::<Result<_>>()?,
-            read_set,
-            input_tokens: best.outgoing.input_tokens,
-            count_kind: best.outgoing.count_kind,
-            reserved_output_tokens: context.model_profile.reserved_output_tokens,
-            safety_tokens: request.budget.safety_tokens,
-            wire_digest: ContentDigest::from_bytes(*blake3::hash(&best.outgoing.wire).as_bytes()),
-        };
-        charge(budget, 1, 0)?;
-        let assembly = CompiledAssembly {
-            context: CompiledContext {
-                pack: best.fit.pack,
-                rendered: best.fit.rendered,
-                canonical_json,
-                canonical_protobuf,
-                canonical_digest,
-            },
-            messages: best.messages,
-            outgoing: best.outgoing,
-            manifest,
-            optional_seeds,
-            selection_evaluations: evaluations,
-            scorer_micros: u64::try_from(scorer_duration.as_micros()).unwrap_or(u64::MAX),
-            raw_recall_pressure: if selected_raw_original {
-                None
-            } else {
-                raw_recall_pressure
-            },
-        };
-        if let Some(record) = &mut router_record {
-            record.prepared_units = units;
+        let mut units_to_score: BTreeSet<BTreeSet<BlockId>> = BTreeSet::new();
+        let mut pairs = 0;
+        for (id, unit) in &units {
+            if selected.contains(id) {
+                continue;
+            }
+            units_to_score.insert(BTreeSet::from([id.clone()]));
+            for partner in &unit.dependencies.complements {
+                if pairs < 64 && units.contains_key(partner) && !selected.contains(partner) {
+                    pairs += 1;
+                    units_to_score.insert(BTreeSet::from([id.clone(), partner.clone()]));
+                }
+            }
         }
-        Ok((assembly, router_record))
+        let covered = covered_facets(&prepared, &selected);
+        let mut winner: Option<SelectionWinner> = None;
+        for seeds in units_to_score {
+            if evaluations >= context.budgets.max_selection_evaluations {
+                break;
+            }
+            charge(budget, 1, 0)?;
+            evaluations += 1;
+            let mut trial_ids = selected.clone();
+            trial_ids.extend(seeds.iter().cloned());
+            let trial_ids = match if capture {
+                closure_bounded(&trial_ids, &units, &prepared, budget)
+            } else {
+                closure(&trial_ids, &units, &prepared)
+            } {
+                Ok(ids) => ids,
+                Err(error @ ContextError::BudgetExceeded(_)) if capture => return Err(error),
+                Err(_) => {
+                    record_attempt(
+                        &mut router_record,
+                        evaluations,
+                        &seeds,
+                        router::RouterReplayAttemptOutcome::ClosureRejected,
+                        budget,
+                    )?;
+                    continue;
+                }
+            };
+            let trial = match trial(
+                request,
+                &base_outgoing,
+                &trial_ids,
+                &units,
+                &visible,
+                &omissions,
+                evaluations,
+                tokenizer,
+                encoder,
+                budget,
+            ) {
+                Ok(trial) => trial,
+                Err(ContextError::BudgetExceeded(_))
+                    if budget.check().is_ok()
+                        && budget.remaining_work() > 0
+                        && budget.remaining_bytes() > 0 =>
+                {
+                    record_attempt(
+                        &mut router_record,
+                        evaluations,
+                        &seeds,
+                        router::RouterReplayAttemptOutcome::TrialRejected,
+                        budget,
+                    )?;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let marginal = trial
+                .outgoing
+                .input_tokens
+                .saturating_sub(best.outgoing.input_tokens);
+            let unit = ScoringUnit {
+                seeds: seeds.clone(),
+                closure: trial_ids.difference(&selected).cloned().collect(),
+                marginal_tokens: marginal,
+                prior_utility_micros: seeds.iter().fold(0_u64, |sum, id| {
+                    sum.saturating_add(units[id].variants[0].candidate.utility_micros)
+                }),
+                new_facets: covered_facets(&prepared, &trial_ids)
+                    .difference(&covered)
+                    .cloned()
+                    .collect(),
+                adds_original_bytes: trial.added_bytes > best.added_bytes,
+                raw_only: seeds
+                    .iter()
+                    .all(|id| units[id].variants[0].block.kind == PackBlockKind::RawObservation),
+            };
+            let started = std::time::Instant::now();
+            let score = if let (Some(plan), Some(record)) = (proposal, &router_record) {
+                let saved = plan
+                    .scores
+                    .iter()
+                    .find(|score| score.evaluation == evaluations)
+                    .ok_or_else(|| {
+                        ContextError::RouterProposal("missing score evaluation".into())
+                    })?;
+                let actual = score_record(
+                    &record.request,
+                    &selected,
+                    &best,
+                    &unit,
+                    &trial,
+                    evaluations,
+                    saved.utility_micros,
+                    budget,
+                )?;
+                if actual != *saved {
+                    return Err(ContextError::RouterProposal(
+                        "stale score base or trial material".into(),
+                    ));
+                }
+                saved.utility_micros
+            } else {
+                let before_work = budget.remaining_work();
+                let value = scorer.score(&unit, budget)?;
+                scorer_duration += started.elapsed();
+                scorer_work = scorer_work.saturating_add(before_work - budget.remaining_work());
+                if capture
+                    && (scorer_duration.as_micros() > u128::from(scorer.latency_limit_micros())
+                        || scorer_work
+                            > u64::from(context.budgets.max_selection_evaluations) * 1024)
+                {
+                    return Err(ContextError::RouterScore(
+                        "scorer work or cooperative subdeadline exceeded".into(),
+                    ));
+                }
+                value
+            };
+            if let Some(record) = &mut router_record {
+                let score = score_record(
+                    &record.request,
+                    &selected,
+                    &best,
+                    &unit,
+                    &trial,
+                    evaluations,
+                    score,
+                    budget,
+                )?;
+                record.scores.push(score);
+            }
+            record_attempt(
+                &mut router_record,
+                evaluations,
+                &seeds,
+                router::RouterReplayAttemptOutcome::Scored,
+                budget,
+            )?;
+            let Some(value) = score else {
+                continue;
+            };
+            if value == 0 {
+                continue;
+            }
+            let adds_raw_original = unit.raw_only && unit.adds_original_bytes;
+            if trial.outgoing_overflow {
+                // All closure/category/serialization limits have passed, and
+                // the real scorer priced the actual encoded marginal cost.
+                if adds_raw_original
+                    && raw_recall_pressure
+                        .as_ref()
+                        .is_none_or(|old| trial.outgoing.input_tokens < old.candidate_input_tokens)
+                {
+                    let usage = trial.fit.pack.compilation.usage;
+                    raw_recall_pressure = Some(RawRecallPressure {
+                        baseline_input_tokens: best.outgoing.input_tokens,
+                        candidate_input_tokens: trial.outgoing.input_tokens,
+                        memory_tokens: usage.rendered_tokens,
+                        raw_evidence_tokens: usage.raw_evidence_tokens,
+                        history_tokens: usage.history_tokens,
+                        conflict_tokens: usage.conflict_tokens,
+                    });
+                }
+                continue;
+            }
+            let cost = marginal.max(1);
+            let replace = winner.as_ref().is_none_or(|old| {
+                u128::from(value) * u128::from(old.cost) > u128::from(old.value) * u128::from(cost)
+                    || (u128::from(value) * u128::from(old.cost)
+                        == u128::from(old.value) * u128::from(cost)
+                        && seeds < old.seeds)
+            });
+            if replace {
+                winner = Some(SelectionWinner {
+                    value,
+                    cost,
+                    seeds,
+                    selected: trial_ids,
+                    trial,
+                    adds_raw_original,
+                });
+            }
+        }
+        let Some(winner) = winner else {
+            break;
+        };
+        selected = winner.selected;
+        optional_seeds.extend(winner.seeds);
+        selected_raw_original |= winner.adds_raw_original;
+        best = winner.trial;
+        if evaluations >= context.budgets.max_selection_evaluations
+            || best.fit.pack.compilation.usage.rendered_tokens >= context.budgets.soft_tokens
+        {
+            break;
+        }
     }
+    // Re-render after selection accounting; this is the exact request returned.
+    best = trial(
+        request,
+        &base_outgoing,
+        &selected,
+        &units,
+        &visible,
+        &omissions,
+        evaluations,
+        tokenizer,
+        encoder,
+        budget,
+    )?
+    .require_outgoing_fit()?;
+    let mut originals: Vec<_> = best
+        .fit
+        .pack
+        .evidence
+        .iter()
+        .filter_map(|item| item.original_span.clone())
+        .collect();
+    originals.extend(
+        best.messages
+            .iter()
+            .flat_map(|message| message.originals.iter().map(|value| value.span.clone())),
+    );
+    originals.sort_by_key(|span| (span.event_id, span.payload_digest, span.start, span.end));
+    originals.dedup();
+    let read_set = AssemblyReadSet {
+        scopes: context.scopes.clone(),
+        originals,
+        selected_blocks: selected,
+        binding,
+    };
+    if let Some(provider) = provider {
+        provider.validate_read_set(&read_set, budget)?;
+    }
+    if capture && elapsed_micros(prepare_started) > 30_000_000 {
+        return Err(ContextError::BudgetExceeded(
+            "router prepare deadline exceeded".into(),
+        ));
+    }
+    best.fit.pack.validate()?;
+    let canonical_json = CanonicalSerializer::to_json(&best.fit.pack)?;
+    let canonical_protobuf = CanonicalSerializer::to_protobuf(&best.fit.pack)?;
+    let canonical_digest = blake3::hash(&canonical_protobuf).to_hex().to_string();
+    let manifest = OutgoingAssemblyManifest {
+        layout: OUTGOING_LAYOUT.into(),
+        encoder: encoder.id().into(),
+        model_profile_digest: digest(&context.model_profile)?,
+        base_digest: digest(&request.base)?,
+        pack_digest: canonical_digest.clone(),
+        scorer: scorer.id().into(),
+        occurrences: best
+            .messages
+            .iter()
+            .map(|message| {
+                Ok(OutgoingOccurrence {
+                    id: message.id.clone(),
+                    zone: message.zone,
+                    role: message.role,
+                    digest: digest(message)?,
+                    originals: message.originals.clone(),
+                })
+            })
+            .collect::<Result<_>>()?,
+        read_set,
+        input_tokens: best.outgoing.input_tokens,
+        count_kind: best.outgoing.count_kind,
+        reserved_output_tokens: context.model_profile.reserved_output_tokens,
+        safety_tokens: request.budget.safety_tokens,
+        wire_digest: ContentDigest::from_bytes(*blake3::hash(&best.outgoing.wire).as_bytes()),
+    };
+    charge(budget, 1, 0)?;
+    let assembly = CompiledAssembly {
+        context: CompiledContext {
+            pack: best.fit.pack,
+            rendered: best.fit.rendered,
+            canonical_json,
+            canonical_protobuf,
+            canonical_digest,
+        },
+        messages: best.messages,
+        outgoing: best.outgoing,
+        manifest,
+        optional_seeds,
+        selection_evaluations: evaluations,
+        scorer_micros: u64::try_from(scorer_duration.as_micros()).unwrap_or(u64::MAX),
+        raw_recall_pressure: if selected_raw_original {
+            None
+        } else {
+            raw_recall_pressure
+        },
+    };
+    if let Some(record) = &mut router_record {
+        record.prepared_units = units;
+    }
+    Ok((assembly, router_record))
+}
+
+fn record_attempt(
+    record: &mut Option<RouterRecord>,
+    evaluation: u32,
+    seeds: &BTreeSet<BlockId>,
+    outcome: router::RouterReplayAttemptOutcome,
+    budget: &mut QueryBudget,
+) -> Result<()> {
+    if let Some(replay) = record.as_mut().and_then(|record| record.replay.as_mut()) {
+        if replay.attempts.len() >= router::MAX_SCORES {
+            return Err(router::invalid("excessive replay attempt inventory"));
+        }
+        #[derive(serde::Serialize)]
+        struct AttemptView<'a> {
+            evaluation: u32,
+            seed_ids: &'a BTreeSet<BlockId>,
+            outcome: router::RouterReplayAttemptOutcome,
+        }
+        let bytes = router::canonical_bytes(
+            &AttemptView {
+                evaluation,
+                seed_ids: seeds,
+                outcome,
+            },
+            budget,
+        )?
+        .len();
+        replay.attempt_bytes = replay
+            .attempt_bytes
+            .checked_add(bytes)
+            .filter(|bytes| *bytes <= router::MAX_RECORD_BYTES)
+            .ok_or_else(|| router::invalid("excessive complete replay attempt bytes"))?;
+        charge(
+            budget,
+            1,
+            (size_of::<router::RouterReplayAttempt>()
+                + seeds.iter().map(|id| id.as_str().len()).sum::<usize>()) as u64,
+        )?;
+        replay.attempts.push(router::RouterReplayAttempt {
+            evaluation,
+            seed_ids: seeds.iter().cloned().collect(),
+            outcome,
+        });
+    }
+    Ok(())
 }
 
 fn elapsed_micros(started: std::time::Instant) -> u64 {

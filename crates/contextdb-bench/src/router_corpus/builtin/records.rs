@@ -93,7 +93,7 @@ pub(super) fn validate_builtin_profile(
     Ok(())
 }
 
-pub(super) fn build_artifacts(budget: &mut QueryBudget) -> Result<BuiltinArtifacts> {
+pub(super) fn build_artifacts(replay: bool, budget: &mut QueryBudget) -> Result<BuiltinArtifacts> {
     let mut inputs = Vec::new();
     let mut features = Vec::new();
     let mut behavior = Vec::new();
@@ -144,7 +144,11 @@ pub(super) fn build_artifacts(budget: &mut QueryBudget) -> Result<BuiltinArtifac
         }
         parents.sort();
         for scenario in fixture::SCENARIOS {
-            let case = fixture::build_case(group, scenario, budget)?;
+            let case = if replay {
+                fixture::build_replay_case(group, scenario, budget)?
+            } else {
+                fixture::build_case(group, scenario, budget)?
+            };
             case.routed
                 .manifest
                 .validate(
@@ -212,6 +216,7 @@ pub(super) fn build_artifacts(budget: &mut QueryBudget) -> Result<BuiltinArtifac
                 manifest: case.routed.manifest,
                 attempt: RouterAttemptStatus::Prepared,
                 accepted_receipt: None,
+                replay_observation: case.routed.replay_observation,
             };
             let input = RouterQueryTimeRecord {
                 format: ROUTER_QUERY_VERSION.into(),
@@ -348,8 +353,13 @@ pub(super) fn build_artifacts(budget: &mut QueryBudget) -> Result<BuiltinArtifac
         })
         .collect();
     let manifest = Manifest {
-        format: ROUTER_CORPUS_VERSION.into(),
-        builder: BUILDER.into(),
+        format: if replay {
+            REPLAY_FORMAT
+        } else {
+            ROUTER_CORPUS_VERSION
+        }
+        .into(),
+        builder: if replay { REPLAY_BUILDER } else { BUILDER }.into(),
         generator: fixture::GENERATOR.into(),
         examples: inputs.len(),
         artifacts,

@@ -76,6 +76,9 @@ impl ContextCompiler {
                     ));
                 }
             }
+            if let Some(preparation) = &policy.replay {
+                super::super::replay::validate_preparation(request, preparation, budget)?;
+            }
         }
         // Stream borrowed inputs through the existing ceiling before cloning any
         // block/representation or building temporary support inventories.

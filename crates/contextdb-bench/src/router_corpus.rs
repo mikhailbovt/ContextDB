@@ -4,11 +4,13 @@ mod builtin;
 mod features;
 mod fixture;
 mod lineage;
+mod replay;
 mod types;
 
 pub use builtin::*;
 pub use features::*;
 pub use lineage::*;
+pub use replay::*;
 pub use types::*;
 
 use crate::{BenchError, Result};

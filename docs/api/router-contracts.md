@@ -10,6 +10,9 @@ are observations and proposals; a digest or deserialized request grants no acces
 - `compile_assembly_with_router` runs the existing assembly pipeline and records
   actual scorer calls. It returns the assembly, request, plan, manifest and actual
   prepared candidate/evidence material, including unselected alternatives.
+- `compile_assembly_with_router_replay` also retains versioned prepared selector
+  inputs and separate attempt observations. `replay_router_r0` executes pinned R0
+  through the same selection and rendering path over those frozen inputs.
 - `compile_router_plan` rebuilds the current authorized inventory and validates a
   proposed score/selection path through the same closure, support selection,
   complete protocol encoding and publication-owner read-set check. It does not
@@ -18,7 +21,7 @@ are observations and proposals; a digest or deserialized request grants no acces
   after a malformed or stale proposal. Authorization, provider failures and
   exhausted shared budgets propagate as errors.
 
-All entry points receive the host's provider, tokenizer, outgoing encoder and
+Live entries receive the host's provider, tokenizer, outgoing encoder and
 `QueryBudget`. The existing `compile_assembly` path remains available.
 
 ## Records
@@ -104,8 +107,20 @@ acquire the port implicitly.
 Compiler validation separately reports support material, unit semantics and the
 complete candidate commitment. The explicit `compile_assembly_with_router_policy`
 entry retains versioned prepared actions/reasons for the last column; the default
-entry and native v1 traces omit it. Native v1 refuses this extension. Historical
-selection replay still lacks prepared selector state. Current source-wire replay
-is also a separate operation. The [synthetic corpus](../../learning/context-router/README.md)
-keeps query-time features, R0 behavior, labels and lineage distinct. Scoring
-remains R0; real export, replay completion and Kev training remain later work.
+entry and native v1 traces omit it. Native v1 refuses this extension.
+
+The replay entry captures actual variant costs, generated markers, support order,
+ordered omissions and the remaining selector-entry work/bytes. Replay reserves that
+allowance from the enclosing job, keeping its absolute deadline and cancellation.
+It recomputes every R0 evaluation and trial, then compares attempts, exact integer
+scores, seed ties, closure/support choices, STOP, canonical pack, ordered wire and
+token counts. Recorded timing remains an observation; replay timing is measured
+separately. A reproduced conservative token bound keeps exact count unavailable.
+Missing preparation/observations or unsupported runtime/scorer profiles
+return unavailable. Changed material or behavior fails integrity verification.
+
+Detached replay performs no provider authorization, source read or dispatch, and
+does not grant current rights. Current source-wire verification and native v2
+custody are separate work. The [synthetic corpus](../../learning/context-router/README.md)
+keeps query-time features, R0 behavior, labels and lineage distinct. Scoring remains
+R0; real export and Kev training remain later work.
