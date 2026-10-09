@@ -1,6 +1,6 @@
 use super::*;
-use std::io::Read;
-use std::sync::Arc;
+use std::io::{BufRead, BufReader, Read};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use contextdb_core::{AgentRunId, EventPayload, EventProvenance, OriginalSourceSpan};
@@ -48,7 +48,86 @@ fn input(lines: &[serde_json::Value]) -> Vec<u8> {
         .collect()
 }
 
+struct HostDeadline {
+    hard: Instant,
+    last_answer: Instant,
+    idle: Duration,
+    completed: usize,
+    commands: usize,
+}
+
+impl HostDeadline {
+    fn new(started: Instant, idle: Duration, turn: Duration, commands: usize) -> Self {
+        Self {
+            hard: started + idle + turn * commands as u32,
+            last_answer: started,
+            idle,
+            completed: 0,
+            commands,
+        }
+    }
+
+    fn answer(&mut self, observed: Instant) {
+        if self.completed < self.commands
+            && observed < self.hard
+            && observed.saturating_duration_since(self.last_answer) < self.idle
+        {
+            self.completed += 1;
+            self.last_answer = self.last_answer.max(observed);
+        }
+    }
+
+    fn expired(&self, now: Instant) -> Option<&'static str> {
+        if now >= self.hard {
+            Some("absolute batch deadline")
+        } else if now.saturating_duration_since(self.last_answer) >= self.idle {
+            Some("no completed answer progress")
+        } else {
+            None
+        }
+    }
+}
+
+fn wait_host(
+    child: &mut BrokerChild,
+    progress: &mpsc::Receiver<Instant>,
+    deadline: &mut HostDeadline,
+) -> (std::process::ExitStatus, Option<&'static str>) {
+    loop {
+        if let Some(status) = child.0.try_wait().expect("host progress") {
+            return (status, None);
+        }
+        for observed in progress.try_iter() {
+            deadline.answer(observed);
+        }
+        if let Some(reason) = deadline.expired(Instant::now()) {
+            // Reap before joining the pipe collectors or input writer.
+            let _ = child.0.kill();
+            return (child.0.wait().expect("reap timed-out host"), Some(reason));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "type")]
+enum CompletedHostRecord {
+    #[serde(rename = "answer")]
+    Answer {
+        output_receipt: CaptureReceipt,
+        checkpoint_receipt: CaptureReceipt,
+    },
+}
+
 fn host(f: &Fixture, config: &Path, resume: bool, bytes: Vec<u8>) -> Output {
+    let commands = bytes
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .count();
+    assert!(
+        commands <= 32,
+        "owned fixture batch exceeds its command bound"
+    );
     let mut command = f.command(
         &[
             "--json",
@@ -71,42 +150,71 @@ fn host(f: &Fixture, config: &Path, resume: bool, bytes: Vec<u8>) -> Output {
     let writer = std::thread::spawn(move || {
         let _ = stdin.write_all(&bytes);
     });
-    let collect = |stream: Box<dyn Read + Send>| {
-        std::thread::spawn(move || {
-            let mut bytes = vec![];
-            stream
-                .take(8 * 1024 * 1024)
-                .read_to_end(&mut bytes)
-                .expect("bounded host output");
-            bytes
-        })
-    };
-    let stdout = collect(Box::new(stdout));
-    let stderr = collect(Box::new(stderr));
-    // A batch contains 21 separately bounded turns and durable native writes.
-    // Its process guard is not a per-turn latency gate for a shared CI runner.
-    let started = Instant::now();
-    let deadline = started + Duration::from_secs(180);
-    let status = loop {
-        if let Some(status) = child.0.try_wait().expect("host progress") {
-            break status;
+    let (progress_sender, progress) = mpsc::channel();
+    let stdout = std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout.take(8 * 1024 * 1024));
+        let mut bytes = vec![];
+        let mut answers = BTreeSet::new();
+        loop {
+            let start = bytes.len();
+            if reader
+                .read_until(b'\n', &mut bytes)
+                .expect("bounded host output")
+                == 0
+            {
+                break;
+            }
+            if answers.len() < commands
+                && bytes.last() == Some(&b'\n')
+                && let Ok(CompletedHostRecord::Answer {
+                    output_receipt,
+                    checkpoint_receipt,
+                }) = serde_json::from_slice(&bytes[start..])
+                && output_receipt.domain == contextdb_service::NATIVE_CAPTURE_DOMAIN
+                && checkpoint_receipt.domain == contextdb_service::NATIVE_CAPTURE_DOMAIN
+                && output_receipt.workspace_commit > 0
+                && checkpoint_receipt.workspace_commit > output_receipt.workspace_commit
+                && answers.insert(output_receipt.event_id)
+            {
+                // Only complete, distinct answer records advance the guard.
+                // The exact wire and owner receipts are still checked below.
+                let _ = progress_sender.send(Instant::now());
+            }
         }
-        assert!(
-            Instant::now() < deadline,
-            "owned CLI must reach a bounded terminal process state"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    };
+        bytes
+    });
+    let stderr = std::thread::spawn(move || {
+        let mut bytes = vec![];
+        stderr
+            .take(8 * 1024 * 1024)
+            .read_to_end(&mut bytes)
+            .expect("bounded host error");
+        bytes
+    });
+    // A batch has separately bounded turns. Completed answers may renew the
+    // inactivity guard, but never its finite command-derived absolute ceiling.
+    let started = Instant::now();
+    let mut deadline = HostDeadline::new(
+        started,
+        Duration::from_secs(180),
+        Duration::from_secs(30),
+        commands,
+    );
+    let (status, timeout) = wait_host(&mut child, &progress, &mut deadline);
     writer.join().expect("host input writer");
     let output = Output {
         status,
         stdout: stdout.join().expect("host stdout"),
         stderr: stderr.join().expect("host stderr"),
     };
+    for observed in progress.try_iter() {
+        deadline.answer(observed);
+    }
     eprintln!(
-        "owned host: resume={resume}, elapsed_ms={}, status={}",
+        "owned host: resume={resume}, elapsed_ms={}, status={}, completed_answers={}",
         started.elapsed().as_millis(),
-        output.status
+        output.status,
+        deadline.completed
     );
     no_key_disclosure(&output);
     for bytes in [&output.stdout, &output.stderr] {
@@ -116,6 +224,14 @@ fn host(f: &Fixture, config: &Path, resume: bool, bytes: Vec<u8>) -> Output {
             "private source/protocol bytes must not be dumped into host diagnostics"
         );
     }
+    assert!(
+        timeout.is_none(),
+        "owned CLI timeout: reason={}, completed_answers={}, commands={}, elapsed_ms={}",
+        timeout.unwrap_or("none"),
+        deadline.completed,
+        commands,
+        started.elapsed().as_millis()
+    );
     output
 }
 
@@ -133,6 +249,107 @@ fn require_success(output: &Output) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn owned_host_guard_bounds_progress_and_reaps_a_stalled_process() {
+    let started = Instant::now();
+    let mut deadline = HostDeadline::new(
+        started,
+        Duration::from_secs(180),
+        Duration::from_secs(30),
+        2,
+    );
+    deadline.answer(started + Duration::from_secs(170));
+    deadline.answer(started + Duration::from_secs(200));
+    assert_eq!(deadline.completed, 2);
+    assert_eq!(deadline.expired(started + Duration::from_secs(220)), None);
+    let last = deadline.last_answer;
+    deadline.answer(started + Duration::from_secs(239));
+    assert_eq!(
+        deadline.last_answer, last,
+        "excess answers cannot renew the guard"
+    );
+    assert_eq!(
+        deadline.expired(started + Duration::from_secs(240)),
+        Some("absolute batch deadline")
+    );
+    let idle = HostDeadline::new(
+        started,
+        Duration::from_secs(180),
+        Duration::from_secs(30),
+        2,
+    );
+    assert_eq!(
+        idle.expired(started + Duration::from_secs(180)),
+        Some("no completed answer progress")
+    );
+    for record in [
+        br#"{"type":"ready"}"#.as_slice(),
+        br#"{"type":"accepted"}"#.as_slice(),
+        br#"{"type":"answer","output_receipt":{}}"#.as_slice(),
+    ] {
+        assert!(serde_json::from_slice::<CompletedHostRecord>(record).is_err());
+    }
+
+    // Exercise the real wait/kill/wait path, including an open stdout pipe.
+    // This child is only a lifecycle fixture and never acts as a reader.
+    let fixture = Fixture::new();
+    let peer = Peer::new(&fixture, "reply");
+    let mut child = BrokerChild(
+        Command::new(&peer.python)
+            .args([
+                "-I",
+                "-u",
+                "-c",
+                "import os, time; os.write(1, b'guard-ready\\n'); time.sleep(60)",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("stalled lifecycle child"),
+    );
+    let stdout = child.0.stdout.take().expect("lifecycle pipe");
+    let (ready_sender, ready) = mpsc::channel();
+    let collector = std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout.take(64));
+        let mut bytes = vec![];
+        reader
+            .read_until(b'\n', &mut bytes)
+            .expect("lifecycle ready");
+        ready_sender.send(()).expect("lifecycle readiness");
+        reader
+            .read_to_end(&mut bytes)
+            .expect("closed lifecycle pipe");
+        bytes
+    });
+    ready
+        .recv_timeout(Duration::from_secs(5))
+        .expect("child entered its stall");
+    let (_sender, progress) = mpsc::channel();
+    let before = Instant::now();
+    let mut stalled = HostDeadline::new(
+        before,
+        Duration::from_millis(100),
+        Duration::from_millis(100),
+        2,
+    );
+    let (status, timeout) = wait_host(&mut child, &progress, &mut stalled);
+    assert_eq!(timeout, Some("no completed answer progress"));
+    assert!(!status.success());
+    assert!(
+        child
+            .0
+            .try_wait()
+            .expect("reaped lifecycle child")
+            .is_some()
+    );
+    assert_eq!(
+        collector.join().expect("lifecycle collector"),
+        b"guard-ready\n"
+    );
+    assert!(before.elapsed() < Duration::from_secs(5));
 }
 
 fn context(config: &serde_json::Value) -> AuthenticatedRequestContext {

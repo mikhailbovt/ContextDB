@@ -38,7 +38,9 @@ fn replace_artifact(root: &Path, name: &str, bytes: &[u8]) {
 #[test]
 fn builtin_cold_roundtrip_reuses_completed_job_and_preserves_separated_unknown_labels() {
     let temp = tempfile::tempdir().expect("owned fixture root");
-    let root = temp.path().join("corpus");
+    let parent = fs::canonicalize(temp.path()).expect("canonical owned fixture parent");
+    validate_root(&parent, true).expect("fixture parent passes strict path admission");
+    let root = parent.join("corpus");
     let built =
         write_builtin_router_corpus(&root, &mut allowance()).expect("actual compiler corpus");
     assert_eq!(built.examples, 32);
@@ -60,6 +62,20 @@ fn builtin_cold_roundtrip_reuses_completed_job_and_preserves_separated_unknown_l
         manifest,
         fs::read(root.join(MANIFEST)).expect("unchanged manifest")
     );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+
+        let alias = parent.join("owned-parent-alias");
+        symlink(&parent, &alias).expect("controlled owned parent alias");
+        assert!(write_builtin_router_corpus(&alias.join("corpus"), &mut allowance()).is_err());
+        let canonical = fs::canonicalize(&alias).expect("resolve owned fixture alias");
+        assert_eq!(
+            built,
+            verify_builtin_router_corpus(&canonical.join("corpus"), &mut allowance())
+                .expect("canonical alias resolves the same completed job")
+        );
+    }
     let observed: Vec<RouterBehaviorRecord> = decode(
         &fs::read(root.join("behavior.json")).expect("behavior"),
         MAX_ROUTER_EXAMPLE_BYTES,
@@ -164,7 +180,9 @@ fn builtin_cold_roundtrip_reuses_completed_job_and_preserves_separated_unknown_l
 #[test]
 fn incomplete_roots_bounds_and_cancellation_are_closed_without_overwrite() {
     let temp = tempfile::tempdir().expect("owned fixture root");
-    let incomplete = temp.path().join("incomplete");
+    let parent = fs::canonicalize(temp.path()).expect("canonical owned fixture parent");
+    validate_root(&parent, true).expect("fixture parent passes strict path admission");
+    let incomplete = parent.join("incomplete");
     fs::create_dir(&incomplete).expect("incomplete directory");
     fs::write(
         incomplete.join("query-time.json.part"),
@@ -176,7 +194,7 @@ fn incomplete_roots_bounds_and_cancellation_are_closed_without_overwrite() {
         fs::read(incomplete.join("query-time.json.part")).expect("preserved incomplete"),
         b"SYNTHETIC_PENDING"
     );
-    let fresh = temp.path().join("cancelled");
+    let fresh = parent.join("cancelled");
     let cancellation = QueryCancellation::default();
     cancellation.cancel();
     let mut cancelled = QueryBudget::new(
@@ -185,10 +203,16 @@ fn incomplete_roots_bounds_and_cancellation_are_closed_without_overwrite() {
         Duration::from_secs(10),
         cancellation,
     );
-    assert!(write_builtin_router_corpus(&fresh, &mut cancelled).is_err());
+    assert!(matches!(
+        write_builtin_router_corpus(&fresh, &mut cancelled),
+        Err(BenchError::TelemetryBudget(_))
+    ));
     assert!(!fresh.exists());
     let mut exhausted = QueryBudget::new(1_000_000, 1, Duration::from_secs(10), Default::default());
-    assert!(write_builtin_router_corpus(&fresh, &mut exhausted).is_err());
+    assert!(matches!(
+        write_builtin_router_corpus(&fresh, &mut exhausted),
+        Err(BenchError::TelemetryBudget(_))
+    ));
     assert!(!fresh.exists());
     assert!(write_builtin_router_corpus(Path::new("relative-output"), &mut allowance()).is_err());
     let nonfile = incomplete.join(MANIFEST);
