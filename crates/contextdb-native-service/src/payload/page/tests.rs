@@ -307,6 +307,7 @@ fn settings() -> RuntimeSettings {
         },
         cache_residency: None,
         automatic_recall_filter: RawFilter::default(),
+        automatic_bm25: None,
         router_trace_profile: RouterTraceProfile::Off,
     }
 }

@@ -457,6 +457,19 @@ impl NativeService {
         record.work()
     }
 
+    pub(in super::super) fn capture_work_for_receipt_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        receipt: &CaptureReceipt,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<CaptureWork> {
+        let record = self.capture_record_with_budget(snapshot, receipt.event_id, budget)?;
+        if record.receipt != *receipt {
+            return Err(integrity("capture journal receipt differs"));
+        }
+        record.work()
+    }
+
     pub(super) fn enable_capture_recovery<T: WriteTransaction>(
         &self,
         tx: &mut T,

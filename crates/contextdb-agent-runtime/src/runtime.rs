@@ -40,12 +40,22 @@ pub struct RuntimeSettings {
     /// Default selects all authorized originals. Explicit expansion routes and
     /// mandatory current state remain separate; this is not an access policy.
     pub automatic_recall_filter: RawFilter,
+    /// Optional native BM25 frontier size. None preserves the legacy R0 routes.
+    pub automatic_bm25: Option<u32>,
     /// Required tracing preserves the complete authorized routing inventory.
     pub router_trace_profile: RouterTraceProfile,
 }
 impl RuntimeSettings {
     fn validate(&self, profile: &ModelProfile) -> ServiceResult<()> {
         profile.validate().map_err(context_error)?;
+        if self
+            .automatic_bm25
+            .is_some_and(|limit| !(1..=100).contains(&limit))
+        {
+            return Err(invalid(
+                "automatic BM25 frontier must contain 1..100 sources",
+            ));
+        }
         if self.automatic_recall_filter.event_ids.len() > 64 {
             return Err(invalid(
                 "automatic recall identity filter exceeds 64 originals",
@@ -601,10 +611,27 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 measurement.preparation_hook_micros += telemetry::elapsed(started);
                 hook_result?;
                 let mut routes = extra_routes.to_vec();
-                let cues = rolling::current_step_routes(&base, budget)?;
+                let cues = if self.settings.automatic_bm25.is_some() {
+                    rolling::bm25_step_routes(&base, budget)?
+                } else {
+                    rolling::current_step_routes(&base, budget)?
+                };
+                let bm25_query = match self.settings.automatic_bm25 {
+                    Some(limit) => rolling::bm25_step_query(
+                        &cues,
+                        &self.settings.automatic_recall_filter,
+                        limit,
+                        budget,
+                    )?,
+                    None => None,
+                };
                 measurement.automatic_recall_inspected_bytes += cues.inspected_bytes;
                 measurement.automatic_recall_omitted_bytes += cues.omitted_bytes;
-                for mut route in cues.routes {
+                for mut route in cues
+                    .routes
+                    .into_iter()
+                    .filter(|_| self.settings.automatic_bm25.is_none())
+                {
                     route.filter = self.settings.automatic_recall_filter.clone();
                     if routes.len() == 8 {
                         break;
@@ -629,6 +656,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     explicit_memory_request: false,
                     router_trace_profile: self.settings.router_trace_profile,
                     memory_query: None,
+                    bm25_query,
                 };
                 let started = Instant::now();
                 measurement.prepare_attempts += 1;

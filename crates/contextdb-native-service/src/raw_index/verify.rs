@@ -7,6 +7,103 @@ use contextdb_recall::QueryCancellation;
 use super::*;
 
 impl NativeService {
+    fn accepted_raw_bm25_generations<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+    ) -> ServiceResult<BTreeMap<(String, u64), RawProjectionProgress>> {
+        let mut declared = BTreeMap::<(String, u64), RawProjectionProgress>::new();
+        let mut budget = super::super::retention::audit_budget();
+        let mut previous_commit = 0;
+        for row in snapshot
+            .scan_prefix(&self.keyspaces.events, b"")
+            .map_err(storage_error)?
+        {
+            let event: super::super::StoredEvent = decode(&row.value, "raw BM25 publication")?;
+            if event.operation != bm25::OPERATION {
+                continue;
+            }
+            if event.schema_version != super::super::SCHEMA_VERSION
+                || row.key != event.global_commit.to_be_bytes()
+                || event.global_commit <= previous_commit
+                || event.event_digest != super::super::event_digest(&event)?
+            {
+                return Err(integrity(
+                    "BM25 publication journal ordering or binding differs",
+                ));
+            }
+            previous_commit = event.global_commit;
+            budget
+                .charge(1, (row.key.len() + row.value.len()) as u64)
+                .map_err(budget_error)?;
+            let bytes = snapshot
+                .get(&self.keyspaces.idempotency, event.request_digest.as_bytes())
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("accepted BM25 projection receipt is absent"))?;
+            if bytes.len() > 8 * 1024 {
+                return Err(integrity(
+                    "BM25 projection receipt exceeds its metadata bound",
+                ));
+            }
+            budget.charge(1, bytes.len() as u64).map_err(budget_error)?;
+            let receipt: super::super::StoredIdempotency =
+                decode(&bytes, "accepted BM25 projection receipt")?;
+            let progress: RawProjectionProgress =
+                decode(&receipt.response_bytes, "accepted BM25 projection progress")?;
+            if receipt.schema_version != super::super::SCHEMA_VERSION
+                || receipt.operation != event.operation
+                || receipt.request_digest != event.request_digest
+                || receipt.response_digest != event.response_digest
+                || receipt.response_digest != digest_bytes(&receipt.response_bytes)
+                || progress.generation == 0
+                || progress.through >= event.workspace_commit
+                || progress.projected_sources > progress.through
+            {
+                return Err(integrity(
+                    "accepted BM25 projection receipt binding differs",
+                ));
+            }
+            let identity = (event.workspace_digest, progress.generation);
+            if declared.get(&identity).is_some_and(|previous| {
+                progress.through < previous.through
+                    || progress.projected_sources < previous.projected_sources
+            }) {
+                return Err(integrity("accepted BM25 projection prefix moved backwards"));
+            }
+            declared.insert(identity, progress);
+        }
+        if !declared.is_empty() {
+            let bytes = snapshot
+                .get(&self.keyspaces.meta, super::super::META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("BM25 native manifest is absent"))?;
+            if bytes.len() > super::super::MAX_JSON_BYTES {
+                return Err(integrity("BM25 native manifest exceeds its metadata bound"));
+            }
+            budget.charge(1, bytes.len() as u64).map_err(budget_error)?;
+            let manifest: super::super::Manifest = decode(&bytes, "BM25 native manifest")?;
+            super::super::validate_manifest(&manifest, &self.database_id)?;
+            if !manifest.features.contains(bm25::FEATURE) {
+                return Err(integrity(
+                    "accepted BM25 projection format feature is absent",
+                ));
+            }
+        }
+        Ok(declared)
+    }
+
+    pub(in crate::raw_index) fn validate_raw_bm25_generation<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        generation: &Generation,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        let Some(profile) = &generation.bm25 else {
+            return Ok(());
+        };
+        profile.validate()?;
+        self.require_raw_bm25_feature(snapshot, budget)
+    }
+
     pub(crate) fn accepted_raw_revocations<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -88,6 +185,7 @@ impl NativeService {
         snapshot: &S,
     ) -> ServiceResult<()> {
         self.verify_raw_copy_publications(snapshot)?;
+        let bm25_generations = self.accepted_raw_bm25_generations(snapshot)?;
         let actual = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"raw/")
             .map_err(storage_error)?;
@@ -99,7 +197,7 @@ impl NativeService {
             {
                 let event: super::super::StoredEvent =
                     decode(&entry.value, "native index publication")?;
-                if event.operation == "raw_projection" {
+                if event.operation == "raw_projection" || event.operation == bm25::OPERATION {
                     return Err(integrity("published raw index state is absent"));
                 }
             }
@@ -166,6 +264,22 @@ impl NativeService {
                 {
                     return Err(integrity("raw generation binding invalid"));
                 }
+                let declaration = bm25_generations.get(&(workspace.to_owned(), number));
+                if generation.bm25.is_some() != declaration.is_some()
+                    || declaration.is_some_and(|progress| {
+                        progress.through != generation.through
+                            || progress.projected_sources != generation.projected_sources
+                    })
+                {
+                    return Err(integrity(
+                        "BM25 generation differs from its accepted projection prefix",
+                    ));
+                }
+                self.validate_raw_bm25_generation(
+                    snapshot,
+                    &generation,
+                    &mut super::super::retention::audit_budget(),
+                )?;
                 expected.insert(generation_key(workspace, number), encode(&generation)?);
                 if state
                     .reclaiming
@@ -184,11 +298,20 @@ impl NativeService {
                         )
                         .map_err(storage_error)?
                     {
+                        if row.key[generation_prefix(workspace, number).len()..]
+                            .starts_with(b"bm25/")
+                            && generation.bm25.is_none()
+                        {
+                            return Err(integrity(
+                                "reclaiming BM25 rows lost their generation profile",
+                            ));
+                        }
                         expected.insert(row.key, row.value);
                     }
                     continue;
                 }
                 let mut domains = BTreeMap::<String, PolicyDomain>::new();
+                let mut bm25_documents = Vec::new();
                 let mut count = 0;
                 let outbox = format!("outbox/{workspace}/");
                 for entry in snapshot
@@ -236,6 +359,17 @@ impl NativeService {
                     let labels: PolicyDomain = self
                         .raw_value(snapshot, &key)?
                         .ok_or_else(|| integrity("raw domain labels missing"))?;
+                    if generation.bm25.is_some() {
+                        bm25_documents.push(self.build_bm25_document(
+                            snapshot,
+                            &original.event,
+                            work.workspace_commit,
+                            work.event_digest,
+                            &document.policy_domain,
+                            bm25::routing_scope_count(&labels.policies)?,
+                            &mut budget,
+                        )?);
+                    }
                     if canonical_digest(&labels.policies)? != document.policy_domain
                         || labels.policies.is_empty()
                         || labels
@@ -264,6 +398,9 @@ impl NativeService {
                 }
                 if count != generation.projected_sources {
                     return Err(integrity("raw source count differs from captured prefix"));
+                }
+                if generation.bm25.is_some() {
+                    expected.extend(bm25::reconstruct_rows(workspace, number, &bm25_documents)?);
                 }
                 for (id, labels) in domains {
                     for key in domain_eligibility_keys(workspace, number, &id, &labels)? {

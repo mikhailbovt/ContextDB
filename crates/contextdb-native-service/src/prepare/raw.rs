@@ -7,6 +7,7 @@ use contextdb_service::OriginalRenderOmission;
 pub(super) struct PreparedRawSpan {
     pub span: OriginalSourceSpan,
     pub page: Option<contextdb_service::OriginalPage>,
+    pub bytes: Option<Vec<u8>>,
 }
 
 impl NativeService {
@@ -16,6 +17,7 @@ impl NativeService {
         context: &AuthenticatedRequestContext,
         hit: &IndexedHit,
         external_processing: bool,
+        budgeted: bool,
         budget: &mut QueryBudget,
     ) -> ServiceResult<std::result::Result<Vec<PreparedRawSpan>, OriginalRenderOmission>> {
         const WHOLE_LIMIT: u64 = 32 * 1024;
@@ -79,6 +81,7 @@ impl NativeService {
                 spans.push(PreparedRawSpan {
                     span: page.view.preview.clone(),
                     page: Some(page),
+                    bytes: None,
                 });
             }
             return Ok(Ok(spans));
@@ -112,7 +115,28 @@ impl NativeService {
             }
             merged
         };
-        let original = self.load_captured_original(snapshot, hit.source.event_id)?;
+        let original = if budgeted {
+            self.authorized_capture_policy_with_budget(
+                snapshot,
+                context,
+                hit.source.event_id,
+                budget,
+            )?;
+            self.authorize_derived_custody_with_budget(
+                snapshot,
+                context,
+                hit.source.event_id,
+                budget,
+            )?;
+            self.load_captured_original_with_budget(snapshot, hit.source.event_id, budget)?
+        } else {
+            self.load_captured_original(snapshot, hit.source.event_id)?
+        };
+        if RawSource::from(&original.event) != hit.source {
+            return Err(super::super::integrity(
+                "raw source differs from its accepted original",
+            ));
+        }
         if let contextdb_core::EventPayload::InlineBytes { media_type, .. }
         | contextdb_core::EventPayload::Staged { media_type, .. } = &original.event.payload
             && !media_type.starts_with("text/")
@@ -130,8 +154,19 @@ impl NativeService {
                 .checked_sub(start)
                 .filter(|size| *size <= WHOLE_LIMIT)
                 .ok_or_else(|| super::super::exhausted("raw context range exceeds its limit"))?;
-            budget.charge(1, size).map_err(budget_error)?;
-            let bytes = self.original_range(snapshot, context, &original.event, start, end)?;
+            let bytes = if budgeted {
+                self.original_range_with_budget(
+                    snapshot,
+                    context,
+                    &original.event,
+                    start,
+                    end,
+                    budget,
+                )?
+            } else {
+                budget.charge(1, size).map_err(budget_error)?;
+                self.original_range(snapshot, context, &original.event, start, end)?
+            };
             // A query byte window may bisect a UTF-8 code point. Trim only its
             // incomplete boundary bytes; malformed content itself is not repaired.
             let skip = if start == 0 {
@@ -156,6 +191,9 @@ impl NativeService {
                 return Ok(Err(OriginalRenderOmission::NonText));
             }
             let start = start + skip as u64;
+            if budgeted {
+                budget.charge(1, text.len() as u64).map_err(budget_error)?;
+            }
             spans.push(PreparedRawSpan {
                 span: OriginalSourceSpan {
                     event_id: hit.source.event_id,
@@ -167,6 +205,7 @@ impl NativeService {
                     ),
                 },
                 page: None,
+                bytes: budgeted.then(|| text.as_bytes().to_vec()),
             });
         }
         Ok(Ok(spans))

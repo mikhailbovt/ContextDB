@@ -45,6 +45,7 @@ fn request(input: &CaptureRequest) -> PrepareContextRequest {
     PrepareContextRequest {
         router_trace_profile: contextdb_service::RouterTraceProfile::Off,
         memory_query: None,
+        bm25_query: None,
         context,
         pack_id: ContextPackId::new(),
         purpose: PackPurpose::Conversation,

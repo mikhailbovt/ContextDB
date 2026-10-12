@@ -261,6 +261,7 @@ fn protected_capacity_retries_below_rotation_high_with_same_parent_and_exact_tra
                     after_receipt: Some(head.receipt),
                     raw_queries: vec![],
                     memory_query: None,
+                    bm25_query: None,
                     required_facets: vec![],
                     memory_budget: fixture.settings.memory_budget,
                     model_profile: fixture.reader.profile(),

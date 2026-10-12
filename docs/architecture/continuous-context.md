@@ -822,6 +822,34 @@ epoch. Rebuilds switch separately constructed generations after catch-up. Reads
 use short Fjall snapshots; neither index construction nor archive-wide corpus
 materialization runs inside a query. Empty projection polls do not create writes.
 
+An explicit native BM25 profile uses `project_originals_bm25` to publish exact
+term frequencies, document lengths and policy-partitioned corpus/DF statistics
+in the same atomic source batches. The fixed Unicode analyzer uses k1=1.2 and
+b=0.75, with [positive BM25 IDF and average document length](https://lucene.apache.org/core/10_2_2/core/org/apache/lucene/search/similarities/BM25Similarity.html).
+Ordinary incremental maintenance preserves the selected profile; a
+legacy generation requires an explicit rebuild to adopt it. Accepted projection
+receipts retain that declaration after generation reclamation. Deep verification
+reconstructs statistics from originals; shared aggregates remain separate from
+source-owned document copies.
+
+`RuntimeSettings::automatic_bm25` enables an OR query derived from the current
+step before every model request, including after tools. It samples visible source
+bytes rather than locator wrappers, preserves original token spelling for one
+native Unicode analysis, and admits up to 64 terms within 4 KiB. Native preparation joins
+persisted postings with at most 128 freshly captured sources, ranks up to 100
+candidates and verifies exact source spans under the same operation budget.
+It reads authorized policy partitions only and reports unsupported historical
+or filtered queries, missing projection, lexical omissions and bounded search
+completion explicitly. Sources exceeding the 1 MiB text, lexical or atomic row
+limits keep their originals and legacy routes; they do not receive invented
+frequency statistics. Model-request echoes and operational run snapshots remain
+archived and retain legacy routes, but are excluded from the BM25 text population.
+Actual scores supply a fixed uncalibrated R0 prior: 1,000,000 plus score times
+1,000,000 rounded and capped at 100,000,000. They grant neither confidence nor
+mandatory-state priority. This opt-in Rust path is BM25 retrieval infrastructure;
+embedding/causal fusion, recall quality and default client integration remain
+separate gates. The CLI retains its previous profile.
+
 Scope eligibility precedes domain labels and content search. Each domain includes
 the original's policy and every source dependency's policy. Ranking uses match
 spread, source length and stable ID, with no cross-domain document-frequency

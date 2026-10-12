@@ -36,6 +36,7 @@ pub(super) fn request(source: &CaptureRequest) -> PrepareContextRequest {
         after_receipt: None,
         raw_queries: Vec::new(),
         memory_query: None,
+        bm25_query: None,
         required_facets: Vec::new(),
         memory_budget: ContextBudgets {
             hard_tokens: 14_000,

@@ -41,6 +41,8 @@ pub use pruning::NativePayloadPruningProgress;
 pub(super) use pruning::{PAYLOAD_PRUNING_FEATURE, PayloadPruningPublication};
 
 #[cfg(test)]
+mod budget_tests;
+#[cfg(test)]
 mod tests;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -229,6 +231,86 @@ impl NativeService {
         end: u64,
     ) -> ServiceResult<Vec<u8>> {
         self.original_range_with_policy(snapshot, None, event, start, end)
+    }
+
+    /// Owner-authorized maintenance; charges authenticated IO and output allocation
+    /// to the enclosing operation. This is not a retrieval authorization port.
+    pub(super) fn original_range_for_custody_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        event: &EventEnvelope,
+        start: u64,
+        end: u64,
+        budget: &mut PayloadBudget,
+    ) -> ServiceResult<Vec<u8>> {
+        self.original_range_with_policy_and_budget(snapshot, None, event, start, end, budget)
+    }
+
+    /// The caller authorizes the event and complete source closure before entry.
+    pub(super) fn original_range_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        event: &EventEnvelope,
+        start: u64,
+        end: u64,
+        budget: &mut PayloadBudget,
+    ) -> ServiceResult<Vec<u8>> {
+        self.original_range_with_policy_and_budget(
+            snapshot,
+            Some(context),
+            event,
+            start,
+            end,
+            budget,
+        )
+    }
+
+    fn original_range_with_policy_and_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: Option<&AuthenticatedRequestContext>,
+        event: &EventEnvelope,
+        start: u64,
+        end: u64,
+        budget: &mut PayloadBudget,
+    ) -> ServiceResult<Vec<u8>> {
+        budget.check().map_err(super::raw_index::budget_error)?;
+        match &event.payload {
+            EventPayload::InlineUtf8 { text, .. } => {
+                let range = source_range(start, end, text.len())?;
+                budget
+                    .charge(1, range.len() as u64)
+                    .map_err(super::raw_index::budget_error)?;
+                Ok(text.as_bytes()[range].to_vec())
+            }
+            EventPayload::InlineBytes { bytes, .. } => {
+                let range = source_range(start, end, bytes.len())?;
+                budget
+                    .charge(1, range.len() as u64)
+                    .map_err(super::raw_index::budget_error)?;
+                Ok(bytes[range].to_vec())
+            }
+            EventPayload::Staged { reference, .. } => {
+                let header =
+                    self.checked_payload_header_inner(snapshot, context, reference, Some(budget))?;
+                self.payload_range_inner(snapshot, &header, start, end, Some(budget))
+            }
+            EventPayload::Assembly { manifest } => {
+                let bytes =
+                    self.assemble_request_inner(snapshot, context, manifest, Some(budget))?;
+                let range = source_range(start, end, bytes.len())?;
+                budget
+                    .charge(1, range.len() as u64)
+                    .map_err(super::raw_index::budget_error)?;
+                Ok(bytes[range].to_vec())
+            }
+            EventPayload::Omitted { .. } => Err(ServiceError::new(
+                ErrorCode::EvidenceRequired,
+                "original bytes are explicitly unavailable",
+                false,
+            )),
+        }
     }
 
     fn original_range_with_policy<S: ReadSnapshot>(

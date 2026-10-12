@@ -51,6 +51,7 @@ struct NativeAssemblyProvider<'a> {
     fence: PrepareFence,
     trace_controls: Option<RouterTraceControls>,
     external_processing: bool,
+    budgeted_raw: bool,
 }
 
 impl ContextProvider for NativeAssemblyProvider<'_> {
@@ -142,6 +143,10 @@ impl AssemblyProvider for NativeAssemblyProvider<'_> {
                 ));
             }
             page.bytes
+        } else if self.budgeted_raw {
+            self.service
+                .source_span_inner(&snapshot, Some(self.context), span, false, Some(budget))
+                .map_err(context_error)?
         } else {
             self.service
                 .source_span(&snapshot, Some(self.context), span, false)
@@ -433,15 +438,56 @@ impl PrepareContextPort for NativeService {
             }
         }
         let mut discovery = Vec::new();
+        let mut bm25_discovery = None;
+        let mut bm25_priors = BTreeMap::new();
         let mut unrendered_sources = Vec::new();
         let mut raw_ids = BTreeSet::new();
-        if !request.raw_queries.is_empty() {
+        {
             let provider = self.indexed_recall_provider(&request.context);
-            let view = provider.open_view(Some(known), budget)?;
-            for query in &request.raw_queries {
-                let page = provider.candidates(&view, query, budget)?;
-                discovery.push(page.completion);
-                for hit in page.hits {
+            let mut batches = Vec::new();
+            if let Some(query) = &request.bm25_query {
+                let view = provider.open_bm25_view(Some(known), budget)?;
+                let page = provider.bm25_candidates(&view, query, budget)?;
+                // Fixed lexical routing prior, not calibrated memory utility or
+                // epistemic confidence. Preserve ranking through R0's re-keying.
+                for hit in &page.hits {
+                    budget.charge(1, 1024).map_err(budget_error)?;
+                    let bonus = (hit.score * 1_000_000.0).round().clamp(0.0, 100_000_000.0) as u64;
+                    bm25_priors.insert(hit.source.event_id, 1_000_000 + bonus);
+                }
+                budget
+                    .charge(
+                        page.hits.len() as u64 + 1,
+                        page.hits
+                            .iter()
+                            .map(|hit| {
+                                512 + hit.matches.len() as u64
+                                    * size_of::<OriginalSourceSpan>() as u64
+                            })
+                            .sum(),
+                    )
+                    .map_err(budget_error)?;
+                batches.push(
+                    page.hits
+                        .iter()
+                        .map(|hit| contextdb_recall::IndexedHit {
+                            source: hit.source.clone(),
+                            matches: hit.matches.clone(),
+                        })
+                        .collect::<Vec<_>>(),
+                );
+                bm25_discovery = Some(page);
+            }
+            if !request.raw_queries.is_empty() {
+                let view = provider.open_view(Some(known), budget)?;
+                for query in &request.raw_queries {
+                    let page = provider.candidates(&view, query, budget)?;
+                    discovery.push(page.completion);
+                    batches.push(page.hits);
+                }
+            }
+            for hits in batches {
+                for hit in hits {
                     if !raw_ids.insert(hit.source.event_id) {
                         continue;
                     }
@@ -455,6 +501,7 @@ impl PrepareContextPort for NativeService {
                         &request.context,
                         &hit,
                         request.model_profile.external_processing,
+                        request.bm25_query.is_some(),
                         budget,
                     )? {
                         Ok(spans) => spans,
@@ -507,6 +554,15 @@ impl PrepareContextPort for NativeService {
                                 &snapshot,
                                 &request.context,
                                 page,
+                                &mut evidence,
+                                budget,
+                            )?
+                        } else if let Some(bytes) = prepared.bytes {
+                            self.add_budgeted_original_evidence(
+                                &snapshot,
+                                &request.context,
+                                prepared.span,
+                                bytes,
                                 &mut evidence,
                                 budget,
                             )?
@@ -563,14 +619,19 @@ impl PrepareContextPort for NativeService {
                                 .collect::<Vec<_>>()
                                 .join(" "),
                         );
-                        candidate.representations[0].fields.insert(
-                            "original_page_operation".into(),
-                            contextdb_continuity::ORIGINAL_PAGE_OPERATION.into(),
-                        );
+                        if request.model_profile.supports_tool_results {
+                            candidate.representations[0].fields.insert(
+                                "original_page_operation".into(),
+                                contextdb_continuity::ORIGINAL_PAGE_OPERATION.into(),
+                            );
+                        }
                         page_candidates.insert(candidate.id.clone(), page.handle.clone());
                     }
                     candidate.evidence_handles = handles.clone();
                     candidate.source_class = source_class(hit.source.role);
+                    if let Some(prior) = bm25_priors.get(&hit.source.event_id) {
+                        candidate.utility_micros = *prior;
+                    }
                     if traced {
                         let mut controls = RouterTraceControls::default();
                         controls.originals.insert(hit.source.event_id);
@@ -700,6 +761,7 @@ impl PrepareContextPort for NativeService {
             fence,
             trace_controls,
             external_processing: request.model_profile.external_processing,
+            budgeted_raw: request.bm25_query.is_some(),
         };
         let principal = RecallPrincipal {
             subject: request.context.request.subject_id.clone(),
@@ -748,7 +810,39 @@ impl PrepareContextPort for NativeService {
             base: request.base,
             budget: request.outgoing_budget,
         };
+        if bm25_discovery.as_ref().is_some_and(|page| {
+            page.profile_status != contextdb_service::RawBm25ProfileStatus::Supported
+                || matches!(
+                    page.completion,
+                    contextdb_service::RawBm25Completion::WorkLimit
+                        | contextdb_service::RawBm25Completion::ByteLimit
+                        | contextdb_service::RawBm25Completion::PostingLimit
+                )
+        }) {
+            let page = bm25_discovery
+                .as_ref()
+                .expect("checked process observation");
+            let text = format!(
+                "[ContextDB memory-search unknown] Automatic discovery was unavailable or limited for this step (profile={:?}; completion={:?}). Recalled sources are a bounded selection. Missing context does not establish that the archive contains no relevant information.",
+                page.profile_status, page.completion
+            );
+            budget.charge(1, text.len() as u64).map_err(budget_error)?;
+            compile_request.base.control.push(OutgoingMessage {
+                id: BlockId::new("contextdb.bm25-discovery-status.v1").map_err(service_error)?,
+                zone: OutgoingZone::Control,
+                role: OutgoingRole::System,
+                text,
+                originals: vec![],
+                tool_calls: vec![],
+                tool_result: None,
+            });
+            if traced {
+                router::canonical_bytes(&compile_request.base, budget).map_err(service_error)?;
+                trace_base = Some(compile_request.base.clone());
+            }
+        }
         if !page_candidates.is_empty()
+            && compile_request.context.model_profile.supports_tool_results
             && !compile_request
                 .base
                 .control
@@ -1056,6 +1150,7 @@ impl PrepareContextPort for NativeService {
             outgoing: compiled.outgoing,
             assembly: compiled.manifest,
             discovery,
+            bm25_discovery,
             pending_interpretation,
             unrendered_sources,
         })
@@ -1284,6 +1379,18 @@ impl NativeService {
         budget: &mut QueryBudget,
     ) -> ServiceResult<EvidenceHandle> {
         let span = page.view.preview;
+        self.add_budgeted_original_evidence(snapshot, context, span, page.bytes, evidence, budget)
+    }
+
+    fn add_budgeted_original_evidence<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        span: OriginalSourceSpan,
+        bytes: Vec<u8>,
+        evidence: &mut BTreeMap<EvidenceHandle, ProviderEvidence>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<EvidenceHandle> {
         let policy =
             self.authorized_capture_policy_with_budget(snapshot, context, span.event_id, budget)?;
         let original = self.load_captured_original_with_budget(snapshot, span.event_id, budget)?;
@@ -1292,15 +1399,15 @@ impl NativeService {
         if evidence.contains_key(&handle) {
             return Ok(handle);
         }
-        if page.bytes.len() as u64 != span.end - span.start
-            || ContentDigest::from_bytes(*blake3::hash(&page.bytes).as_bytes()) != span.span_digest
+        if bytes.len() as u64 != span.end - span.start
+            || ContentDigest::from_bytes(*blake3::hash(&bytes).as_bytes()) != span.span_digest
         {
             return Err(super::integrity(
                 "prepared page bytes differ from their authenticated span",
             ));
         }
-        let excerpt = String::from_utf8(page.bytes)
-            .map_err(|_| invalid("prepared tool page is not UTF-8"))?;
+        let excerpt =
+            String::from_utf8(bytes).map_err(|_| invalid("prepared tool page is not UTF-8"))?;
         evidence.insert(
             handle.clone(),
             ProviderEvidence {

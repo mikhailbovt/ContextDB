@@ -3480,6 +3480,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != payload::MODEL_PROTOCOL_FEATURE
                 && feature != payload::REQUEST_TRANSFORM_FEATURE
                 && feature != raw_index::INDEX_FEATURE
+                && feature != raw_index::bm25::FEATURE
                 && feature != raw_index::GC_FEATURE
                 && feature != raw_index::COPY_FEATURE
                 && feature != raw_index::REMOVAL_FEATURE
@@ -3551,6 +3552,8 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 || !manifest.features.contains(retention::RETENTION_FEATURE)))
         || (manifest.features.contains(raw_index::REMOVAL_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
+        || (manifest.features.contains(raw_index::bm25::FEATURE)
+            && !manifest.features.contains(raw_index::INDEX_FEATURE))
         || (manifest.features.contains(retention::PRUNING_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || (manifest.features.contains(assertions::PRUNING_FEATURE)

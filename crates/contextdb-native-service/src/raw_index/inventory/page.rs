@@ -290,6 +290,7 @@ impl NativeService {
                 .charge(1, (entry.key.len() + entry.value.len()) as u64)
                 .map_err(budget_error)?;
             let generation: Generation = decode(&entry.value, "raw inventory manifest")?;
+            self.validate_raw_bm25_generation(snapshot, &generation, budget)?;
             if entry.key != generation_key(&workspace, number)
                 || generation.number != number
                 || generation.through > world.watermarks.journal

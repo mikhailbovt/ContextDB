@@ -1,5 +1,6 @@
 //! Persistent raw-source generations, advanced from the native capture outbox.
 
+pub(crate) mod bm25;
 pub(crate) mod copies;
 mod gc;
 pub(crate) mod inventory;
@@ -78,6 +79,9 @@ pub(super) struct Generation {
     /// Prepared source removals through this native prefix are omitted entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub removal_through: Option<u64>,
+    /// Explicit scoring method; old generation bytes keep their legacy encoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25: Option<bm25::Bm25Profile>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -158,6 +162,13 @@ impl NativeService {
                     )
                     .map_err(storage_error)?
                     .is_some()
+                || snapshot
+                    .get(
+                        &self.keyspaces.continuous,
+                        &bm25::document_key(workspace, number, receipt.event_id),
+                    )
+                    .map_err(storage_error)?
+                    .is_some()
             {
                 return Err(ServiceError::new(
                     ErrorCode::IndexTooStale,
@@ -180,6 +191,29 @@ impl NativeService {
         rebuild: bool,
         max_events: u32,
         budget: &mut QueryBudget,
+    ) -> ServiceResult<RawProjectionProgress> {
+        self.project_originals_inner(context, rebuild, max_events, budget, false)
+    }
+
+    /// Publish exact BM25 statistics with complete raw originals. An existing
+    /// legacy generation requires an explicit rebuild before this method resumes.
+    pub fn project_originals_bm25(
+        &self,
+        context: &AuthenticatedRequestContext,
+        rebuild: bool,
+        max_events: u32,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<RawProjectionProgress> {
+        self.project_originals_inner(context, rebuild, max_events, budget, true)
+    }
+
+    fn project_originals_inner(
+        &self,
+        context: &AuthenticatedRequestContext,
+        rebuild: bool,
+        max_events: u32,
+        budget: &mut QueryBudget,
+        request_bm25: bool,
     ) -> ServiceResult<RawProjectionProgress> {
         require_capability(context, Capability::Admin)?;
         if max_events == 0 || max_events > 256 {
@@ -230,6 +264,7 @@ impl NativeService {
                     .as_ref()
                     .filter(|ledger| ledger.supports_removal())
                     .map(|_| world.watermarks.journal),
+                bm25: request_bm25.then(bm25::Bm25Profile::fixed),
             }
         } else {
             let number = state
@@ -239,6 +274,16 @@ impl NativeService {
             self.raw_value(&snapshot, &generation_key(&workspace, number))?
                 .ok_or_else(|| integrity("raw generation manifest is absent"))?
         };
+        if request_bm25 && generation.bm25.is_none() {
+            return Err(stale_index());
+        }
+        if let Some(profile) = &generation.bm25 {
+            profile.validate()?;
+            if !fresh {
+                self.validate_raw_bm25_generation(&snapshot, &generation, budget)?;
+            }
+        }
+        let profiled = generation.bm25.is_some();
         if generation.authorization_epoch != auth
             || generation.analyzer != RAW_ANALYZER
             || generation.custody_version != super::custody::CUSTODY_VERSION
@@ -249,6 +294,7 @@ impl NativeService {
         let prefix = format!("outbox/{workspace}/").into_bytes();
         let mut after = prefix.clone();
         after.extend_from_slice(&generation.through.to_be_bytes());
+        budget.check().map_err(budget_error)?;
         let page = snapshot
             .scan_prefix_page(
                 &self.keyspaces.continuous,
@@ -271,12 +317,34 @@ impl NativeService {
         let mut rows = BTreeMap::<Vec<u8>, Vec<u8>>::new();
         let mut caught_up = page.continuation.is_none();
         for entry in page.entries {
-            budget.charge(1, 0).map_err(budget_error)?;
+            budget
+                .charge(
+                    1,
+                    if profiled {
+                        (entry.key.len() + entry.value.len()) as u64
+                    } else {
+                        0
+                    },
+                )
+                .map_err(budget_error)?;
             let work: super::capture::CaptureWork = decode(&entry.value, "raw projection work")?;
-            let accepted = self.captured_receipt_metadata(&snapshot, work.event_id)?;
+            let (accepted, accepted_work) = if profiled {
+                let (receipt, _) =
+                    self.capture_recovery_metadata(&snapshot, work.event_id, budget)?;
+                let work =
+                    self.capture_work_for_receipt_with_budget(&snapshot, &receipt, budget)?;
+                (receipt, work)
+            } else {
+                let receipt = self.captured_receipt_metadata(&snapshot, work.event_id)?;
+                let work = self.capture_work_for_receipt(&snapshot, &receipt)?;
+                (receipt, work)
+            };
             if entry.key != super::capture::work_key(&workspace, work.workspace_commit)
+                || accepted.event_id != work.event_id
+                || accepted.database_id != self.database_id
+                || accepted.domain != contextdb_service::NATIVE_CAPTURE_DOMAIN
                 || accepted.workspace_id.to_string() != context.request.workspace_id
-                || self.capture_work_for_receipt(&snapshot, &accepted)? != work
+                || accepted_work != work
             {
                 return Err(integrity(
                     "raw projection work differs from accepted control",
@@ -292,7 +360,11 @@ impl NativeService {
                 generation.through = work.workspace_commit;
                 continue;
             }
-            let original = self.load_captured_original(&snapshot, work.event_id)?;
+            let original = if profiled {
+                self.load_captured_original_with_budget(&snapshot, work.event_id, budget)?
+            } else {
+                self.load_captured_original(&snapshot, work.event_id)?
+            };
             if original.receipt.workspace_commit != work.workspace_commit
                 || original.receipt.event_digest != work.event_digest
             {
@@ -300,7 +372,7 @@ impl NativeService {
             }
             let source = RawSource::from(&original.event);
             let length = source.byte_length.unwrap_or_default();
-            if length > budget.remaining_bytes() {
+            if !profiled && length > budget.remaining_bytes() {
                 if generation == expected_generation {
                     return Err(exhausted(
                         "one original exceeds the projection byte allowance",
@@ -309,30 +381,78 @@ impl NativeService {
                 caught_up = false;
                 break;
             }
-            budget.charge(0, length).map_err(budget_error)?;
+            if !profiled {
+                budget.charge(0, length).map_err(budget_error)?;
+            }
             let mut policy = PolicyDomain {
-                policies: self.stored_custody_policies(&snapshot, work.event_id)?,
+                policies: if profiled {
+                    self.stored_custody_policies_with_budget(&snapshot, work.event_id, budget)?
+                } else {
+                    self.stored_custody_policies(&snapshot, work.event_id)?
+                },
                 first_commit: work.workspace_commit,
             };
             let domain = canonical_digest(&policy.policies)?;
-            let document = self.build_raw_document(
-                &snapshot,
-                &original.event,
-                work.workspace_commit,
-                work.event_digest,
-                &domain,
-                budget,
-            )?;
+            let (document, frequencies) = if profiled {
+                let (document, frequencies) = self.build_raw_bm25_documents(
+                    &snapshot,
+                    &original.event,
+                    work.workspace_commit,
+                    work.event_digest,
+                    &domain,
+                    bm25::routing_scope_count(&policy.policies)?,
+                    budget,
+                )?;
+                (document, Some(frequencies))
+            } else {
+                (
+                    self.build_raw_document(
+                        &snapshot,
+                        &original.event,
+                        work.workspace_commit,
+                        work.event_digest,
+                        &domain,
+                        budget,
+                    )?,
+                    None,
+                )
+            };
             let key = domain_key(&workspace, generation.number, &domain);
-            if let Some(previous) = rows.get(&key) {
+            if profiled {
+                if let Some(previous) =
+                    bm25::staged_value::<PolicyDomain, _>(self, &snapshot, &rows, &key, budget)?
+                {
+                    policy.first_commit = previous.first_commit;
+                }
+            } else if let Some(previous) = rows.get(&key) {
                 policy.first_commit = decode::<PolicyDomain>(previous, "raw domain")?.first_commit;
             } else if let Some(previous) = self.raw_value::<PolicyDomain, _>(&snapshot, &key)? {
                 policy.first_commit = previous.first_commit;
+            }
+            if profiled {
+                // Conservative map/serialization admission precedes row creation.
+                let row_count = 8_u64
+                    + document.first_terms.len() as u64
+                    + document.parents.len() as u64
+                    + bm25::routing_scope_count(&policy.policies)? as u64;
+                budget
+                    .charge(1, row_count.saturating_mul(2048))
+                    .map_err(budget_error)?;
             }
             let mut source_rows = document_rows(&workspace, generation.number, &document)?;
             source_rows.insert(key, encode(&policy)?);
             for key in domain_eligibility_keys(&workspace, generation.number, &domain, &policy)? {
                 source_rows.insert(key, encode(&domain)?);
+            }
+            if let Some(frequencies) = &frequencies {
+                source_rows.extend(self.bm25_source_rows(
+                    &snapshot,
+                    &workspace,
+                    generation.number,
+                    frequencies,
+                    &rows,
+                    budget,
+                )?);
             }
             let additional = source_rows
                 .keys()
@@ -354,7 +474,10 @@ impl NativeService {
                 rows.insert(key, value);
             }
             generation.through = work.workspace_commit;
-            generation.projected_sources += 1;
+            generation.projected_sources = generation
+                .projected_sources
+                .checked_add(1)
+                .ok_or_else(|| exhausted("raw projected-source counter overflow"))?;
         }
         if caught_up {
             generation.through = world.watermarks.journal;
@@ -383,6 +506,9 @@ impl NativeService {
             ));
         }
         self.enable_raw_index_format(&mut tx)?;
+        if profiled {
+            self.enable_capture_extension(&mut tx, bm25::FEATURE)?;
+        }
         if generation.removal_through.is_some() {
             self.enable_capture_extension(&mut tx, REMOVAL_FEATURE)?;
         }
@@ -417,7 +543,11 @@ impl NativeService {
         self.finish_frame(
             &mut tx,
             &frame,
-            "raw_projection",
+            if profiled {
+                bm25::OPERATION
+            } else {
+                "raw_projection"
+            },
             digest.as_bytes(),
             &digest,
             &progress,

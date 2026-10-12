@@ -82,6 +82,7 @@ impl NativeService {
     )> {
         let workspace = digest_bytes(workspace_id.as_bytes());
         let prefix = generation_prefix(&workspace, generation.number);
+        self.validate_raw_bm25_generation(snapshot, generation, budget)?;
         let mut sources = BTreeMap::new();
         let mut documents = BTreeMap::new();
         let mut rows = Vec::new();
@@ -89,7 +90,27 @@ impl NativeService {
             let relative = std::str::from_utf8(&entry.key)
                 .ok()
                 .and_then(|key| key.strip_prefix(&prefix));
+            if relative.is_some_and(|key| key.starts_with("bm25/")) && generation.bm25.is_none() {
+                return Err(integrity("observed BM25 row lost its generation profile"));
+            }
             let (kind, owner) = match relative {
+                Some(key) if key.starts_with("bm25/document/") => {
+                    let document: bm25::Bm25Document = decode(&entry.value, "BM25 copy document")?;
+                    (
+                        NativeRawCopyKind::Document,
+                        Some((document.source.event_id, document.policy_domain)),
+                    )
+                }
+                Some(key) if key.starts_with("bm25/corpus/") => {
+                    let _: bm25::DomainStatistics =
+                        decode(&entry.value, "BM25 shared corpus statistics")?;
+                    (NativeRawCopyKind::SharedMetadata, None)
+                }
+                Some(key) if key.starts_with("bm25/df/") => {
+                    let _: bm25::TermStatistics =
+                        decode(&entry.value, "BM25 shared term statistics")?;
+                    (NativeRawCopyKind::SharedMetadata, None)
+                }
                 Some(key) if key.starts_with("doc/") => {
                     let document: IndexedOriginal = decode(&entry.value, "raw copy document")?;
                     (
@@ -139,7 +160,27 @@ impl NativeService {
                         &domain,
                         budget,
                     )?;
-                    let expected = document_rows(&workspace, generation.number, &document)?;
+                    let mut expected = document_rows(&workspace, generation.number, &document)?;
+                    if generation.bm25.is_some() {
+                        // Domain rows may already have been reclaimed on an
+                        // earlier page. Custody scope labels remain with the
+                        // accepted source; revocation changes permission only.
+                        let policies =
+                            self.stored_custody_policies_with_budget(snapshot, id, budget)?;
+                        let statistics = self.build_bm25_document(
+                            snapshot,
+                            &original,
+                            control.receipt.workspace_commit,
+                            control.receipt.event_digest,
+                            &domain,
+                            bm25::routing_scope_count(&policies)?,
+                            budget,
+                        )?;
+                        expected.insert(
+                            bm25::document_key(&workspace, generation.number, id),
+                            encode(&statistics)?,
+                        );
+                    }
                     for (key, value) in &expected {
                         budget
                             .charge(1, (key.len() + value.len()) as u64)

@@ -12,6 +12,8 @@ pub(crate) mod keys;
 pub use keys::{NativeRawKeyFamily, NativeRawKeyInventory, NativeRawObservationFrontier};
 
 #[cfg(test)]
+mod bm25_tests;
+#[cfg(test)]
 pub(crate) mod tests;
 
 pub(crate) const MAX_WITNESS_BYTES: usize = 1024 * 1024;
@@ -32,11 +34,11 @@ pub struct NativeRawCopyReceipt {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeRawCopyKind {
-    /// Normalized words and spans from one captured original.
+    /// Lexical content or statistics derived from one captured original.
     Document,
     /// A route whose stored value identifies one captured original.
     Route,
-    /// Generation-wide policy or scope routing metadata.
+    /// Generation-wide policy, routing or aggregate metadata.
     SharedMetadata,
     /// The generation manifest at the observed snapshot.
     Manifest,

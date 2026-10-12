@@ -3,6 +3,8 @@
 #[cfg(test)]
 mod tests;
 
+mod bm25;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
@@ -50,6 +52,8 @@ pub struct NativeIndexedView {
     domains: BTreeMap<String, PolicyDomain>,
     principal: String,
     opened: Instant,
+    current_snapshot: bool,
+    budgeted_for_bm25: bool,
 }
 
 #[derive(Debug)]
@@ -239,6 +243,7 @@ impl IndexedRecallProvider for NativeIndexedRecallProvider<'_> {
                 authorization_epoch: auth,
                 projected_sources: 0,
                 removal_through: None,
+                bm25: None,
             }
         };
         if generation.authorization_epoch != auth
@@ -319,6 +324,8 @@ impl IndexedRecallProvider for NativeIndexedRecallProvider<'_> {
             domains,
             principal: self.context.authorization_binding_digest()?,
             opened: Instant::now(),
+            current_snapshot: false,
+            budgeted_for_bm25: false,
         })
     }
 

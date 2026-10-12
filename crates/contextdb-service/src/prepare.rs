@@ -11,7 +11,8 @@ use contextdb_context::{
 };
 use contextdb_core::{
     ContentDigest, ContextPackId, MAX_ROUTER_TRACE_BYTES, ModelCallId, ROUTER_REPLAY_TRACE_VERSION,
-    ROUTER_TRACE_VERSION, RawSource, RecallIntent, RouterTraceAttachment, TimestampMicros,
+    ROUTER_TRACE_VERSION, RawFilter, RawSource, RecallIntent, RouterTraceAttachment,
+    TimestampMicros,
 };
 use contextdb_recall::{
     IndexedCompletion, IndexedQuery, QueryBudget, RecallLimits, RecallMode, SuppliedVector,
@@ -75,6 +76,80 @@ pub struct PrepareRecallQuery {
     pub query_vector: Option<SuppliedVector>,
 }
 
+/// Separate opt-in lexical ranking intent; it contains no authorization or model.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawBm25Query {
+    /// Bounded actual current-step text, analyzed with the native raw analyzer.
+    pub text: String,
+    /// Initially only the unrestricted, request-echo-excluding filter is supported.
+    pub filter: RawFilter,
+    /// Maximum returned source candidates, from one through one hundred.
+    pub limit: u32,
+}
+
+/// Population support is distinct from rank/scan completion and semantic coverage.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawBm25ProfileStatus {
+    /// The captured lexical population supports this scoring profile.
+    Supported,
+    /// No explicitly declared BM25 generation is active.
+    MissingProjection,
+    /// The filter cannot use the fixed population statistics.
+    UnsupportedFilter,
+    /// Current statistics cannot represent the requested historical snapshot.
+    UnsupportedHistorical,
+    /// Some accepted sources exceed the lexical or rendering profile.
+    IncompleteLexicalCoverage,
+    /// Fresh source population exceeds the bounded join.
+    TailOverflow,
+}
+
+/// Completion of this bounded OR-posting operation, never whole-memory recall.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawBm25Completion {
+    /// Every posting within this bounded query was considered.
+    Complete,
+    /// The requested top-K retained a subset of positively ranked sources.
+    RankedLimit,
+    /// The fixed posting cap prevented a complete ranking.
+    PostingLimit,
+    /// The shared work allowance stopped the query.
+    WorkLimit,
+    /// The shared byte allowance stopped the query.
+    ByteLimit,
+}
+
+/// An admitted source and authenticated matching ranges; score grants no authority.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawBm25Hit {
+    /// Complete admitted original identity.
+    pub source: RawSource,
+    /// Exact authenticated first-term ranges in original bytes.
+    pub matches: Vec<contextdb_core::OriginalSourceSpan>,
+    /// Finite nonnegative rank value, not a utility probability.
+    pub score: f64,
+}
+
+/// Process observation of the actual bounded candidate path, not an owner lease.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawBm25Page {
+    /// Actual bounded normalized query terms; this observation grants no access.
+    pub terms: Vec<String>,
+    /// Selected source candidates in deterministic score order.
+    pub hits: Vec<RawBm25Hit>,
+    /// Support or explicit limitations of the captured lexical population.
+    pub profile_status: RawBm25ProfileStatus,
+    /// Completion of posting work, distinct from memory completeness.
+    pub completion: RawBm25Completion,
+    /// Opaque native view identity; contains no global activity counters.
+    pub snapshot: String,
+}
+
 /// The host supplies H* and a bounded discovery frontier. Mandatory applicable
 /// state is enumerated by the publication owner, not selected by the model.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -97,6 +172,9 @@ pub struct PrepareContextRequest {
     /// Optional generic discovery through the same owner and shared allowance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_query: Option<PrepareRecallQuery>,
+    /// Optional persistent native BM25 discovery, sharing this complete budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_query: Option<RawBm25Query>,
     /// Task facets, in addition to owner-enumerated mandatory current state.
     pub required_facets: Vec<PackFacetRequirement>,
     /// Maximum additional memory allocation.
@@ -148,6 +226,9 @@ pub struct PreparedContext {
     /// This encoding marker never authorizes the original or a proposed page call.
     #[serde(default, skip_serializing_if = "is_false")]
     pub original_page_recall: bool,
+    /// Actual BM25 process observation; it is not standalone sealed authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bm25_discovery: Option<RawBm25Page>,
 }
 
 fn is_false(value: &bool) -> bool {
