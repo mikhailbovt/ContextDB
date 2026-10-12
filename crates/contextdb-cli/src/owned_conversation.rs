@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use contextdb_agent_runtime::{
-    ExecutionAdapters, InteractionAnswer, NoExternalTools, OwnedAgentRuntime, OwnerDispatchFence,
-    StartRun,
+    ExecutionAdapters, InteractionAnswer, NoExternalTools, OwnedAgentRuntime, OwnedHybridSettings,
+    OwnerDispatchFence, RuntimeSettings, StartRun,
 };
 use contextdb_continuity::{OwnedRunIdentity, OwnedRunStatus};
 use contextdb_core::TimestampMicros;
@@ -28,6 +28,8 @@ use crate::{CliError, CliResult, TokenKey, codex_operator_authority, load_state}
 
 mod binding;
 mod config;
+mod hybrid_encoder;
+mod hybrid_index;
 mod kev;
 mod preparation;
 mod reader;
@@ -39,6 +41,13 @@ use reader::LocalReader;
 const MAX_COMMAND_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PROCESS_INPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_COMMANDS: usize = 256;
+
+const HYBRID_STARTUP_TIME_MS: u64 = 120_000;
+const HYBRID_STARTUP_MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const HYBRID_STARTUP_MAX_WORK: u64 = 1_000_000;
+const HYBRID_SHUTDOWN_TIME_MS: u64 = 10_000;
+const HYBRID_SHUTDOWN_MAX_BYTES: u64 = 1024 * 1024;
+const HYBRID_SHUTDOWN_MAX_WORK: u64 = 100_000;
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -77,7 +86,7 @@ pub(crate) fn run(path: &Path, config_path: &Path, start: bool) -> CliResult<()>
     };
     let owner = Arc::new(native);
     let mut context = authority(&state.key, &identity, &digest)?;
-    if kev.is_some() {
+    if kev.is_some() || config.automatic_hybrid.is_some() {
         context
             .capability_grants
             .insert(Capability::ModelProcessing);
@@ -111,9 +120,59 @@ pub(crate) fn run(path: &Path, config_path: &Path, start: bool) -> CliResult<()>
         scorer.warm()?;
     }
 
-    // No reader process or tokenizer operation occurs before all retained owner,
-    // profile, identity and configuration bindings have passed verification.
-    let reader = LocalReader::spawn(config.reader)?;
+    // Launch only after retained ownership and exact run configuration admission.
+    let hybrid = config.automatic_hybrid;
+    hybrid_encoder::with_encoder(hybrid.as_ref(), |encoder| {
+        let mut settings = settings;
+        let preparation = match encoder {
+            Some(encoder) => {
+                settings.automatic_hybrid = Some(OwnedHybridSettings {
+                    query_encoder: encoder.clone(),
+                    limits: hybrid.as_ref().expect("declared hybrid encoder").limits,
+                });
+                NativePreparation::with_hybrid(owner.clone(), encoder)
+            }
+            None => NativePreparation::new(owner.clone()),
+        };
+        drive(
+            BoundHost {
+                owner,
+                context,
+                identity,
+                binding,
+                timeout,
+            },
+            config.reader,
+            settings,
+            preparation,
+            start,
+        )
+    })
+}
+
+struct BoundHost {
+    owner: Arc<NativeService>,
+    context: AuthenticatedRequestContext,
+    identity: OwnedRunIdentity,
+    binding: binding::AcceptedBinding,
+    timeout: Duration,
+}
+
+fn drive(
+    host: BoundHost,
+    reader_config: reader::LocalReaderConfig,
+    settings: RuntimeSettings,
+    preparation: NativePreparation,
+    start: bool,
+) -> CliResult<()> {
+    let BoundHost {
+        owner,
+        context,
+        identity,
+        binding,
+        timeout,
+    } = host;
+    let reader = LocalReader::spawn(reader_config)?;
     reader.begin_turn()?;
     let mut runtime = if start {
         OwnedAgentRuntime::start(
@@ -149,7 +208,6 @@ pub(crate) fn run(path: &Path, config_path: &Path, start: bool) -> CliResult<()>
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let fence = OwnerDispatchFence::new(owner.clone());
-    let preparation = NativePreparation::new(owner.clone());
     let adapters = ExecutionAdapters {
         reader: &reader,
         model_fence: &fence,
@@ -203,6 +261,45 @@ pub(crate) fn run(path: &Path, config_path: &Path, start: bool) -> CliResult<()>
         "model_outcome_unknown":runtime.model_outcome_unknown(),
         "measurements":runtime.drain_measurements()
     }))
+}
+
+pub(crate) fn index(path: &Path, config_path: &Path, bootstrap: bool) -> CliResult<()> {
+    let config = HostConfig::read(config_path)?;
+    let hybrid = config
+        .automatic_hybrid
+        .as_ref()
+        .ok_or_else(|| invalid("owned hybrid indexing requires automatic_hybrid configuration"))?;
+    let identity = config.identity();
+    let digest = config.digest()?;
+    let timeout = Duration::from_millis(config.reader.timeout_millis) + Duration::from_secs(30);
+    let state = load_state(path)?;
+    let lifecycle = ProductionService::open(path, state.clone())?;
+    lifecycle.verify(VerifyRequest {
+        context: codex_operator_authority(&state.key, "owned-hybrid-index")?.request,
+        deep: true,
+    })?;
+    let (owner, _) = open_native_owner(path, &state, true)?;
+    let mut context = authority(&state.key, &identity, &digest)?;
+    context
+        .capability_grants
+        .insert(Capability::ModelProcessing);
+    owner.recover_record_writes(&context, &mut budget(timeout))?;
+    hybrid_encoder::with_encoder(Some(hybrid), |encoder| {
+        let encoder = encoder.ok_or_else(|| invalid("owned hybrid encoder was not launched"))?;
+        let mode = if bootstrap {
+            hybrid_index::Mode::Bootstrap
+        } else {
+            hybrid_index::Mode::Continue
+        };
+        let progress = hybrid_index::advance(
+            &owner,
+            &context,
+            encoder.as_ref(),
+            mode,
+            &mut budget(timeout),
+        )?;
+        emit(&json!({ "type": "hybrid_index", "progress": progress }))
+    })
 }
 
 fn execute(

@@ -174,6 +174,29 @@ enum Command {
         resume: bool,
     },
     #[cfg(feature = "mcp")]
+    /// Explicitly advance the owned hybrid index and publish its first bounded graph.
+    OwnedHybridIndex {
+        /// Existing authenticated encrypted-native lifecycle archive.
+        path: PathBuf,
+        /// Trusted owned-conversation configuration with automatic_hybrid enabled.
+        #[arg(long)]
+        config: PathBuf,
+        /// Start a fresh raw generation; never replaces an accepted graph implicitly.
+        #[arg(
+            long,
+            conflicts_with = "continue",
+            required_unless_present = "continue"
+        )]
+        bootstrap: bool,
+        /// Continue accepted index work or retry an exact graph publication.
+        #[arg(
+            long = "continue",
+            conflicts_with = "bootstrap",
+            required_unless_present = "bootstrap"
+        )]
+        r#continue: bool,
+    },
+    #[cfg(feature = "mcp")]
     /// Create a bounded composite backup for the local Codex authorities.
     CodexBackup {
         /// Current portable lifecycle archive.
@@ -942,6 +965,16 @@ fn run(cli: Cli) -> CliResult<()> {
         } => {
             require_codex_operator_output(format)?;
             owned_conversation::run(&path, &config, start)?;
+        }
+        #[cfg(feature = "mcp")]
+        Command::OwnedHybridIndex {
+            path,
+            config,
+            bootstrap,
+            r#continue: _,
+        } => {
+            require_codex_operator_output(format)?;
+            owned_conversation::index(&path, &config, bootstrap)?;
         }
         #[cfg(feature = "mcp")]
         Command::CodexBackup { path, output } => {

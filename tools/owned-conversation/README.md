@@ -146,6 +146,64 @@ An accepted read does not execute replay or authorize training. These opt-ins
 observe R0; Kev inference, training and whole-history semantic recall remain
 separate later stages.
 
+## Automatic hybrid retrieval
+
+For a new run, set `"router_trace_profile": "required_replay_v2"` and add a trusted
+`automatic_hybrid` object with `encoder` and `limits`. The encoder uses the pinned
+[native embedding profile](../../docs/architecture/continuous-context.md):
+absolute `program` and `model` paths, a dedicated nonzero loopback `port`, and
+`runtime_artifacts`, the complete sorted executable/DLL name-to-lowercase-SHA256
+map. The owned launcher verifies these files before starting its process.
+
+To add the declaration to the example configuration, retain the complete local
+backend manifest rather than listing only its executable:
+
+```powershell
+$ownedConfig = Get-Content D:/ContextDB/owned.json -Raw | ConvertFrom-Json -AsHashtable
+$embeddingArtifacts = [ordered]@{}
+Get-ChildItem D:/Reader/llama -File | Where-Object { $_.Name -eq 'llama-server.exe' -or $_.Extension -eq '.dll' } | Sort-Object Name | ForEach-Object {
+  $embeddingArtifacts[$_.Name] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$ownedConfig.router_trace_profile = 'required_replay_v2'
+$ownedConfig.automatic_hybrid = @{
+  encoder = @{ program='D:/Reader/llama/llama-server.exe'; model='D:/Reader/Qwen3-Embedding-0.6B-Q8_0.gguf'; runtime_artifacts=$embeddingArtifacts; port=18768 }
+  limits = @{ sources=64; node_reads=256; vector_reads=256; discovered=256; ef_search=128; tail_work=128; tail_vectors=256 }
+}
+$ownedConfig | ConvertTo-Json -Depth 20 | Set-Content D:/ContextDB/owned.json -Encoding utf8NoBOM
+```
+
+With other owners stopped, explicitly prepare a populated encrypted archive:
+
+```powershell
+contextdb owned-hybrid-index D:/ContextDB/data/memory.ctxb --config D:/ContextDB/owned.json --bootstrap
+contextdb owned-hybrid-index D:/ContextDB/data/memory.ctxb --config D:/ContextDB/owned.json --continue
+```
+
+Bootstrap starts a fresh BM25 generation. Continue advances accepted work or
+repeats an unchanged graph publication. Each command allows eight raw and eight
+dense batches of 64 events under one operation budget. A `hybrid_index` response
+reports accepted progress; `graph_ready` is true only after an accepted graph
+receipt. An unobserved graph is not proof of absence. Empty archives and graphs
+above 4096 spans refuse this first profile. Changed or stripped accepted graph
+bases refuse publication; an error does not roll back already accepted batches.
+
+Start/resume then uses one owned encoder for new original spans and each current
+query. Before preparation, the hook finishes up to eight 64-event raw batches,
+then up to eight dense batches on that accepted generation. It preserves the
+immutable base and searches authenticated
+incremental vectors. The owner derives cues from the current checkpoint, combines
+BM25, dense and one-hop causal routes, and retains a protected observation outside
+the reader prompt. It never rebuilds a graph after an interactive failure.
+
+Startup has a separate bound of 120 seconds, 4 GiB charged bytes and one million
+work units; cleanup has ten seconds, 1 MiB and 100,000 units. The encoder is closed
+after the reader/runtime release their leases, including failed turns. All pins,
+limits and these allowances are bound to the run configuration; changing them
+requires a new run. Omission preserves the existing lexical profile exactly.
+Hybrid and development Kev cannot be enabled together in this CLI profile. This
+wiring establishes neither whole-archive recall quality nor a measured reader
+benefit, and the text connector still has no external tools.
+
 ## Start, pause and resume
 
 Input and output are UTF-8 JSON Lines. Conversation frames contain text/control

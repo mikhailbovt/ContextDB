@@ -277,6 +277,29 @@ pub(super) struct Reader {
     pub wires: Mutex<Vec<Vec<OutgoingMessage>>>,
     pub call: ToolCallId,
 }
+
+// A registry's reference to an archive key is not the archived fact. Copy only
+// a marker at the beginning of an actual delivered original-content line.
+fn original_marker_line<'a>(messages: &'a [OutgoingMessage], marker: &str) -> Option<&'a str> {
+    messages
+        .iter()
+        .filter(|message| message.zone == OutgoingZone::Evidence)
+        .flat_map(|message| {
+            message.originals.iter().filter_map(move |original| {
+                let start = usize::try_from(original.text_start).ok()?;
+                let end = usize::try_from(original.text_end).ok()?;
+                message.text.get(start..end)
+            })
+        })
+        .flat_map(str::lines)
+        .find(|line| {
+            line.strip_prefix(marker)
+                .is_some_and(|suffix| suffix.starts_with(' '))
+        })
+}
+
+mod reader_tests;
+
 impl Reader {
     pub fn new() -> Self {
         Self {
@@ -350,10 +373,8 @@ impl ReaderAdapter for Reader {
         } else {
             "ARCHIVE_SILVER"
         };
-        let text = messages
-            .iter()
-            .find(|message| message.zone == OutgoingZone::Evidence && message.text.contains(cue))
-            .map(|message| message.text.clone())
+        let text = original_marker_line(&messages, cue)
+            .map(str::to_owned)
             .unwrap_or_else(|| "No attributable fixture evidence was delivered.".into());
         self.wires
             .lock()

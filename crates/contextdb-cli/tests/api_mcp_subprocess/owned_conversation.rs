@@ -20,6 +20,9 @@ use peer::Peer;
 #[path = "owned_conversation/protected_trace.rs"]
 mod protected_trace;
 
+#[path = "owned_conversation/hybrid.rs"]
+mod hybrid;
+
 const ORIGINAL: &str = "An incidental launch note: the satellite nickname was BLUEBIRD-7319 after a maintenance meeting.";
 
 fn config(f: &Fixture, peer: &Peer) -> (PathBuf, serde_json::Value) {

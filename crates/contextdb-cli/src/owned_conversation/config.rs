@@ -5,17 +5,20 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use contextdb_agent_runtime::{RollingPolicy, RuntimeSettings};
+use contextdb_agent_runtime::{
+    LocalEmbeddingConfig, RollingPolicy, RuntimeSettings, embedding_backend_artifacts_digest,
+};
 use contextdb_context::{
     BlockId, ContextBudgets, OutgoingBudget, OutgoingMessage, OutgoingRole, OutgoingZone,
     PackPurpose,
 };
 use contextdb_continuity::OwnedRunIdentity;
 use contextdb_core::{
-    ActorId, AgentId, AgentRunId, MAX_ROUTER_TRACE_BYTES, MAX_ROUTER_TRACE_PAGE_BYTES,
-    MAX_ROUTER_TRACE_PAGES, MemorySubjectId, RawFilter, ScopeId, SessionId, WorkspaceId,
+    ActorId, AgentId, AgentRunId, ContentDigest, MAX_ROUTER_TRACE_BYTES,
+    MAX_ROUTER_TRACE_PAGE_BYTES, MAX_ROUTER_TRACE_PAGES, MemorySubjectId, RawFilter, ScopeId,
+    SessionId, WorkspaceId,
 };
-use contextdb_service::RouterTraceProfile;
+use contextdb_service::{OwnedHybridLimits, RouterTraceProfile, TextEmbeddingProfile};
 use serde::{Deserialize, Serialize};
 
 use super::invalid;
@@ -55,6 +58,84 @@ impl TraceSettingsBinding {
     }
 }
 
+/// Explicit host-only declaration. Parsing never verifies assets or starts a model.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HybridConfig {
+    pub(super) encoder: LocalEmbeddingConfig,
+    pub(super) limits: OwnedHybridLimits,
+}
+
+impl HybridConfig {
+    /// Pure pinned profile derivation; actual files are checked by the owned launcher.
+    pub(super) fn embedding_profile(&self) -> CliResult<TextEmbeddingProfile> {
+        Ok(TextEmbeddingProfile::qwen3_06b_q8_llama_b10964(
+            embedding_backend_artifacts_digest(&self.encoder.runtime_artifacts)?,
+        ))
+    }
+
+    fn validate(&self) -> CliResult<()> {
+        if !self.encoder.program.is_absolute()
+            || !self.encoder.model.is_absolute()
+            || self.encoder.port == 0
+        {
+            return Err(invalid(
+                "hybrid encoder requires absolute paths and a nonzero port",
+            ));
+        }
+        self.limits.validate()?;
+        self.embedding_profile()?.validate()?;
+        Ok(())
+    }
+
+    fn binding(&self) -> CliResult<HybridSettingsBinding<'_>> {
+        let embedding_profile = self.embedding_profile()?;
+        let embedding_profile_digest = embedding_profile.digest()?;
+        Ok(HybridSettingsBinding {
+            profile: "contextdb.cli-owned-hybrid-settings.v1",
+            encoder: &self.encoder,
+            embedding_profile,
+            embedding_profile_digest,
+            limits: self.limits,
+            preparation: preparation::HYBRID_PROFILE,
+            projection_limits: (
+                preparation::HYBRID_BATCH_EVENTS,
+                preparation::HYBRID_MAX_BATCHES,
+            ),
+            startup: HybridAllowanceBinding {
+                max_work: super::HYBRID_STARTUP_MAX_WORK,
+                max_bytes: super::HYBRID_STARTUP_MAX_BYTES,
+                timeout_millis: super::HYBRID_STARTUP_TIME_MS,
+            },
+            shutdown: HybridAllowanceBinding {
+                max_work: super::HYBRID_SHUTDOWN_MAX_WORK,
+                max_bytes: super::HYBRID_SHUTDOWN_MAX_BYTES,
+                timeout_millis: super::HYBRID_SHUTDOWN_TIME_MS,
+            },
+        })
+    }
+}
+
+#[derive(Serialize)]
+struct HybridSettingsBinding<'a> {
+    profile: &'static str,
+    encoder: &'a LocalEmbeddingConfig,
+    embedding_profile: TextEmbeddingProfile,
+    embedding_profile_digest: ContentDigest,
+    limits: OwnedHybridLimits,
+    preparation: &'static str,
+    projection_limits: (u32, u8),
+    startup: HybridAllowanceBinding,
+    shutdown: HybridAllowanceBinding,
+}
+
+#[derive(Serialize)]
+struct HybridAllowanceBinding {
+    max_work: u64,
+    max_bytes: u64,
+    timeout_millis: u64,
+}
+
 #[derive(Serialize)]
 struct SettingsBinding<'a> {
     profile: &'static str,
@@ -72,6 +153,8 @@ struct SettingsBinding<'a> {
     router_trace: Option<TraceSettingsBinding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     development_kev: Option<PolicyBinding<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    automatic_hybrid: Option<HybridSettingsBinding<'a>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -112,6 +195,8 @@ pub(super) struct HostConfig {
     router_trace_profile: RouterTraceProfile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) development_kev: Option<KevConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) automatic_hybrid: Option<HybridConfig>,
 }
 
 impl HostConfig {
@@ -170,6 +255,16 @@ impl HostConfig {
                 "configuration exceeds the bounded local conversation profile",
             ));
         }
+        if let Some(hybrid) = &self.automatic_hybrid {
+            if self.router_trace_profile != RouterTraceProfile::RequiredReplayV2
+                || self.development_kev.is_some()
+            {
+                return Err(invalid(
+                    "automatic hybrid requires replay v2 and a separate development Kev configuration",
+                ));
+            }
+            hybrid.validate()?;
+        }
         if let Some(kev) = &self.development_kev {
             if self.router_trace_profile.is_off() {
                 return Err(invalid(
@@ -210,6 +305,11 @@ impl HostConfig {
             raw_projection_limits: (preparation::BATCH_EVENTS, preparation::MAX_BATCHES),
             router_trace: TraceSettingsBinding::for_profile(self.router_trace_profile),
             development_kev: self.development_kev.as_ref().map(KevConfig::binding),
+            automatic_hybrid: self
+                .automatic_hybrid
+                .as_ref()
+                .map(HybridConfig::binding)
+                .transpose()?,
         };
         serde_json::to_vec(&(self, binding))
             .map_err(|_| invalid("conversation configuration cannot be bound"))

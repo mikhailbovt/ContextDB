@@ -139,6 +139,282 @@ fn omitted_and_explicit_off_preserve_exact_legacy_configuration_and_digest() {
         omitted.settings().expect("settings").router_trace_profile,
         RouterTraceProfile::Off
     );
+    let mut null = serde_json::to_value(&omitted).expect("legacy config value");
+    null["automatic_hybrid"] = Value::Null;
+    let null: HostConfig = serde_json::from_value(null).expect("explicit absent hybrid");
+    assert_eq!(null.binding_bytes().expect("absent binding"), old_binding);
+    assert!(null.automatic_hybrid.is_none());
+}
+
+fn hybrid_config() -> HostConfig {
+    let mut config = config(Some(RouterTraceProfile::RequiredReplayV2));
+    let root = std::env::current_exe()
+        .expect("test executable")
+        .parent()
+        .expect("absolute fixture parent")
+        .join("not-provisioned-config-only-encoder");
+    config.automatic_hybrid = Some(HybridConfig {
+        encoder: LocalEmbeddingConfig {
+            program: root.join("llama-server"),
+            model: root.join("Qwen3-Embedding-0.6B-Q8_0.gguf"),
+            runtime_artifacts: std::collections::BTreeMap::from([(
+                "llama-server".into(),
+                "1".repeat(64),
+            )]),
+            port: 29781,
+        },
+        limits: OwnedHybridLimits::default(),
+    });
+    config.validate().expect("pure bounded hybrid declaration");
+    config
+}
+
+#[test]
+fn hybrid_binds_full_pinned_profile_without_starting_or_reading_encoder_assets() {
+    let host = hybrid_config();
+    let hybrid = host.automatic_hybrid.as_ref().expect("explicit hybrid");
+    let profile = hybrid.embedding_profile().expect("fixed pure profile");
+    let bound: Value = serde_json::from_slice(&host.binding_bytes().expect("hybrid binding"))
+        .expect("parsed canonical binding");
+    let settings = &bound[1]["automatic_hybrid"];
+    assert_eq!(bound[0]["automatic_hybrid"]["encoder"], settings["encoder"]);
+    assert_eq!(settings["embedding_profile"], json!(profile));
+    assert_eq!(
+        settings["embedding_profile_digest"],
+        json!(profile.digest().expect("complete profile digest"))
+    );
+    assert_eq!(settings["limits"], json!(OwnedHybridLimits::default()));
+    assert_eq!(settings["preparation"], preparation::HYBRID_PROFILE);
+    assert_eq!(
+        settings["projection_limits"],
+        json!([
+            preparation::HYBRID_BATCH_EVENTS,
+            preparation::HYBRID_MAX_BATCHES
+        ])
+    );
+    assert_eq!(
+        settings["startup"],
+        json!({
+            "max_work":super::super::HYBRID_STARTUP_MAX_WORK,
+            "max_bytes":super::super::HYBRID_STARTUP_MAX_BYTES,
+            "timeout_millis":super::super::HYBRID_STARTUP_TIME_MS
+        })
+    );
+    assert_eq!(
+        settings["shutdown"],
+        json!({
+            "max_work":super::super::HYBRID_SHUTDOWN_MAX_WORK,
+            "max_bytes":super::super::HYBRID_SHUTDOWN_MAX_BYTES,
+            "timeout_millis":super::super::HYBRID_SHUTDOWN_TIME_MS
+        })
+    );
+    assert_ne!(
+        host.digest().expect("hybrid digest"),
+        config(Some(RouterTraceProfile::RequiredReplayV2))
+            .digest()
+            .expect("legacy v2 digest")
+    );
+    let inert = host.settings().expect("pure host settings");
+    assert!(inert.automatic_hybrid.is_none());
+    assert!(inert.automatic_bm25.is_none());
+}
+
+#[test]
+fn hybrid_refuses_wrong_profile_invalid_limits_paths_ports_and_unknown_fields() {
+    let config = hybrid_config();
+    let value = serde_json::to_value(&config).expect("hybrid config value");
+    for profile in [RouterTraceProfile::Off, RouterTraceProfile::Required] {
+        let mut changed = value.clone();
+        changed["router_trace_profile"] = json!(profile);
+        let changed: HostConfig = serde_json::from_value(changed).expect("parsed other trace");
+        assert!(changed.validate().is_err());
+    }
+    for (field, changed_value) in [
+        ("program", json!("relative-server")),
+        ("model", json!("relative-model.gguf")),
+        ("port", json!(0)),
+        ("runtime_artifacts", json!({})),
+        ("runtime_artifacts", json!({"llama-server":"invalid-sha"})),
+    ] {
+        let mut changed = value.clone();
+        changed["automatic_hybrid"]["encoder"][field] = changed_value;
+        let changed: HostConfig = serde_json::from_value(changed).expect("parsed invalid encoder");
+        assert!(changed.validate().is_err(), "invalid encoder field {field}");
+    }
+    let mut changed = value.clone();
+    changed["automatic_hybrid"]["limits"]["sources"] = json!(19);
+    let changed: HostConfig = serde_json::from_value(changed).expect("parsed invalid limits");
+    assert!(changed.validate().is_err());
+    for path in [
+        vec!["automatic_hybrid", "embedding_profile"],
+        vec!["automatic_hybrid", "encoder", "allow_remote"],
+        vec!["automatic_hybrid", "limits", "unbounded"],
+    ] {
+        let mut changed = value.clone();
+        let mut parent = &mut changed;
+        for key in &path[..path.len() - 1] {
+            parent = &mut parent[*key];
+        }
+        parent[path[path.len() - 1]] = json!(true);
+        assert!(serde_json::from_value::<HostConfig>(changed).is_err());
+    }
+    let worker_directory = tempfile::tempdir().expect("owned worker pins");
+    let worker_root =
+        std::fs::canonicalize(worker_directory.path()).expect("canonical worker pins");
+    let program = worker_root.join("interpreter");
+    std::fs::write(&program, b"never executed").expect("owned dummy interpreter");
+    let mut combined = hybrid_config();
+    combined.development_kev = Some(crate::owned_conversation::kev::tests::fixture_config(
+        &worker_root,
+        program,
+    ));
+    assert!(
+        combined.validate().is_err(),
+        "development scorer remains a separate opt-in"
+    );
+}
+
+fn changed_hybrid_configs(original: &HostConfig) -> Vec<HostConfig> {
+    let value = serde_json::to_value(original).expect("accepted hybrid value");
+    let mut changed = Vec::new();
+    let mut port = value.clone();
+    port["automatic_hybrid"]["encoder"]["port"] = json!(29782);
+    changed.push(port);
+    let mut limits = value.clone();
+    limits["automatic_hybrid"]["limits"]["sources"] = json!(65);
+    changed.push(limits);
+    let mut pins = value.clone();
+    pins["automatic_hybrid"]["encoder"]["runtime_artifacts"]["llama-server"] =
+        json!("2".repeat(64));
+    changed.push(pins);
+    let mut model = value.clone();
+    model["automatic_hybrid"]["encoder"]["model"] = json!(
+        original
+            .automatic_hybrid
+            .as_ref()
+            .expect("hybrid")
+            .encoder
+            .model
+            .with_file_name("changed-location.gguf")
+    );
+    changed.push(model);
+    let mut identity = value;
+    identity["identity"]["actor_id"] = json!("10000000-0000-4000-8000-000000000008");
+    changed.push(identity);
+    changed
+        .into_iter()
+        .map(|value| {
+            let config: HostConfig = serde_json::from_value(value).expect("changed parsed config");
+            config.validate().expect("changed valid declaration");
+            config
+        })
+        .collect()
+}
+
+#[test]
+fn hybrid_changes_bind_identity_port_limits_paths_and_full_backend_profile() {
+    let original = hybrid_config();
+    let digest = original.digest().expect("original digest");
+    let profile_digest = original
+        .automatic_hybrid
+        .as_ref()
+        .expect("hybrid")
+        .embedding_profile()
+        .expect("profile")
+        .digest()
+        .expect("profile digest");
+    for (index, changed) in changed_hybrid_configs(&original).into_iter().enumerate() {
+        assert_ne!(changed.digest().expect("changed digest"), digest);
+        let changed_profile = changed
+            .automatic_hybrid
+            .as_ref()
+            .expect("hybrid")
+            .embedding_profile()
+            .expect("profile")
+            .digest()
+            .expect("profile digest");
+        if index == 2 {
+            assert_ne!(
+                changed_profile, profile_digest,
+                "complete runtime pins change the encoder space"
+            );
+        } else {
+            assert_eq!(
+                changed_profile, profile_digest,
+                "host settings do not manufacture another encoder"
+            );
+        }
+    }
+}
+
+#[test]
+fn accepted_hybrid_binding_survives_cold_open_and_refuses_changed_resume_hash() {
+    let directory = tempfile::tempdir().expect("native fixture directory");
+    let authorities = tempfile::tempdir().expect("retained authorities");
+    let ledger =
+        NativeSuppressionLedger::create(authorities.path().join("ledger"), "hybrid-config")
+            .expect("retained suppression authority");
+    let keys = NativeCustodyKeys::create(
+        authorities.path().join("keys"),
+        "hybrid-config",
+        CustodyMasterKey::from_zeroizing(zeroize::Zeroizing::new([9; 32])).expect("fixture master"),
+    )
+    .expect("retained custody authority");
+    let owner = Arc::new(
+        NativeService::open_encrypted(
+            directory.path(),
+            "hybrid-config",
+            [7; 32],
+            ledger.clone(),
+            keys.clone(),
+        )
+        .expect("actual encrypted native owner"),
+    );
+    let original = hybrid_config();
+    let identity = original.identity();
+    let digest = original.digest().expect("hybrid digest");
+    let key = TokenKey::new([11; 32]).expect("host authority key");
+    let context = authority(&key, &identity, &digest).expect("actual host principal");
+    let accepted = binding::require_binding(&owner, &context, &identity, &digest, true)
+        .expect("accepted hybrid binding without encoder launch");
+    drop(owner);
+    let reopened = Arc::new(
+        NativeService::open_encrypted_existing(
+            directory.path(),
+            "hybrid-config",
+            [7; 32],
+            ledger,
+            keys,
+        )
+        .expect("cold native owner"),
+    );
+    assert_eq!(
+        binding::require_binding(&reopened, &context, &identity, &digest, false)
+            .expect("same cold hybrid binding")
+            .receipt,
+        accepted.receipt
+    );
+    for changed in changed_hybrid_configs(&original).into_iter().take(4) {
+        let changed_digest = changed.digest().expect("changed digest");
+        let changed_context =
+            authority(&key, &identity, &changed_digest).expect("new trusted binding");
+        let error = binding::require_binding(
+            &reopened,
+            &changed_context,
+            &identity,
+            &changed_digest,
+            false,
+        )
+        .err()
+        .expect("changed hybrid declaration cannot resume the accepted run");
+        assert_eq!(error.0.code, contextdb_service::ErrorCode::InvalidArgument);
+    }
+    assert_eq!(
+        binding::require_binding(&reopened, &context, &identity, &digest, false)
+            .expect("failed switches did not replace accepted binding")
+            .receipt,
+        accepted.receipt
+    );
 }
 
 #[test]
