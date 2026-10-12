@@ -94,6 +94,9 @@ pub(super) struct Generation {
     /// Accepted directory reference; full immutable delta declarations survive GC.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dense_segments: Option<dense::graph::segments::types::DirectoryRef>,
+    /// Independently accepted bounded prefix base; absent on legacy generations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dense_prefix_base: Option<dense::graph::prefix_v2::types::PrefixBaseRefV2>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -289,6 +292,7 @@ impl NativeService {
                 dense: None,
                 dense_graph: None,
                 dense_segments: None,
+                dense_prefix_base: None,
             }
         } else {
             let number = state

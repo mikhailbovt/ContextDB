@@ -90,8 +90,19 @@ impl NativeService {
             let relative = std::str::from_utf8(&entry.key)
                 .ok()
                 .and_then(|key| key.strip_prefix(&prefix));
-            if relative.is_some_and(|key| key.starts_with("dense/graph/")) {
-                let owner = if relative.is_some_and(|key| {
+            if relative.is_some_and(|key| {
+                key.starts_with("dense/graph/") || key.starts_with("dense/prefix-base-v2/")
+            }) {
+                let owner = if relative.is_some_and(|key| key.starts_with("dense/prefix-base-v2/"))
+                {
+                    self.verify_dense_prefix_base_copy(
+                        snapshot,
+                        generation,
+                        &entry.key,
+                        &entry.value,
+                        budget,
+                    )?
+                } else if relative.is_some_and(|key| {
                     key.starts_with("dense/graph/segment/") || key == "dense/graph/segments/head"
                 }) {
                     self.verify_dense_segment_copy(

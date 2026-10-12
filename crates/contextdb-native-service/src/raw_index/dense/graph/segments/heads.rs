@@ -118,8 +118,16 @@ impl NativeService {
             .ok_or_else(|| integrity("workspace predecessor format manifest absent"))?;
         crate::validate_manifest(&manifest, &self.database_id)?;
         let activated_format = manifest.features.contains(FEATURE);
+        let prefix_format = manifest
+            .features
+            .contains(super::super::prefix_v2::types::FEATURE);
         if state.segment_heads.is_some() && !activated_format {
             return Err(integrity("workspace predecessor lost its segment feature"));
+        }
+        if state.prefix_bases.is_some() && !prefix_format {
+            return Err(integrity(
+                "workspace predecessor lost its prefix-base feature",
+            ));
         }
         let key = workspace_map_key(&state.workspace_digest, state.watermarks.journal);
         let mapping = self.predecessor_row::<CommitMap, _>(
@@ -129,7 +137,7 @@ impl NativeService {
             HEAD_BYTES,
         )?;
         if state.watermarks.journal == 0 {
-            if mapping.is_some() || state.segment_heads.is_some() {
+            if mapping.is_some() || state.segment_heads.is_some() || state.prefix_bases.is_some() {
                 return Err(integrity(
                     "genesis workspace has a committed segment predecessor",
                 ));
@@ -163,8 +171,32 @@ impl NativeService {
                 ));
             }
             self.check_segment_head_stamp(state, &event)?;
-        } else if activated_format || state.segment_heads.is_some() {
-            return Err(integrity("activated workspace predecessor map absent"));
+            self.check_prefix_base_predecessor(state, &event, &manifest)?;
+        } else {
+            if activated_format
+                || prefix_format
+                || state.segment_heads.is_some()
+                || state.prefix_bases.is_some()
+            {
+                return Err(integrity("activated workspace predecessor map absent"));
+            }
+            // Only the inherited missing-map exception needs this additional
+            // point read. A surviving stamp/declaration cannot become legacy
+            // None merely by deleting its map and stripping the format flag.
+            if let Some(event) = self.predecessor_row::<StoredEvent, _>(
+                snapshot,
+                &self.keyspaces.events,
+                &state.latest_global_commit.to_be_bytes(),
+                crate::MAX_JSON_BYTES,
+            )? && (event.prefix_bases.is_some()
+                || event.segment_heads.is_some()
+                || event.operation == super::super::prefix_v2::types::OPERATION
+                || event.operation == OPERATION)
+            {
+                return Err(integrity(
+                    "stamped workspace predecessor lost its committed map",
+                ));
+            }
         }
         // Legacy historical mappings may expire. A missing None map is still
         // permitted when the new format is absent; a successor never is. This
@@ -274,7 +306,7 @@ impl NativeService {
         }))
     }
 
-    fn check_segment_head_stamp(
+    pub(crate) fn check_segment_head_stamp(
         &self,
         state: &WorkspaceState,
         event: &StoredEvent,
@@ -402,7 +434,7 @@ impl NativeService {
         Ok(state)
     }
 
-    fn head_read<T: DeserializeOwned + serde::Serialize, S: ReadSnapshot>(
+    pub(crate) fn head_read<T: DeserializeOwned + serde::Serialize, S: ReadSnapshot>(
         &self,
         snapshot: &S,
         space: &Keyspace,
@@ -856,7 +888,7 @@ impl NativeService {
         Ok(())
     }
 
-    fn head_walk<S: ReadSnapshot>(
+    pub(crate) fn head_walk<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         space: &Keyspace,

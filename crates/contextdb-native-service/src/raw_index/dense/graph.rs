@@ -5,6 +5,7 @@ use contextdb_core::{Modality, RepresentationId, TimestampMicros};
 use contextdb_index::{AnnAlgorithmV2, AnnBuildParametersV2, AnnPartitionSchemeV2};
 use contextdb_index::{AnnPartitionManifestV2, VectorMetric, VectorSpace};
 
+pub(crate) mod prefix_v2;
 mod publication;
 mod query;
 pub(crate) mod segments;

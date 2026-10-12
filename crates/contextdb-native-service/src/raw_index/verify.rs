@@ -191,6 +191,7 @@ impl NativeService {
         let mut segment_budget = super::super::retention::audit_budget();
         let segment_generations =
             self.accepted_dense_segment_generations(snapshot, &mut segment_budget)?;
+        let prefix_generations = self.prefix_base_declarations(snapshot, &mut segment_budget)?;
         let actual = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"raw/")
             .map_err(storage_error)?;
@@ -306,6 +307,14 @@ impl NativeService {
                     segment_generations.get(&(workspace.to_owned(), number)),
                     &mut segment_budget,
                 )?;
+                let prefix_base = prefix_generations.get(&(workspace.to_owned(), number));
+                self.validate_dense_prefix_base_declaration(
+                    snapshot,
+                    workspace,
+                    &generation,
+                    prefix_base,
+                    &mut segment_budget,
+                )?;
                 expected.insert(generation_key(workspace, number), encode(&generation)?);
                 if state
                     .reclaiming
@@ -324,6 +333,14 @@ impl NativeService {
                         )
                         .map_err(storage_error)?
                     {
+                        if row.key[generation_prefix(workspace, number).len()..]
+                            .starts_with(b"dense/prefix-base-v2/")
+                            && generation.dense_prefix_base.is_none()
+                        {
+                            return Err(integrity(
+                                "reclaiming prefix rows lost their accepted owner seal",
+                            ));
+                        }
                         if row.key[generation_prefix(workspace, number).len()..]
                             .starts_with(b"dense/graph/segment")
                             && generation.dense_segments.is_none()
@@ -359,6 +376,20 @@ impl NativeService {
                         expected.insert(row.key, row.value);
                     }
                     continue;
+                }
+                if let Some(receipt) = prefix_base {
+                    for (key, value) in self.reconstruct_prefix_base_rows(
+                        snapshot,
+                        workspace,
+                        receipt,
+                        &mut segment_budget,
+                    )? {
+                        if expected.insert(key, value).is_some() {
+                            return Err(integrity(
+                                "prefix reconstruction overlaps another key family",
+                            ));
+                        }
+                    }
                 }
                 let mut domains = BTreeMap::<String, PolicyDomain>::new();
                 let mut bm25_documents = Vec::new();

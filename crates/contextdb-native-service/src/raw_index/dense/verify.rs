@@ -3,7 +3,7 @@
 use super::*;
 
 impl DenseProjectionReceipt {
-    fn manifest(&self) -> ServiceResult<DenseManifest> {
+    pub(in crate::raw_index) fn manifest(&self) -> ServiceResult<DenseManifest> {
         let manifest = DenseManifest {
             profile: self.profile.clone(),
             profile_digest: self.profile_digest,
@@ -183,7 +183,7 @@ impl NativeService {
         budget: &mut QueryBudget,
     ) -> ServiceResult<bool> {
         let prefix = graph::graph_prefix(workspace, generation);
-        crate::budgeted::metadata(snapshot, budget, |reader| {
+        let graph_present = crate::budgeted::metadata(snapshot, budget, |reader| {
             reader
                 .scan_prefix_page(
                     &self.keyspaces.continuous,
@@ -195,6 +195,29 @@ impl NativeService {
                     },
                 )
                 .map(|page| !page.entries.is_empty())
+                .map_err(storage_error)
+        })?;
+        if graph_present {
+            return Ok(true);
+        }
+        // Shared prefix topology also outlives member rows during paged GC.
+        // Check rows even if a malformed generation has lost its declaration.
+        budget
+            .charge(1, graph::prefix_v2::types::KEY_BYTES)
+            .map_err(budget_error)?;
+        let prefix = graph::prefix_v2::types::prefix_key(workspace, generation)?;
+        crate::budgeted::metadata(snapshot, budget, |reader| {
+            reader
+                .scan_prefix_page(
+                    &self.keyspaces.continuous,
+                    ScanPageRequest {
+                        prefix: &prefix,
+                        start_after: None,
+                        max_entries: 1,
+                        max_bytes: 128 * 1024,
+                    },
+                )
+                .map(|page| !page.entries.is_empty() || page.continuation.is_some())
                 .map_err(storage_error)
         })
     }
@@ -311,7 +334,7 @@ impl NativeService {
         }
     }
 
-    fn check_dense_publication(
+    pub(in crate::raw_index) fn check_dense_publication(
         &self,
         event: &crate::StoredEvent,
         receipt: &DenseProjectionReceipt,

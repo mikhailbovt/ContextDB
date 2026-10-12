@@ -212,6 +212,13 @@ impl NativeService {
         {
             heads.remove(&number);
         }
+        if finished
+            && let Some(bases) = &mut frame.state.prefix_bases
+            && let Some(number) = progress.generation
+        {
+            // Preserve Some(empty): the accepted format cannot downgrade after GC.
+            bases.remove(&number);
+        }
         let digest = canonical_digest(&(&workspace, frame.global_commit, &progress))?;
         self.finish_frame(
             &mut tx,

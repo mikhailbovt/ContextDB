@@ -64,6 +64,9 @@ impl NativeService {
         if generation.authorization_epoch != self.graph_epoch(&snapshot, &workspace, budget)? {
             return Err(stale_index());
         }
+        if generation.dense_prefix_base.is_some() {
+            return Err(stale_index());
+        }
         if generation.dense_graph.is_some() {
             return self.current_graph_receipt(&snapshot, &workspace, &generation, budget);
         }

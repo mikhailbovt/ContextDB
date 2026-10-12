@@ -87,6 +87,9 @@ pub use payload::{
     CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS, NativePayloadKeyInventory,
     NativePayloadPruningProgress,
 };
+pub use raw_index::dense::graph::prefix_v2::types::{
+    DensePrefixBaseManifestV2, DensePrefixBaseReceiptV2, DensePrefixBaseRequestV2,
+};
 pub use raw_index::dense::graph::segments::query::{
     DenseSegmentQueryCompletion, DenseSegmentQueryLimits, DenseSegmentQueryResult,
 };
@@ -287,6 +290,12 @@ struct WorkspaceState {
         deserialize_with = "raw_index::dense::graph::segments::heads::deserialize_heads"
     )]
     segment_heads: Option<BTreeMap<u64, raw_index::dense::graph::segments::types::DirectoryRef>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "raw_index::dense::graph::prefix_v2::heads::deserialize_prefix_bases"
+    )]
+    prefix_bases: Option<BTreeMap<u64, raw_index::dense::graph::prefix_v2::types::PrefixBaseRefV2>>,
 }
 
 impl WorkspaceState {
@@ -297,6 +306,7 @@ impl WorkspaceState {
             latest_global_commit: 0,
             watermarks: Watermarks::default(),
             segment_heads: None,
+            prefix_bases: None,
         }
     }
 }
@@ -423,6 +433,8 @@ struct StoredEvent {
         Option<record_journal::controls::witness::pruning::RecordPruningPublication>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     segment_heads: Option<raw_index::dense::graph::segments::types::SegmentHeadStamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prefix_bases: Option<raw_index::dense::graph::prefix_v2::types::PrefixBaseStampV2>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -902,8 +914,10 @@ impl NativeService {
                 None
             },
             segment_heads: None,
+            prefix_bases: None,
         };
         event.segment_heads = self.segment_head_stamp(&frame.state, &event)?;
+        event.prefix_bases = self.prefix_base_stamp(&frame.state, &event)?;
         event.event_digest = event_digest(&event)?;
         let idempotency = StoredIdempotency {
             schema_version: SCHEMA_VERSION,
@@ -1421,7 +1435,9 @@ impl NativeService {
                 .map_err(|_| integrity("native workspace key is invalid"))?;
             validate_workspace_state(&state, digest)?;
         }
-        self.verify_segment_heads_records(snapshot, &mut retention::audit_budget())?;
+        let mut heads_budget = retention::audit_budget();
+        self.verify_segment_heads_records(snapshot, &mut heads_budget)?;
+        self.verify_prefix_bases_records(snapshot, &mut heads_budget)?;
         self.verify_active_graph_invariants(snapshot)?;
         self.verify_capture_records(snapshot)?;
         self.verify_custody_records(snapshot)?;
@@ -3517,6 +3533,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != raw_index::dense::FEATURE
                 && feature != raw_index::dense::graph::FEATURE
                 && feature != raw_index::dense::graph::segments::types::FEATURE
+                && feature != raw_index::dense::graph::prefix_v2::types::FEATURE
                 && feature != raw_index::GC_FEATURE
                 && feature != raw_index::COPY_FEATURE
                 && feature != raw_index::REMOVAL_FEATURE
@@ -3616,6 +3633,10 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
             .features
             .contains(raw_index::dense::graph::segments::types::FEATURE)
             && !manifest.features.contains(raw_index::dense::graph::FEATURE))
+        || (manifest
+            .features
+            .contains(raw_index::dense::graph::prefix_v2::types::FEATURE)
+            && !manifest.features.contains(raw_index::dense::FEATURE))
         || (manifest.features.contains(retention::PRUNING_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || (manifest.features.contains(assertions::PRUNING_FEATURE)
@@ -3659,6 +3680,7 @@ fn validate_workspace_state(state: &WorkspaceState, digest: &str) -> ServiceResu
         return Err(integrity("native workspace state is invalid"));
     }
     raw_index::dense::graph::segments::heads::validate_segment_heads(state)?;
+    raw_index::dense::graph::prefix_v2::heads::validate_prefix_bases(state)?;
     Ok(())
 }
 

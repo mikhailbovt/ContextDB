@@ -18,10 +18,12 @@ pub(super) const OPERATION: &str = "fixture.hybrid_registry";
 pub(super) const DATABASE: &str = "owned-hybrid-vertical";
 
 pub(super) fn budget() -> QueryBudget {
+    // Positive protocol checks use the same bounded wall allowance as the real
+    // encoder fixture; parallel platform CI does not establish latency quality.
     QueryBudget::new(
         50_000_000,
         512 * 1024 * 1024,
-        Duration::from_secs(60),
+        Duration::from_secs(180),
         Default::default(),
     )
 }

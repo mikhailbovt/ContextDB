@@ -919,9 +919,20 @@ shared allowance. All scored spans participate in global source ranking before
 one dense RRF vote per source. Protected replay records actual per-path work,
 cutoffs and incomplete coverage under `continuous-owned-hybrid-segments-v1`;
 current owner fences remain required around every processing callback. None
-preserves the earlier profile. CLI segment maintenance, bootstrap of an existing
-archive above the base ceiling and scalable routing over every retained ordinal
-remain open; bounded ordinal selection does not establish whole-database recall.
+preserves the earlier profile. CLI segment maintenance and scalable routing over
+every retained ordinal remain open; bounded ordinal selection does not establish
+whole-database recall.
+
+The separate `publish_original_span_prefix_base` maintenance API accepts a genuine
+current dense prefix while preserving the full raw archive totals. Its distinct
+`continuous-raw-span-ann-prefix-v2` format requires 1..4096 whole-plan vectors,
+at most 128 accepted work items and 64 policy cohorts. A native journal proof
+includes prepared removals before exact outbox joins; all construction uses the
+operator's parent budget. Owner roots, retained acceptance and source/shared copy
+verification survive cold retry and paged generation GC. The base remains
+immutable after indexing advances. This family is exclusive with v1 graph bases
+per generation and has no serving, runtime or CLI profile yet. Prefixes above the
+finite bootstrap gates, arbitrary-directory routing and useful recall remain open.
 
 Preparation unions matching ranges across routes before materializing one
 immutable source. Conflicting versions or equal-range digests refuse; the bounded
