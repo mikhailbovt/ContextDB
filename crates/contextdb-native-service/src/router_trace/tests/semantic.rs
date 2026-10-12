@@ -183,7 +183,11 @@ fn assertion_for(
     assertion
 }
 
-fn states(service: &NativeService, source: &CaptureRequest, plan: &mut PrepareContextRequest) {
+pub(super) fn states(
+    service: &NativeService,
+    source: &CaptureRequest,
+    plan: &mut PrepareContextRequest,
+) {
     let known = assertion_for(source, "local-only", 20);
     let first = assertion_for(source, "keep proposal open", 22);
     let second = assertion_for(source, "close proposal", 22);

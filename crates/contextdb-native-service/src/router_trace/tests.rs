@@ -17,6 +17,7 @@ pub(super) use crate::record_sources::tests::{budget, input, publication};
 use crate::{NativeService, encode, history_key};
 
 pub(in crate::router_trace) mod capture;
+mod census;
 mod lifecycle;
 mod lifecycle_v2;
 mod semantic;

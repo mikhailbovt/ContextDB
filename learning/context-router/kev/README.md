@@ -232,3 +232,27 @@ exact attributed sources through the same projection. Opaque generic metadata,
 Node/CodeLocation and arbitrary Structured values refuse before forward. Current
 admission is a check at the processing boundary, not atomic revocation during GPU
 execution. Configuration and hashes grant no private training or export rights.
+
+## Lossless projection prototype
+
+`lossless.py` is a separate v2 codec over the pinned v1 normalizer. It interns
+exact payload text in state-local and trial-local tables, retaining source/tool
+occurrences, supports, full trial semantics and costs. Expansion restores the
+exact v1 normalized record. JSON ceilings remain 64 KiB; short unique records
+can grow. The existing trained bundle and serving worker remain v1.
+
+```text
+python -I lossless_check.py --frozen-dir ABS_KEV_DIRECTORY
+```
+
+Three model-free gates cover round-trip fidelity, repeated occurrences, trial
+isolation and strict refusal. The native `router_trace::tests::census` fixture
+observes real authorized preparation callbacks from fixed public sources. Its
+12 cases share one lineage family and provide sizing witnesses without labels,
+inference, tool execution or accepted reader-dispatch claims. Optional fresh
+output is enabled only by `CONTEXTDB_NATIVE_SEMANTIC_CENSUS_OUTPUT`.
+
+A pinned offline tokenizer census admitted all 30 native callbacks at unchanged
+2048-state/4096-total-row limits (maxima 2040/3290), preserving exact normalized
+semantics. This supports the codec prototype; useful v2 training and native
+learned eviction/cold resume remain open.
