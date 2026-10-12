@@ -239,7 +239,7 @@ execution. Configuration and hashes grant no private training or export rights.
 exact payload text in state-local and trial-local tables, retaining source/tool
 occurrences, supports, full trial semantics and costs. Expansion restores the
 exact v1 normalized record. JSON ceilings remain 64 KiB; short unique records
-can grow. The existing trained bundle and serving worker remain v1.
+can grow. The existing native serving worker remains v1.
 
 ```text
 python -I lossless_check.py --frozen-dir ABS_KEV_DIRECTORY
@@ -314,3 +314,9 @@ python learning/context-router/kev/matched_train.py verify-bundle --corpus ABS -
 Old bundles refuse. Source, corpus, ancestry, artifact byte caps and hashes are
 checked before cold tensor loading; completion requires exact cold logits from
 one existing development base. This trainer does not activate the native worker.
+
+The first bounded matched-v2 run completed 32 updates and strict same-runtime
+and fresh-process cold checks. Development BCE/Brier improved to 0.603/0.200,
+but all 60 known positives were rejected (recall 0, specificity 1). All-zero
+STOP passed; matched utility-change comparisons failed. This diagnostic bundle
+does not meet the scoring gates and is not activated for native retrieval.
