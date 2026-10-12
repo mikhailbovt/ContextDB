@@ -905,6 +905,24 @@ active generation, epoch and removal boundaries remain fixed; changed authority
 refuses the attempt. Proof limits, dense lag, omissions and traversal limits stay
 explicit. Queries perform no graph build, neural forward or original-body census.
 
+`seal_original_span_segment` appends an immutable interval after an accepted
+nonempty base. Each interval covers at most 128 accepted work items, including
+explicit omissions, and 256 vectors from whole source plans. Accepted dense prefixes
+may lag the raw archive; their receipts still bind the actual raw totals. A fixed
+authenticated directory and retained ordinal locators support repeated appends,
+exact historical retry, cold reconstruction and generation GC. The operator
+resolves its CAS predecessor with `original_span_segment_head`.
+
+The explicit embedded `OwnedHybridLimits::segments` profile searches the base,
+up to 64 segment ordinals and a completely authenticated fresh prefix under one
+shared allowance. All scored spans participate in global source ranking before
+one dense RRF vote per source. Protected replay records actual per-path work,
+cutoffs and incomplete coverage under `continuous-owned-hybrid-segments-v1`;
+current owner fences remain required around every processing callback. None
+preserves the earlier profile. CLI segment maintenance, bootstrap of an existing
+archive above the base ceiling and scalable routing over every retained ordinal
+remain open; bounded ordinal selection does not establish whole-database recall.
+
 Preparation unions matching ranges across routes before materializing one
 immutable source. Conflicting versions or equal-range digests refuse; the bounded
 rendering frontier cannot silently discard additional ranges. Protected routing

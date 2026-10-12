@@ -188,6 +188,9 @@ impl NativeService {
         let bm25_generations = self.accepted_raw_bm25_generations(snapshot)?;
         let dense_generations = self.accepted_dense_generations(snapshot)?;
         let graph_generations = self.accepted_dense_graph_generations(snapshot)?;
+        let mut segment_budget = super::super::retention::audit_budget();
+        let segment_generations =
+            self.accepted_dense_segment_generations(snapshot, &mut segment_budget)?;
         let actual = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"raw/")
             .map_err(storage_error)?;
@@ -296,6 +299,13 @@ impl NativeService {
                     &generation,
                     graph_generations.get(&(workspace.to_owned(), number)),
                 )?;
+                self.validate_dense_segment_declaration(
+                    snapshot,
+                    workspace,
+                    &generation,
+                    segment_generations.get(&(workspace.to_owned(), number)),
+                    &mut segment_budget,
+                )?;
                 expected.insert(generation_key(workspace, number), encode(&generation)?);
                 if state
                     .reclaiming
@@ -314,6 +324,14 @@ impl NativeService {
                         )
                         .map_err(storage_error)?
                     {
+                        if row.key[generation_prefix(workspace, number).len()..]
+                            .starts_with(b"dense/graph/segment")
+                            && generation.dense_segments.is_none()
+                        {
+                            return Err(integrity(
+                                "reclaiming segment rows lost their accepted directory",
+                            ));
+                        }
                         if row.key[generation_prefix(workspace, number).len()..]
                             .starts_with(b"dense/graph/")
                             && generation.dense_graph.is_none()
@@ -482,6 +500,14 @@ impl NativeService {
                         workspace,
                         &generation,
                         &mut super::super::retention::audit_budget(),
+                    )?);
+                }
+                if generation.dense_segments.is_some() {
+                    expected.extend(self.reconstruct_dense_segment_rows(
+                        snapshot,
+                        workspace,
+                        &generation,
+                        &mut segment_budget,
                     )?);
                 }
                 for (id, labels) in domains {

@@ -91,13 +91,25 @@ impl NativeService {
                 .ok()
                 .and_then(|key| key.strip_prefix(&prefix));
             if relative.is_some_and(|key| key.starts_with("dense/graph/")) {
-                let owner = self.verify_dense_graph_copy(
-                    snapshot,
-                    generation,
-                    &entry.key,
-                    &entry.value,
-                    budget,
-                )?;
+                let owner = if relative.is_some_and(|key| {
+                    key.starts_with("dense/graph/segment/") || key == "dense/graph/segments/head"
+                }) {
+                    self.verify_dense_segment_copy(
+                        snapshot,
+                        generation,
+                        &entry.key,
+                        &entry.value,
+                        budget,
+                    )?
+                } else {
+                    self.verify_dense_graph_copy(
+                        snapshot,
+                        generation,
+                        &entry.key,
+                        &entry.value,
+                        budget,
+                    )?
+                };
                 if let Some(id) = owner {
                     let control = self.verified_capture_control(snapshot, id, budget)?;
                     if control.receipt.workspace_id.to_string() != workspace_id

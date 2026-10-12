@@ -19,6 +19,10 @@ use serde::{Deserialize, Serialize};
 use super::{RouterEnvelope, trace_error};
 use crate::{integrity, invalid, raw_index::budget_error};
 
+pub(crate) mod segments;
+pub(crate) use segments::HybridSegmentedDenseWitness;
+pub(crate) use segments::event_has_segmented_hybrid;
+
 pub(crate) const HYBRID_OBSERVATION_REVISION: &str = "contextdb.native-owned-hybrid-observation.v1";
 pub(crate) const HYBRID_FEATURE: &str = "continuous-owned-hybrid-query-v1";
 pub(crate) const HYBRID_FUSION_REVISION: &str = "native-source-rrf-equal-k60-micros-v1";
@@ -28,53 +32,61 @@ const MAX_FRAGMENTS: usize = 64;
 /// Feature discovery only. Full protected envelope admission owns its encoding;
 /// this marker neither reconstructs query bodies nor establishes authority.
 pub(crate) fn event_has_hybrid(event: &EventEnvelope) -> ServiceResult<bool> {
-    let EventPayload::Assembly { manifest } = &event.payload else {
+    let Some(pages) = protected_pages(event)? else {
         return Ok(false);
     };
-    let Some(trace) = &manifest.router_trace else {
-        return Ok(false);
-    };
-    trace
-        .validate_for_model_request(manifest)
-        .map_err(|_| integrity("hybrid feature marker has invalid protected pages"))?;
     #[derive(Deserialize)]
     struct Marker {
         #[serde(default)]
         owned_hybrid: Option<serde::de::IgnoredAny>,
     }
-    // Parse borrowed page bytes without concatenating the protected envelope.
-    struct Pages<'a> {
-        pages: &'a [contextdb_core::RouterTracePage],
-        page: usize,
-        offset: usize,
-    }
-    impl Read for Pages<'_> {
-        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
-            if output.is_empty() {
-                return Ok(0);
-            }
-            while let Some(page) = self.pages.get(self.page) {
-                let remaining = &page.text.as_bytes()[self.offset..];
-                if remaining.is_empty() {
-                    self.page += 1;
-                    self.offset = 0;
-                    continue;
-                }
-                let count = output.len().min(remaining.len());
-                output[..count].copy_from_slice(&remaining[..count]);
-                self.offset += count;
-                return Ok(count);
-            }
-            Ok(0)
-        }
-    }
-    let marker: Marker = serde_json::from_reader(Pages {
+    let marker: Marker = serde_json::from_reader(pages)
+        .map_err(|_| integrity("hybrid feature marker has malformed protected JSON"))?;
+    Ok(marker.owned_hybrid.is_some())
+}
+
+fn protected_pages(event: &EventEnvelope) -> ServiceResult<Option<Pages<'_>>> {
+    let EventPayload::Assembly { manifest } = &event.payload else {
+        return Ok(None);
+    };
+    let Some(trace) = &manifest.router_trace else {
+        return Ok(None);
+    };
+    trace
+        .validate_for_model_request(manifest)
+        .map_err(|_| integrity("hybrid feature marker has invalid protected pages"))?;
+    Ok(Some(Pages {
         pages: &trace.pages,
         page: 0,
         offset: 0,
-    })
-    .map_err(|_| integrity("hybrid feature marker has malformed protected JSON"))?;
-    Ok(marker.owned_hybrid.is_some())
+    }))
+}
+
+// Parse borrowed page bytes without concatenating the protected envelope.
+struct Pages<'a> {
+    pages: &'a [contextdb_core::RouterTracePage],
+    page: usize,
+    offset: usize,
+}
+impl Read for Pages<'_> {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        if output.is_empty() {
+            return Ok(0);
+        }
+        while let Some(page) = self.pages.get(self.page) {
+            let remaining = &page.text.as_bytes()[self.offset..];
+            if remaining.is_empty() {
+                self.page += 1;
+                self.offset = 0;
+                continue;
+            }
+            let count = output.len().min(remaining.len());
+            output[..count].copy_from_slice(&remaining[..count]);
+            self.offset += count;
+            return Ok(count);
+        }
+        Ok(0)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -229,6 +241,7 @@ pub(crate) enum HybridCompletion {
     UnprojectedSource,
     CandidateLimit,
     UnsupportedProfile,
+    SegmentSelectionLimit,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -262,6 +275,9 @@ pub(crate) struct HybridRouteObservation {
     /// Exact owner index commitments, retained only inside protected metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dense_witness: Option<HybridDenseWitness>,
+    /// Distinct segmented owner provenance; never a reader control block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segmented_dense_witness: Option<HybridSegmentedDenseWitness>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -341,7 +357,12 @@ impl OwnedHybridObservation {
     fn validate_shape(&self, budget: &mut QueryBudget) -> ServiceResult<()> {
         budget.check().map_err(budget_error)?;
         self.intent.validate()?;
-        if self.revision != HYBRID_OBSERVATION_REVISION
+        let expected_revision = if self.intent.limits.segments.is_some() {
+            segments::SEGMENTED_HYBRID_OBSERVATION_REVISION
+        } else {
+            HYBRID_OBSERVATION_REVISION
+        };
+        if self.revision != expected_revision
             || self.sampler_revision != DENSE_QUERY_REFINEMENT_REVISION
             || self.fusion_revision != HYBRID_FUSION_REVISION
             || self.preflights.is_empty()
@@ -523,7 +544,7 @@ impl OwnedHybridObservation {
             budget
                 .charge(route.admitted_sources.len() as u64 + 1, 1024)
                 .map_err(budget_error)?;
-            route.validate(&self.intent, self.known_at)?;
+            route.validate(&self.intent, self.known_at, budget)?;
             route_union.extend(route.admitted_sources.iter().copied());
             if route_union.len() > MAX_SOURCES {
                 return Err(integrity(
@@ -588,7 +609,12 @@ impl OwnedHybridObservation {
 }
 
 impl HybridRouteObservation {
-    fn validate(&self, intent: &OwnedHybridIntent, known_at: u64) -> ServiceResult<()> {
+    fn validate(
+        &self,
+        intent: &OwnedHybridIntent,
+        known_at: u64,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
         use HybridCompletion as C;
         let valid_completion = match self.route {
             HybridRouteKind::Bm25 => matches!(
@@ -605,6 +631,7 @@ impl HybridRouteObservation {
                     | C::VectorLimit
                     | C::DiscoveryLimit
                     | C::BaseLimit
+                    | C::SegmentSelectionLimit
             ),
             HybridRouteKind::Causal => matches!(
                 self.completion,
@@ -624,30 +651,50 @@ impl HybridRouteObservation {
             ));
         }
         if self.route == HybridRouteKind::Dense {
-            let witness = self.dense_witness.as_ref().ok_or_else(|| {
-                integrity("owned hybrid dense route has no authenticated prefix witness")
-            })?;
-            if [
-                witness.graph_digest,
-                witness.observed_dense_commitment,
-                witness.proven_dense_commitment,
-            ]
-            .into_iter()
-            .any(zero)
-                || witness.base_through > witness.proven_through
-                || witness.proven_through > witness.observed_dense_through
-                || witness.observed_dense_through > witness.raw_through
-                || witness.raw_through > known_at
-                || self.dense_lag != (witness.observed_dense_through < witness.raw_through)
-                || (self.tail_witness_complete
-                    && witness.proven_through != witness.observed_dense_through)
-                || (!self.tail_witness_complete && witness.proven_through != witness.base_through)
-                || (witness.proven_through == witness.observed_dense_through
-                    && witness.proven_dense_commitment != witness.observed_dense_commitment)
-            {
-                return Err(integrity(
-                    "owned hybrid dense witness differs from its proved prefix or current cutoff",
-                ));
+            if intent.limits.segments.is_some() {
+                if self.dense_witness.is_some() {
+                    return Err(integrity(
+                        "segmented hybrid route carries the old base witness",
+                    ));
+                }
+                self.segmented_dense_witness
+                    .as_ref()
+                    .ok_or_else(|| {
+                        integrity("segmented hybrid route has no protected segment witness")
+                    })?
+                    .validate(self, intent, known_at, budget)?;
+            } else {
+                if self.segmented_dense_witness.is_some()
+                    || self.completion == C::SegmentSelectionLimit
+                {
+                    return Err(integrity("old hybrid profile carries segmented provenance"));
+                }
+                let witness = self.dense_witness.as_ref().ok_or_else(|| {
+                    integrity("owned hybrid dense route has no authenticated prefix witness")
+                })?;
+                if [
+                    witness.graph_digest,
+                    witness.observed_dense_commitment,
+                    witness.proven_dense_commitment,
+                ]
+                .into_iter()
+                .any(zero)
+                    || witness.base_through > witness.proven_through
+                    || witness.proven_through > witness.observed_dense_through
+                    || witness.observed_dense_through > witness.raw_through
+                    || witness.raw_through > known_at
+                    || self.dense_lag != (witness.observed_dense_through < witness.raw_through)
+                    || (self.tail_witness_complete
+                        && witness.proven_through != witness.observed_dense_through)
+                    || (!self.tail_witness_complete
+                        && witness.proven_through != witness.base_through)
+                    || (witness.proven_through == witness.observed_dense_through
+                        && witness.proven_dense_commitment != witness.observed_dense_commitment)
+                {
+                    return Err(integrity(
+                        "owned hybrid dense witness differs from its proved prefix or current cutoff",
+                    ));
+                }
             }
             if self.node_reads > u64::from(intent.limits.node_reads)
                 || self.vector_reads > u64::from(intent.limits.vector_reads)
@@ -670,6 +717,7 @@ impl HybridRouteObservation {
                 ));
             }
         } else if self.dense_witness.is_some()
+            || self.segmented_dense_witness.is_some()
             || self.dense_lag
             || self.tail_witness_complete
             || self.tail_scoring_complete

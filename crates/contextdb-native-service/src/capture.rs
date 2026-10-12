@@ -548,6 +548,7 @@ impl NativeService {
                 ));
             }
             let admission = prepared
+                .as_deref_mut()
                 .ok_or_else(|| invalid("original-page recall requires prepared owner capture"))?;
             // Replaying this request authenticates actual storage chunks against
             // the same remaining allowance; no legacy unbudgeted read precedes it.
@@ -588,6 +589,81 @@ impl NativeService {
                 self.enable_capture_extension(
                     &mut transaction,
                     super::router_trace::hybrid::HYBRID_FEATURE,
+                )?;
+            }
+            if let Some(admission) = prepared.as_deref_mut() {
+                // The new streaming marker revalidates bounded protected pages
+                // and may decode its revision string; charge that extra work
+                // and scratch to the existing whole-capture parent first.
+                admission
+                    .budget
+                    .charge(
+                        u64::from(trace.header.byte_length) * 8 + trace.pages.len() as u64 + 1,
+                        u64::from(trace.header.byte_length) * 2 + 4096,
+                    )
+                    .map_err(crate::raw_index::budget_error)?;
+            }
+            if super::router_trace::hybrid::event_has_segmented_hybrid(event)? {
+                if trace.header.version != contextdb_core::ROUTER_REPLAY_TRACE_VERSION {
+                    return Err(integrity(
+                        "segmented hybrid capture requires replay trace v2",
+                    ));
+                }
+                // Capturing an observation does not create an ANN directory or
+                // manufacture its projection declaration. That owner format
+                // must already exist, including after completed generation GC.
+                let format_bytes = if let Some(admission) = prepared {
+                    let bytes = crate::budgeted::read_value(
+                        &transaction,
+                        &self.keyspaces.meta,
+                        META_MANIFEST_KEY,
+                        crate::MAX_JSON_BYTES,
+                        admission.budget,
+                    )?
+                    .ok_or_else(|| integrity("segmented hybrid capture manifest absent"))?;
+                    admission
+                        .budget
+                        .charge(1, bytes.len() as u64 * 8 + 4096)
+                        .map_err(crate::raw_index::budget_error)?;
+                    bytes
+                } else {
+                    // The ordinary capture API retains its existing allowance
+                    // semantics. This new format check still bounds its row.
+                    let page = transaction
+                        .scan_prefix_page(
+                            &self.keyspaces.meta,
+                            contextdb_storage::ScanPageRequest {
+                                prefix: META_MANIFEST_KEY,
+                                start_after: None,
+                                max_entries: 1,
+                                max_bytes: crate::MAX_JSON_BYTES + META_MANIFEST_KEY.len() + 256,
+                            },
+                        )
+                        .map_err(storage_error)?;
+                    page.entries
+                        .into_iter()
+                        .next()
+                        .filter(|entry| entry.key == META_MANIFEST_KEY)
+                        .map(|entry| entry.value)
+                        .ok_or_else(|| integrity("segmented hybrid capture manifest absent"))?
+                };
+                if format_bytes.len() > crate::MAX_JSON_BYTES {
+                    return Err(integrity(
+                        "segmented hybrid capture manifest exceeds its bound",
+                    ));
+                }
+                let format: Manifest = decode(&format_bytes, "segmented hybrid capture manifest")?;
+                if !format
+                    .features
+                    .contains(super::raw_index::dense::graph::segments::types::FEATURE)
+                {
+                    return Err(integrity(
+                        "segmented hybrid capture lacks its native segment declaration",
+                    ));
+                }
+                self.enable_capture_extension(
+                    &mut transaction,
+                    super::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE,
                 )?;
             }
         }
@@ -1102,6 +1178,9 @@ impl NativeService {
                 || manifest
                     .features
                     .contains(super::router_trace::hybrid::HYBRID_FEATURE)
+                || manifest
+                    .features
+                    .contains(super::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE)
             {
                 return Err(integrity(
                     "router trace format lacks an accepted protected capture",
@@ -1255,6 +1334,17 @@ impl NativeService {
         {
             return Err(integrity(
                 "owned hybrid format lacks an accepted protected query capture",
+            ));
+        }
+        if manifest
+            .features
+            .contains(super::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE)
+            && !accepted
+                .iter()
+                .any(|(_, recovery)| recovery.owned_hybrid_segments)
+        {
+            return Err(integrity(
+                "segmented hybrid format lacks an accepted protected query capture",
             ));
         }
         accepted.sort_by_key(|(record, _)| record.receipt.workspace_commit);

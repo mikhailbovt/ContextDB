@@ -4,7 +4,7 @@ use super::*;
 use contextdb_context::{ReferenceTokenizer, VisibleOriginal};
 use contextdb_continuity::PendingModelCall;
 
-fn pending(f: &Fixture) -> (PrepareContextRequest, OwnedHybridIntent) {
+pub(super) fn pending(f: &Fixture) -> (PrepareContextRequest, OwnedHybridIntent) {
     let reader = Reader::new();
     let configured = settings(Arc::clone(&f.encoder));
     let mut runtime = OwnedAgentRuntime::start(

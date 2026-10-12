@@ -521,6 +521,9 @@ pub(super) fn decode_envelope(
     }
     envelope.validate(budget)?;
     let header = &trace.header;
+    // Typed validation already binds the distinct revision to the explicit
+    // intent and exactly one witness. Format discovery separately streams the
+    // original pages; decoding this admitted envelope needs no second scan.
     if header.version != envelope.trace_version()?
         || header.pack_id != envelope.request.pack_id
         || header.router_request_digest != envelope.request.digest

@@ -6,9 +6,40 @@ use contextdb_service::{CaptureDurability, CaptureReceipt, NATIVE_CAPTURE_DOMAIN
 
 const MAX_TAIL_WORK: usize = 128;
 const MAX_TAIL_VECTORS: usize = 256;
-struct Witness {
-    documents: Vec<DenseDocument>,
-    complete: bool,
+pub(super) mod prefix;
+
+/// Owner-private anchor. A future directory constructor must consume an
+/// authenticated head proof; no caller can supply a bare ending manifest.
+pub(super) struct AuthenticatedDensePrefixAnchor<'a> {
+    manifest: &'a DenseManifest,
+}
+impl<'a> AuthenticatedDensePrefixAnchor<'a> {
+    // This wrapper is used only after accepted_graph_receipt and the current
+    // generation/profile envelope have authenticated the retained base.
+    fn accepted_base(receipt: &'a DenseGraphReceipt) -> Self {
+        Self {
+            manifest: &receipt.manifest.dense,
+        }
+    }
+    pub(super) fn accepted_segment(head: &'a segments::verification::VerifiedSegmentHead) -> Self {
+        Self {
+            manifest: head.covered(),
+        }
+    }
+}
+
+pub(super) struct DensePrefixInterval {
+    pub(super) work_items: u32,
+    pub(super) digest: ContentDigest,
+}
+
+pub(super) struct Witness {
+    pub(super) documents: Vec<DenseDocument>,
+    pub(super) complete: bool,
+    /// Only a fully reproduced tracked prefix can supply a sealing commitment.
+    pub(super) interval: Option<DensePrefixInterval>,
+    /// Tracked interval work, including omissions/removals even on a partial proof.
+    pub(super) work_items: u32,
 }
 
 impl NativeService {
@@ -384,7 +415,7 @@ impl NativeService {
         })
     }
 
-    fn admit_tail_generation(
+    pub(super) fn admit_tail_generation(
         &self,
         generation: &Generation,
         graph: &DenseGraphManifest,
@@ -421,7 +452,7 @@ impl NativeService {
             .validate()?;
         Ok(())
     }
-    fn tail_dense_receipt<S: ReadSnapshot>(
+    pub(super) fn tail_dense_receipt<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -547,7 +578,7 @@ impl NativeService {
         }
         self.tail_raw_lag(&current, workspace, generation.through, budget)
     }
-    fn tail_raw_lag<S: ReadSnapshot>(
+    pub(super) fn tail_raw_lag<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -628,128 +659,37 @@ impl NativeService {
         max_work: usize,
         budget: &mut QueryBudget,
     ) -> ServiceResult<Witness> {
-        let latest = generation.dense.as_ref().ok_or_else(stale_index)?;
-        budget
-            .charge(1, 8192 + max_work as u64 * 512)
-            .map_err(budget_error)?;
-        let mut witness = receipt.manifest.dense.clone();
-        let mut documents = Vec::new();
-        if witness == *latest {
-            return Ok(Witness {
-                documents,
-                complete: true,
-            });
-        }
-        let prefix = format!("outbox/{workspace}/").into_bytes();
-        let mut after = prefix.clone();
-        after.extend_from_slice(&witness.through.to_be_bytes());
-        let page = crate::budgeted::metadata(snapshot, budget, |r| {
-            r.scan_prefix_page(
-                &self.keyspaces.continuous,
-                ScanPageRequest {
-                    prefix: &prefix,
-                    start_after: Some(&after),
-                    max_entries: max_work,
-                    max_bytes: 256 * 1024,
-                },
-            )
-            .map_err(storage_error)
-        })?;
-        let mut last = witness.through;
-        let mut beyond = false;
-        for row in page.entries {
-            budget.charge(1, 1024).map_err(budget_error)?;
-            let work: crate::capture::CaptureWork = decode(&row.value, "dense tail accepted work")?;
-            if row.key != crate::capture::work_key(workspace, work.workspace_commit)
-                || work.workspace_commit <= last
-            {
-                return Err(integrity("dense tail outbox identity or order differs"));
-            }
-            last = work.workspace_commit;
-            if work.workspace_commit > latest.through {
-                beyond = true;
-                break;
-            }
-            let (captured, recovery) =
-                self.capture_recovery_metadata(snapshot, work.event_id, budget)?;
-            if recovery.is_none()
-                || work.recovery_digest.is_none()
-                || self.capture_work_for_receipt_with_budget(snapshot, &captured, budget)? != work
-            {
-                return Err(integrity("dense tail accepted control differs"));
-            }
-            self.tail_capture_publication(snapshot, workspace, &captured, &work, budget)?;
-            if self.source_prepared_at(
-                snapshot,
-                workspace,
-                work.event_id,
-                generation.removal_through,
-                budget,
-            )? {
-                continue;
-            }
-            let doc: DenseDocument = self
-                .graph_read(
-                    snapshot,
-                    &self.keyspaces.continuous,
-                    &document_key(workspace, generation.number, work.event_id),
-                    budget,
-                )?
-                .ok_or_else(|| integrity("tail tagged document absent"))?;
-            budget
-                .charge(
-                    1,
-                    8192 + doc.spans.len() as u64 * 1024
-                        + doc
-                            .source
-                            .source_version
-                            .as_ref()
-                            .map_or(0, |s| s.len() as u64 * 8),
-                )
-                .map_err(budget_error)?;
-            self.check_dense_document_token(&doc)?;
-            if doc.source.event_id != work.event_id
-                || doc.event_digest != work.event_digest
-                || doc.commit != work.workspace_commit
-                || doc.profile_digest != latest.profile_digest
-                || doc.source.payload_digest != captured.payload_digest
-                || doc.spans.len() > MAX_SOURCE_SPANS
-                || (doc.omission.is_some() && !doc.spans.is_empty())
-                || (doc.omission.is_none() && doc.spans.is_empty())
-                || doc.spans.iter().any(|s| {
-                    s.span.event_id != doc.source.event_id
-                        || Some(s.span.payload_digest) != doc.source.payload_digest
-                        || s.span.start >= s.span.end
-                        || doc
-                            .source
-                            .byte_length
-                            .is_none_or(|length| s.span.end > length)
-                })
-            {
-                return Err(integrity(
-                    "tail document source/version or exact spans differ",
-                ));
-            }
-            witness.accept(&doc)?;
-            documents.push(doc);
-        }
-        let complete = beyond || last >= latest.through || page.continuation.is_none();
-        if !complete {
-            return Ok(Witness {
-                documents: Vec::new(),
-                complete: false,
-            });
-        }
-        witness.through = latest.through;
-        if witness != *latest {
-            return Err(integrity(
-                "dense tail complete prefix witness differs from accepted latest manifest",
-            ));
-        }
-        Ok(Witness {
-            documents,
-            complete: true,
-        })
+        self.dense_prefix_witness(
+            snapshot,
+            workspace,
+            generation,
+            AuthenticatedDensePrefixAnchor::accepted_base(receipt),
+            max_work,
+            false,
+            budget,
+        )
+    }
+
+    /// Internal first-seal seam. The caller has already authenticated this base
+    /// and the latest current generation/dense receipt under the same parent.
+    pub(super) fn tracked_base_dense_prefix_witness<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+        generation: &Generation,
+        receipt: &DenseGraphReceipt,
+        max_work: usize,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<Witness> {
+        self.dense_prefix_witness(
+            snapshot,
+            workspace,
+            generation,
+            AuthenticatedDensePrefixAnchor::accepted_base(receipt),
+            max_work,
+            true,
+            budget,
+        )
     }
     fn tail_capture_publication<S: ReadSnapshot>(
         &self,
@@ -808,7 +748,11 @@ impl NativeService {
     }
 }
 
-fn tail_cosine(left: &[f32], right: &[f32], budget: &mut QueryBudget) -> ServiceResult<f32> {
+pub(super) fn tail_cosine(
+    left: &[f32],
+    right: &[f32],
+    budget: &mut QueryBudget,
+) -> ServiceResult<f32> {
     if left.len() != right.len() {
         return Err(integrity("tail score dimensions differ"));
     }

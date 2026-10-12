@@ -140,6 +140,7 @@ impl NativeService {
         }
         let base: Generation = decode(&m.source_generation, "graph frozen raw generation")?;
         if base.dense_graph.is_some()
+            || base.dense_segments.is_some()
             || base.number != m.generation
             || base.dense.as_ref() != Some(&m.dense)
             || base.authorization_epoch != m.authorization_epoch

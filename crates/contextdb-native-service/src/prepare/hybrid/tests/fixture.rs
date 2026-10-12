@@ -331,7 +331,7 @@ impl ReaderAdapter for Reader {
             family: "controlled-contract-fixture".into(),
             tokenizer_id: ReferenceTokenizer::ID.into(),
             renderer: RendererKind::Compact,
-            max_context_tokens: 32000,
+            max_context_tokens: 64000,
             reserved_output_tokens: 4000,
             preferred_structured_format: StructuredFormat::CompactText,
             supports_tool_results: true,
@@ -443,22 +443,25 @@ impl ExternalTool for CueTool {
 }
 
 pub(super) fn settings(encoder: Arc<Encoder>) -> RuntimeSettings {
+    // This 64K scripted-reader fixture budgets for the complete <=20-source
+    // fusion shortlist. Constant controlled vectors provide no relevance
+    // utility; neither backend proves a main-LLM semantic selection benefit.
     RuntimeSettings {
         control: vec![],
         purpose: PackPurpose::Conversation,
         memory_budget: ContextBudgets {
-            hard_tokens: 14000,
-            soft_tokens: 12000,
+            hard_tokens: 52000,
+            soft_tokens: 48000,
             max_blocks: 64,
             max_evidence_blocks: 128,
-            max_raw_evidence_tokens: 10000,
-            max_history_tokens: 10000,
-            max_conflict_tokens: 10000,
+            max_raw_evidence_tokens: 40000,
+            max_history_tokens: 40000,
+            max_conflict_tokens: 40000,
             max_serialized_bytes: 2 * 1024 * 1024,
             max_selection_evaluations: 128,
         },
         outgoing_budget: OutgoingBudget {
-            max_input_tokens: 27000,
+            max_input_tokens: 59000,
             safety_tokens: 1000,
             max_wire_bytes: 2 * 1024 * 1024,
         },

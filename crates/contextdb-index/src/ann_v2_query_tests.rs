@@ -13,6 +13,7 @@ enum Refusal {
     Stale,
     Missing,
     NotAdmitted,
+    Observation,
 }
 impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -133,6 +134,62 @@ impl AnnPartitionQueryReaderV2 for Reader {
         self.charge(1, bytes as u64)?;
         self.vector_reads.push(id);
         Ok(self.vectors[&id].clone())
+    }
+}
+
+struct ObservingReader {
+    inner: Reader,
+    observations: Vec<(RepresentationId, f32)>,
+    refuse: Option<RepresentationId>,
+}
+impl AnnPartitionQueryReaderV2 for ObservingReader {
+    type Error = Refusal;
+    fn charge(&mut self, work: u64, bytes: u64) -> Result<(), Refusal> {
+        self.inner.charge(work, bytes)
+    }
+    fn acknowledge_partition(
+        &mut self,
+        partition: &AnnPartitionManifestV2,
+        space: &VectorSpace,
+    ) -> Result<(), Refusal> {
+        self.inner.acknowledge_partition(partition, space)
+    }
+    fn admit_member(
+        &mut self,
+        partition: &AnnPartitionManifestV2,
+        id: RepresentationId,
+    ) -> Result<(), Refusal> {
+        self.inner.admit_member(partition, id)
+    }
+    fn read_node(
+        &mut self,
+        request: AnnObjectReadRequestV2<'_>,
+    ) -> Result<AnnObjectReadResponseV2, Refusal> {
+        self.inner.read_node(request)
+    }
+    fn read_vector(
+        &mut self,
+        id: RepresentationId,
+        dimensions: usize,
+        max_bytes: usize,
+    ) -> Result<Vec<f32>, Refusal> {
+        self.inner.read_vector(id, dimensions, max_bytes)
+    }
+    fn observe_score(&mut self, id: RepresentationId, score: f32) -> Result<(), Refusal> {
+        assert!(
+            score.is_finite(),
+            "only validated scores reach the callback"
+        );
+        assert_eq!(self.inner.vector_reads.last(), Some(&id));
+        assert!(self.inner.admitted.contains(&id));
+        if self.refuse == Some(id) {
+            return Err(Refusal::Observation);
+        }
+        // The fixture preallocates this recording buffer outside the operation,
+        // allowing an exact comparison with the default callback's kernel fees.
+        assert!(self.observations.len() < self.observations.capacity());
+        self.observations.push((id, score));
+        Ok(())
     }
 }
 
@@ -323,6 +380,144 @@ fn complete_traversal_reuses_scores_and_respects_the_declared_metric() {
         [id(1), id(2)],
         "duplicate edge scores stay cached"
     );
+}
+
+#[test]
+fn score_observer_retains_visited_vectors_outside_the_beam_once_across_layers() {
+    let rows = [
+        (1, [3.0, 0.0], vec![vec![2, 3], vec![2, 3]]),
+        (2, [2.0, 0.0], vec![vec![1], vec![1]]),
+        (3, [1.0, 0.0], vec![vec![1], vec![1]]),
+    ];
+    let (inner, partition, space) = fixture(&rows, VectorMetric::DotProduct);
+    let mut observing = ObservingReader {
+        inner,
+        observations: Vec::with_capacity(rows.len()),
+        refuse: None,
+    };
+    let narrow = AnnPartitionQueryLimitsV2 {
+        ef_search: 1,
+        ..limits()
+    };
+    let result = search_ann_partition_v2(
+        &mut observing,
+        &partition,
+        &space,
+        AnnPartitionQueryV2 {
+            values: &[1.0, 0.0],
+            limit: 1,
+        },
+        narrow,
+    )
+    .expect("all actual scored observations");
+    assert_eq!(
+        result.hits,
+        [AnnPartitionHitV2 {
+            representation_id: id(1),
+            score: 3.0
+        }]
+    );
+    assert_eq!(
+        observing.observations,
+        [(id(1), 3.0), (id(2), 2.0), (id(3), 1.0)]
+    );
+    assert_eq!(
+        observing.inner.node_reads,
+        [id(1), id(1)],
+        "upper then level zero"
+    );
+    assert_eq!(observing.inner.vector_reads, [id(1), id(2), id(3)]);
+    assert_eq!(
+        observing.observations.len() as u64,
+        result.trace.vector_reads
+    );
+    assert_eq!(result.trace.discovered, 3);
+    assert_eq!(result.completion, AnnPartitionQueryCompletionV2::Complete);
+
+    let (mut legacy, partition, space) = fixture(&rows, VectorMetric::DotProduct);
+    let legacy_result = search_ann_partition_v2(
+        &mut legacy,
+        &partition,
+        &space,
+        AnnPartitionQueryV2 {
+            values: &[1.0, 0.0],
+            limit: 1,
+        },
+        narrow,
+    )
+    .expect("default observer preserves the existing result");
+    assert_eq!(legacy_result, result);
+    assert_eq!(legacy.node_reads, observing.inner.node_reads);
+    assert_eq!(legacy.vector_reads, observing.inner.vector_reads);
+    assert_eq!(legacy.remaining_work, observing.inner.remaining_work);
+    assert_eq!(legacy.remaining_bytes, observing.inner.remaining_bytes);
+}
+
+#[test]
+fn score_observer_refusal_discards_the_result_and_invalid_vectors_are_never_observed() {
+    let rows = [
+        (1, [3.0, 0.0], vec![vec![2, 3]]),
+        (2, [2.0, 0.0], vec![vec![1]]),
+        (3, [1.0, 0.0], vec![vec![1]]),
+    ];
+    let (inner, partition, space) = fixture(&rows, VectorMetric::DotProduct);
+    let mut observing = ObservingReader {
+        inner,
+        observations: Vec::with_capacity(rows.len()),
+        refuse: Some(id(2)),
+    };
+    assert!(matches!(
+        search_ann_partition_v2(
+            &mut observing,
+            &partition,
+            &space,
+            AnnPartitionQueryV2 {
+                values: &[1.0, 0.0],
+                limit: 1
+            },
+            AnnPartitionQueryLimitsV2 {
+                ef_search: 1,
+                ..limits()
+            },
+        ),
+        Err(AnnPartitionQueryErrorV2::Reader(Refusal::Observation))
+    ));
+    assert_eq!(observing.observations, [(id(1), 3.0)]);
+    assert_eq!(
+        observing.inner.vector_reads,
+        [id(1), id(2)],
+        "no read after refusal"
+    );
+    assert_eq!(
+        observing.inner.acknowledgements, 1,
+        "no final successful acknowledgement"
+    );
+
+    let (mut inner, partition, space) = fixture(&rows, VectorMetric::DotProduct);
+    inner.vectors.get_mut(&id(1)).expect("fixture vector")[0] = f32::NAN;
+    let mut observing = ObservingReader {
+        inner,
+        observations: Vec::with_capacity(rows.len()),
+        refuse: None,
+    };
+    assert!(matches!(
+        search_ann_partition_v2(
+            &mut observing,
+            &partition,
+            &space,
+            AnnPartitionQueryV2 {
+                values: &[1.0, 0.0],
+                limit: 1
+            },
+            AnnPartitionQueryLimitsV2 {
+                ef_search: 1,
+                ..limits()
+            },
+        ),
+        Err(AnnPartitionQueryErrorV2::Vector(_))
+    ));
+    assert!(observing.observations.is_empty());
+    assert_eq!(observing.inner.vector_reads, [id(1)]);
 }
 
 #[test]

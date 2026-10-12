@@ -91,6 +91,9 @@ pub(super) struct Generation {
     /// the separate bounded-tail path proves extensions before serving them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dense_graph: Option<dense::DenseGraphManifest>,
+    /// Accepted directory reference; full immutable delta declarations survive GC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dense_segments: Option<dense::graph::segments::types::DirectoryRef>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -285,6 +288,7 @@ impl NativeService {
                 bm25: request_bm25.then(bm25::Bm25Profile::fixed),
                 dense: None,
                 dense_graph: None,
+                dense_segments: None,
             }
         } else {
             let number = state

@@ -14,6 +14,7 @@ use std::sync::{
 mod fixture;
 mod real;
 mod refusals;
+mod segments;
 use fixture::*;
 
 fn request_for_output(
@@ -245,7 +246,21 @@ fn run_vertical(f: Fixture) -> Arc<Encoder> {
         2,
         "one query forward per prepare, no probe inference"
     );
-    assert!(second.reply.text.contains(SILVER));
+    let (second_request, second_envelope) =
+        accepted_envelope(&f.native, &f.context, &second.output_receipt, &f.encoder);
+    assert!(
+        second.reply.text.contains(SILVER),
+        "actual after-tool reply {:?}; silver {:?}; observation {:?}; delivered messages {:?}; actual wire {:?}",
+        second.reply.text,
+        f.silver,
+        second_envelope.owned_hybrid,
+        second.prepared.messages,
+        reader
+            .wires
+            .lock()
+            .expect("actual captured reader wires")
+            .get(1)
+    );
     let tool_source = runtime
         .checkpoint()
         .groups
@@ -257,8 +272,6 @@ fn run_vertical(f: Fixture) -> Arc<Encoder> {
         .expect("actually captured tool result")
         .source
         .event_id;
-    let (second_request, second_envelope) =
-        accepted_envelope(&f.native, &f.context, &second.output_receipt, &f.encoder);
     let second_observation = second_envelope
         .owned_hybrid
         .as_ref()

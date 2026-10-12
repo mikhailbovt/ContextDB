@@ -76,6 +76,10 @@ pub(in super::super) struct CaptureRecovery {
     /// control metadata; it is not an execution or source-access grant.
     #[serde(default, skip_serializing_if = "is_false")]
     pub(in super::super) owned_hybrid: bool,
+    /// The distinct segmented encoding remains declared after body pruning.
+    /// This marker grants neither current source access nor query completeness.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(in super::super) owned_hybrid_segments: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -134,6 +138,23 @@ impl CaptureRecovery {
         {
             return Err(integrity(
                 "capture recovery owned hybrid feature is absent or incompatible",
+            ));
+        }
+        if self.owned_hybrid_segments
+            && (!self.owned_hybrid
+                || !matches!(self.payload.shape, PayloadShape::Assembly)
+                || !self.router_trace.as_ref().is_some_and(|header| {
+                    header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                })
+                || !manifest
+                    .features
+                    .contains(crate::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE)
+                || !manifest
+                    .features
+                    .contains(crate::raw_index::dense::graph::segments::types::FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery segmented hybrid feature is absent or incompatible",
             ));
         }
         if (matches!(self.provenance, Some(EventProvenance::ModelOutput { .. }))
@@ -266,6 +287,7 @@ impl CaptureRecovery {
             router_trace,
             original_page_recall: matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.original_page_recall),
             owned_hybrid: crate::router_trace::hybrid::event_has_hybrid(event)?,
+            owned_hybrid_segments: crate::router_trace::hybrid::event_has_segmented_hybrid(event)?,
         };
         if encode(&metadata)?.len() > MAX_RECOVERY_BYTES {
             return Err(exhausted("capture recovery metadata exceeds 1 MiB"));

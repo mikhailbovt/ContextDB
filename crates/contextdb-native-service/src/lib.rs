@@ -87,6 +87,14 @@ pub use payload::{
     CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS, NativePayloadKeyInventory,
     NativePayloadPruningProgress,
 };
+pub use raw_index::dense::graph::segments::query::{
+    DenseSegmentQueryCompletion, DenseSegmentQueryLimits, DenseSegmentQueryResult,
+};
+pub use raw_index::dense::graph::segments::types::{
+    DenseDeltaManifest, DenseDeltaReceipt, DenseSegmentDirectoryHead, DenseSegmentDirectoryReceipt,
+    DenseSegmentPublication, DirectoryRef as DenseSegmentDirectoryRef,
+    SealRequest as DenseSegmentSealRequest,
+};
 pub use raw_index::dense::graph::{
     DenseGraphHit, DenseGraphManifest, DenseGraphQueryLimits, DenseGraphQueryResult,
     DenseGraphReceipt, DenseGraphTailCompletion, DenseGraphTailQueryLimits,
@@ -273,6 +281,12 @@ struct WorkspaceState {
     workspace_digest: String,
     latest_global_commit: u64,
     watermarks: Watermarks,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "raw_index::dense::graph::segments::heads::deserialize_heads"
+    )]
+    segment_heads: Option<BTreeMap<u64, raw_index::dense::graph::segments::types::DirectoryRef>>,
 }
 
 impl WorkspaceState {
@@ -282,6 +296,7 @@ impl WorkspaceState {
             workspace_digest,
             latest_global_commit: 0,
             watermarks: Watermarks::default(),
+            segment_heads: None,
         }
     }
 }
@@ -406,6 +421,8 @@ struct StoredEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_record_pruning:
         Option<record_journal::controls::witness::pruning::RecordPruningPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    segment_heads: Option<raw_index::dense::graph::segments::types::SegmentHeadStamp>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -748,7 +765,8 @@ impl NativeService {
             .global_head(transaction)?
             .checked_add(1)
             .ok_or_else(|| exhausted("native global commit sequence is exhausted"))?;
-        let mut state = self.workspace_state(transaction, workspace_id)?;
+        let mut state = self.segment_frame_workspace(transaction, workspace_id)?;
+        self.admit_segment_head_predecessor(transaction, &state, global_commit - 1)?;
         let workspace_commit = state
             .watermarks
             .journal
@@ -883,7 +901,9 @@ impl NativeService {
             } else {
                 None
             },
+            segment_heads: None,
         };
+        event.segment_heads = self.segment_head_stamp(&frame.state, &event)?;
         event.event_digest = event_digest(&event)?;
         let idempotency = StoredIdempotency {
             schema_version: SCHEMA_VERSION,
@@ -1401,6 +1421,7 @@ impl NativeService {
                 .map_err(|_| integrity("native workspace key is invalid"))?;
             validate_workspace_state(&state, digest)?;
         }
+        self.verify_segment_heads_records(snapshot, &mut retention::audit_budget())?;
         self.verify_active_graph_invariants(snapshot)?;
         self.verify_capture_records(snapshot)?;
         self.verify_custody_records(snapshot)?;
@@ -3484,6 +3505,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != router_trace::TRACE_FEATURE
                 && feature != router_trace::TRACE_REPLAY_FEATURE
                 && feature != router_trace::hybrid::HYBRID_FEATURE
+                && feature != router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE
                 && feature != owned::OWNED_FEATURE
                 && feature != owned::TOOL_PAGES_FEATURE
                 && feature != owned::PAGE_RECALL_FEATURE
@@ -3494,6 +3516,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != raw_index::bm25::FEATURE
                 && feature != raw_index::dense::FEATURE
                 && feature != raw_index::dense::graph::FEATURE
+                && feature != raw_index::dense::graph::segments::types::FEATURE
                 && feature != raw_index::GC_FEATURE
                 && feature != raw_index::COPY_FEATURE
                 && feature != raw_index::REMOVAL_FEATURE
@@ -3535,6 +3558,15 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 || !manifest.features.contains(owned::OWNED_FEATURE)))
         || (manifest.features.contains(owned::TOOL_PAGES_FEATURE)
             && !manifest.features.contains(owned::OWNED_FEATURE))
+        || (manifest
+            .features
+            .contains(router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE)
+            && (!manifest
+                .features
+                .contains(router_trace::hybrid::HYBRID_FEATURE)
+                || !manifest
+                    .features
+                    .contains(raw_index::dense::graph::segments::types::FEATURE)))
         || (manifest.features.contains(owned::PAGE_RECALL_FEATURE)
             && (!manifest.features.contains(owned::TOOL_PAGES_FEATURE)
                 || !manifest.features.contains(payload::SOURCE_FEATURE)
@@ -3580,6 +3612,10 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 || !manifest.features.contains(custody::CUSTODY_FEATURE)))
         || (manifest.features.contains(raw_index::dense::graph::FEATURE)
             && !manifest.features.contains(raw_index::dense::FEATURE))
+        || (manifest
+            .features
+            .contains(raw_index::dense::graph::segments::types::FEATURE)
+            && !manifest.features.contains(raw_index::dense::graph::FEATURE))
         || (manifest.features.contains(retention::PRUNING_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || (manifest.features.contains(assertions::PRUNING_FEATURE)
@@ -3622,6 +3658,7 @@ fn validate_workspace_state(state: &WorkspaceState, digest: &str) -> ServiceResu
     {
         return Err(integrity("native workspace state is invalid"));
     }
+    raw_index::dense::graph::segments::heads::validate_segment_heads(state)?;
     Ok(())
 }
 

@@ -84,6 +84,11 @@ impl HybridConfig {
             ));
         }
         self.limits.validate()?;
+        if self.limits.segments.is_some() {
+            return Err(invalid(
+                "segmented queries require an embedded maintenance host; CLI segment maintenance is not available yet",
+            ));
+        }
         self.embedding_profile()?.validate()?;
         Ok(())
     }

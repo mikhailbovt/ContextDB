@@ -205,7 +205,13 @@ impl NativeService {
             encode(&state)?,
         )
         .map_err(storage_error)?;
-        let frame = self.begin_frame(&tx, &context.request.workspace_id, false)?;
+        let mut frame = self.begin_frame(&tx, &context.request.workspace_id, false)?;
+        if finished
+            && let Some(heads) = &mut frame.state.segment_heads
+            && let Some(number) = progress.generation
+        {
+            heads.remove(&number);
+        }
         let digest = canonical_digest(&(&workspace, frame.global_commit, &progress))?;
         self.finish_frame(
             &mut tx,

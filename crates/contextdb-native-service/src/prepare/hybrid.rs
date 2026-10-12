@@ -3,6 +3,7 @@
 use super::fusion::{SourceRoute, SourceRouteInput};
 use super::*;
 use crate::owned::OwnedQueryAdmission;
+use crate::router_trace::hybrid::segments::SEGMENTED_HYBRID_OBSERVATION_REVISION;
 use crate::router_trace::hybrid::{
     HYBRID_OBSERVATION_REVISION, HybridCompletion, HybridDenseWitness, HybridPreflightObservation,
     HybridRouteKind, HybridRouteObservation, HybridRouteRank, HybridSelectedSource,
@@ -25,12 +26,18 @@ pub(super) struct OwnedHybridGuard {
     fence: PrepareFence,
     profile: TextEmbeddingProfile,
     graph_digest: ContentDigest,
+    segmented_view:
+        Option<crate::raw_index::dense::graph::segments::query::VerifiedSegmentQueryView>,
 }
 impl std::fmt::Debug for OwnedHybridGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OwnedHybridGuard")
             .field("checkpoint_digest", &self.checkpoint_digest)
             .field("graph_digest", &self.graph_digest)
+            .field(
+                "segmented_view",
+                &self.segmented_view.as_ref().map(|view| view.identity()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -120,66 +127,127 @@ impl NativeService {
         }
         self.check_owned_hybrid_guard(&query.guard, budget)?;
         let limits = query.intent().limits;
-        let mut dense = self.search_original_spans_with_tail(
-            &request.context,
-            &query.cues().text,
-            &query.embedded,
-            crate::DenseGraphTailQueryLimits {
-                graph: crate::DenseGraphQueryLimits {
-                    limit: limits.sources as usize,
-                    max_node_reads: limits.node_reads as usize,
-                    max_vector_reads: limits.vector_reads as usize,
-                    max_discovered: limits.discovered as usize,
-                    ef_search: limits.ef_search as usize,
+        let (dense_hits, dense_frontier, dense_observation) = if let Some(segments) =
+            limits.segments
+        {
+            let mut dense = self.search_original_spans_segmented(
+                &request.context,
+                &query.cues().text,
+                &query.embedded,
+                crate::DenseSegmentQueryLimits {
+                    graph: crate::DenseGraphQueryLimits {
+                        limit: limits.sources as usize,
+                        max_node_reads: limits.node_reads as usize,
+                        max_vector_reads: limits.vector_reads as usize,
+                        max_discovered: limits.discovered as usize,
+                        ef_search: limits.ef_search as usize,
+                    },
+                    max_segments: segments.max_segments as usize,
+                    max_tail_work: limits.tail_work as usize,
+                    max_tail_vectors: limits.tail_vectors as usize,
                 },
-                max_tail_work: limits.tail_work as usize,
-                max_tail_vectors: limits.tail_vectors as usize,
-            },
-            budget,
-        )?;
-        // Move exact source/span observations; vectors and compact ANN IDs are
-        // already authenticated by the owner query and never grant disclosure.
-        budget
-            .charge(1, dense.hits.len() as u64 * 512)
-            .map_err(budget_error)?;
-        let dense_hits = std::mem::take(&mut dense.hits)
-            .into_iter()
-            .map(|hit| contextdb_recall::IndexedHit {
-                source: hit.source,
-                matches: vec![hit.span],
-            })
-            .collect::<Vec<_>>();
-        let dense_frontier = std::mem::take(&mut dense.admitted_sources);
-        let mut dense_observation =
-            route_observation(HybridRouteKind::Dense, &dense_frontier, &dense_hits, budget)?;
-        dense_observation.completion = match dense.completion {
-            crate::DenseGraphTailCompletion::Complete => HybridCompletion::Complete,
-            crate::DenseGraphTailCompletion::DenseLag => HybridCompletion::DenseLag,
-            crate::DenseGraphTailCompletion::RawLag => HybridCompletion::RawLag,
-            crate::DenseGraphTailCompletion::TailWorkLimit => HybridCompletion::TailWorkLimit,
-            crate::DenseGraphTailCompletion::TailVectorLimit => HybridCompletion::TailVectorLimit,
-            crate::DenseGraphTailCompletion::VectorLimit => HybridCompletion::VectorLimit,
-            crate::DenseGraphTailCompletion::DiscoveryLimit => HybridCompletion::DiscoveryLimit,
-            crate::DenseGraphTailCompletion::BaseLimit => HybridCompletion::BaseLimit,
+                budget,
+            )?;
+            let hits = segmented_source_hits(std::mem::take(&mut dense.hits), budget)?;
+            let frontier = std::mem::take(&mut dense.admitted_sources);
+            let mut observation =
+                route_observation(HybridRouteKind::Dense, &frontier, &hits, budget)?;
+            observation.completion = match dense.completion {
+                crate::DenseSegmentQueryCompletion::Complete => HybridCompletion::Complete,
+                crate::DenseSegmentQueryCompletion::SegmentSelectionLimit => {
+                    HybridCompletion::SegmentSelectionLimit
+                }
+                crate::DenseSegmentQueryCompletion::TailWorkLimit => {
+                    HybridCompletion::TailWorkLimit
+                }
+                crate::DenseSegmentQueryCompletion::TailVectorLimit => {
+                    HybridCompletion::TailVectorLimit
+                }
+                crate::DenseSegmentQueryCompletion::NodeLimit => HybridCompletion::BaseLimit,
+                crate::DenseSegmentQueryCompletion::VectorLimit => HybridCompletion::VectorLimit,
+                crate::DenseSegmentQueryCompletion::DiscoveryLimit => {
+                    HybridCompletion::DiscoveryLimit
+                }
+                crate::DenseSegmentQueryCompletion::DenseLag => HybridCompletion::DenseLag,
+                crate::DenseSegmentQueryCompletion::RawLag => HybridCompletion::RawLag,
+            };
+            observation.source_coverage_incomplete = dense.permitted_tail_omissions
+                || dense.completion != crate::DenseSegmentQueryCompletion::Complete;
+            observation.raw_lag = dense.raw_lag;
+            observation.dense_lag = dense.dense_lag;
+            observation.tail_witness_complete = dense.tail_witness_complete;
+            observation.tail_scoring_complete = dense.tail_scoring_complete;
+            observation.node_reads = dense.node_reads;
+            observation.vector_reads = dense.vector_reads;
+            observation.discovered = dense.discovered;
+            observation.tail_vector_reads = dense.tail_vector_reads;
+            observation.segmented_dense_witness = Some(dense.witness);
+            (hits, frontier, observation)
+        } else {
+            let mut dense = self.search_original_spans_with_tail(
+                &request.context,
+                &query.cues().text,
+                &query.embedded,
+                crate::DenseGraphTailQueryLimits {
+                    graph: crate::DenseGraphQueryLimits {
+                        limit: limits.sources as usize,
+                        max_node_reads: limits.node_reads as usize,
+                        max_vector_reads: limits.vector_reads as usize,
+                        max_discovered: limits.discovered as usize,
+                        ef_search: limits.ef_search as usize,
+                    },
+                    max_tail_work: limits.tail_work as usize,
+                    max_tail_vectors: limits.tail_vectors as usize,
+                },
+                budget,
+            )?;
+            // Move exact source/span observations; vectors and compact ANN IDs are
+            // already authenticated by the owner query and never grant disclosure.
+            budget
+                .charge(1, dense.hits.len() as u64 * 512)
+                .map_err(budget_error)?;
+            let dense_hits = std::mem::take(&mut dense.hits)
+                .into_iter()
+                .map(|hit| contextdb_recall::IndexedHit {
+                    source: hit.source,
+                    matches: vec![hit.span],
+                })
+                .collect::<Vec<_>>();
+            let dense_frontier = std::mem::take(&mut dense.admitted_sources);
+            let mut dense_observation =
+                route_observation(HybridRouteKind::Dense, &dense_frontier, &dense_hits, budget)?;
+            dense_observation.completion = match dense.completion {
+                crate::DenseGraphTailCompletion::Complete => HybridCompletion::Complete,
+                crate::DenseGraphTailCompletion::DenseLag => HybridCompletion::DenseLag,
+                crate::DenseGraphTailCompletion::RawLag => HybridCompletion::RawLag,
+                crate::DenseGraphTailCompletion::TailWorkLimit => HybridCompletion::TailWorkLimit,
+                crate::DenseGraphTailCompletion::TailVectorLimit => {
+                    HybridCompletion::TailVectorLimit
+                }
+                crate::DenseGraphTailCompletion::VectorLimit => HybridCompletion::VectorLimit,
+                crate::DenseGraphTailCompletion::DiscoveryLimit => HybridCompletion::DiscoveryLimit,
+                crate::DenseGraphTailCompletion::BaseLimit => HybridCompletion::BaseLimit,
+            };
+            dense_observation.source_coverage_incomplete = dense.permitted_tail_omissions;
+            dense_observation.raw_lag = dense.raw_lag;
+            dense_observation.dense_lag = dense.dense_lag;
+            dense_observation.tail_witness_complete = dense.tail_witness_complete;
+            dense_observation.tail_scoring_complete = dense.tail_scoring_complete;
+            dense_observation.node_reads = dense.node_reads;
+            dense_observation.vector_reads = dense.vector_reads;
+            dense_observation.discovered = dense.discovered;
+            dense_observation.tail_vector_reads = dense.tail_vector_reads;
+            dense_observation.dense_witness = Some(HybridDenseWitness {
+                graph_digest: dense.graph_digest,
+                observed_dense_commitment: dense.observed_dense_commitment,
+                proven_dense_commitment: dense.proven_dense_commitment,
+                base_through: dense.base_through,
+                observed_dense_through: dense.observed_dense_through,
+                proven_through: dense.proven_through,
+                raw_through: dense.raw_through,
+            });
+            (dense_hits, dense_frontier, dense_observation)
         };
-        dense_observation.source_coverage_incomplete = dense.permitted_tail_omissions;
-        dense_observation.raw_lag = dense.raw_lag;
-        dense_observation.dense_lag = dense.dense_lag;
-        dense_observation.tail_witness_complete = dense.tail_witness_complete;
-        dense_observation.tail_scoring_complete = dense.tail_scoring_complete;
-        dense_observation.node_reads = dense.node_reads;
-        dense_observation.vector_reads = dense.vector_reads;
-        dense_observation.discovered = dense.discovered;
-        dense_observation.tail_vector_reads = dense.tail_vector_reads;
-        dense_observation.dense_witness = Some(HybridDenseWitness {
-            graph_digest: dense.graph_digest,
-            observed_dense_commitment: dense.observed_dense_commitment,
-            proven_dense_commitment: dense.proven_dense_commitment,
-            base_through: dense.base_through,
-            observed_dense_through: dense.observed_dense_through,
-            proven_through: dense.proven_through,
-            raw_through: dense.raw_through,
-        });
 
         // Eight fixed owner-admitted seeds: sampled current/working originals,
         // then lexical rank and dense rank. No unprojected version is invented.
@@ -327,7 +395,12 @@ impl NativeService {
             )?);
         }
         let observation = OwnedHybridObservation {
-            revision: HYBRID_OBSERVATION_REVISION.into(),
+            revision: if limits.segments.is_some() {
+                SEGMENTED_HYBRID_OBSERVATION_REVISION
+            } else {
+                HYBRID_OBSERVATION_REVISION
+            }
+            .into(),
             intent: query.intent().clone(),
             checkpoint_receipt: query.guard.checkpoint.clone(),
             checkpoint_digest: query.admission.checkpoint_digest,
@@ -407,9 +480,18 @@ impl NativeService {
         if admission.checkpoint_digest != guard.checkpoint_digest {
             return Err(stale("owned query checkpoint changed during preparation"));
         }
-        if self.admit_owned_query_embedding_profile(&guard.context, &guard.profile, budget)?
-            != guard.graph_digest
-        {
+        if guard.intent.limits.segments.is_some() != guard.segmented_view.is_some() {
+            return Err(stale(
+                "owned query segmented admission differs from its intent",
+            ));
+        }
+        let graph_digest = if let Some(view) = &guard.segmented_view {
+            self.check_segment_query_view(&guard.context, view, budget)?;
+            guard.graph_digest
+        } else {
+            self.admit_owned_query_embedding_profile(&guard.context, &guard.profile, budget)?
+        };
+        if graph_digest != guard.graph_digest {
             return Err(stale(
                 "owned query immutable graph changed during preparation",
             ));
@@ -479,8 +561,19 @@ impl NativeService {
                 "owned query base uses a reserved native status identity",
             ));
         }
-        let graph_digest =
-            self.admit_owned_query_embedding_profile(&request.context, &profile, budget)?;
+        let (graph_digest, segmented_view) = if intent.limits.segments.is_some() {
+            let (graph, view) = self.admit_owned_segmented_query_embedding_profile(
+                &request.context,
+                &profile,
+                budget,
+            )?;
+            (graph, Some(view))
+        } else {
+            (
+                self.admit_owned_query_embedding_profile(&request.context, &profile, budget)?,
+                None,
+            )
+        };
         let context_cost =
             crate::budgeted::auth::ContextCost::for_context(&request.context, budget)?;
         let principal = context_cost.binding_digest(&request.context, budget)?;
@@ -498,6 +591,7 @@ impl NativeService {
             fence: fence.clone(),
             profile: profile.clone(),
             graph_digest,
+            segmented_view,
         };
         let input_base_digest =
             router::canonical_digest(&request.base, budget).map_err(service_error)?;
@@ -681,6 +775,38 @@ fn route_kind(route: SourceRoute) -> HybridRouteKind {
     }
 }
 
+/// Preserve the first (best) global dense rank while retaining every scored
+/// span of that source. Fusion consumes sources, rather than counting spans as
+/// independent candidates or additional segment votes.
+fn segmented_source_hits(
+    hits: Vec<crate::DenseGraphHit>,
+    budget: &mut QueryBudget,
+) -> ServiceResult<Vec<contextdb_recall::IndexedHit>> {
+    if hits.len() > 4096 {
+        return Err(crate::exhausted(
+            "segmented owned span observations exceed the query cap",
+        ));
+    }
+    let sources = hits.len().min(100);
+    let tree_bytes = sources * 2 * (12 * size_of::<(contextdb_core::ObservationId, usize)>() + 512);
+    budget
+        .charge(
+            hits.len() as u64 * 16 + 1,
+            (tree_bytes
+                + sources * 2 * size_of::<contextdb_recall::IndexedHit>()
+                + hits.len() * (4 * size_of::<OriginalSourceSpan>() + 512)) as u64,
+        )
+        .map_err(budget_error)?;
+    let observations = hits
+        .into_iter()
+        .map(|hit| contextdb_recall::IndexedHit {
+            source: hit.source,
+            matches: vec![hit.span],
+        })
+        .collect::<Vec<_>>();
+    frontier::union_raw_hits(vec![observations], budget)
+}
+
 fn route_observation(
     route: HybridRouteKind,
     sources: &BTreeMap<contextdb_core::ObservationId, RawSource>,
@@ -712,6 +838,7 @@ fn route_observation(
         discovered: 0,
         tail_vector_reads: 0,
         dense_witness: None,
+        segmented_dense_witness: None,
     })
 }
 

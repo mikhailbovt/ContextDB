@@ -7,11 +7,13 @@ use contextdb_index::{AnnPartitionManifestV2, VectorMetric, VectorSpace};
 
 mod publication;
 mod query;
+pub(crate) mod segments;
 mod tail;
 #[cfg(test)]
 mod tail_tests;
 #[cfg(test)]
 mod tests;
+mod topology;
 mod verification;
 
 pub(crate) const FEATURE: &str = "continuous-raw-span-ann-v1";
@@ -287,6 +289,7 @@ pub(crate) fn node_key(workspace: &str, generation: u64, id: RepresentationId) -
 fn source_generation_digest(generation: &Generation) -> ServiceResult<String> {
     let mut source = generation.clone();
     source.dense_graph = None;
+    source.dense_segments = None;
     canonical_digest(&("native-span-ann-source-generation/v1", source))
 }
 fn vector_space(dense: &DenseManifest) -> VectorSpace {

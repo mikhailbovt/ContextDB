@@ -71,6 +71,14 @@ pub trait AnnPartitionQueryReaderV2 {
         dimensions: usize,
         max_bytes: usize,
     ) -> Result<Vec<f32>, Self::Error>;
+    /// Observe each newly materialized vector's validated finite score once,
+    /// including observations that do not survive the local result beam. Cached
+    /// reuse does not repeat this callback. An owner that retains observations
+    /// must admit its own allocations against the same parent allowance; a
+    /// refusal discards the query result. The default adds no work or allocation.
+    fn observe_score(&mut self, _id: RepresentationId, _score: f32) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 /// Separate finite bounds. They do not reset or replace the parent allowance.
@@ -357,6 +365,9 @@ impl<R: AnnPartitionQueryReaderV2> Search<'_, R> {
                 .map_err(AnnPartitionQueryErrorV2::Vector)?,
         };
         self.charge(1, 0)?;
+        self.reader
+            .observe_score(id, candidate.score)
+            .map_err(AnnPartitionQueryErrorV2::Reader)?;
         self.cache.insert(
             id,
             Cached {
