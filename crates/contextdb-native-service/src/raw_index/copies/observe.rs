@@ -90,6 +90,43 @@ impl NativeService {
             let relative = std::str::from_utf8(&entry.key)
                 .ok()
                 .and_then(|key| key.strip_prefix(&prefix));
+            if relative.is_some_and(|key| key.starts_with("dense/graph/")) {
+                let owner = self.verify_dense_graph_copy(
+                    snapshot,
+                    generation,
+                    &entry.key,
+                    &entry.value,
+                    budget,
+                )?;
+                if let Some(id) = owner {
+                    let control = self.verified_capture_control(snapshot, id, budget)?;
+                    if control.receipt.workspace_id.to_string() != workspace_id
+                        || control.original.is_none()
+                    {
+                        return Err(integrity("graph copy lost its captured source owner"));
+                    }
+                    sources.insert(
+                        id,
+                        NativeRawSourceControl {
+                            capture_commit: control.receipt.workspace_commit,
+                            event_digest: control.receipt.event_digest,
+                            control_digest: control.control_digest,
+                        },
+                    );
+                }
+                rows.push(self.observe_raw_row(
+                    snapshot,
+                    entry,
+                    if owner.is_some() {
+                        NativeRawCopyKind::Document
+                    } else {
+                        NativeRawCopyKind::SharedMetadata
+                    },
+                    owner,
+                    budget,
+                )?);
+                continue;
+            }
             if relative.is_some_and(|key| key.starts_with("dense/")) {
                 let dense = generation
                     .dense

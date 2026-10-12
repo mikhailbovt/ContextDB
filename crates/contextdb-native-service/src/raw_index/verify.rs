@@ -187,6 +187,7 @@ impl NativeService {
         self.verify_raw_copy_publications(snapshot)?;
         let bm25_generations = self.accepted_raw_bm25_generations(snapshot)?;
         let dense_generations = self.accepted_dense_generations(snapshot)?;
+        let graph_generations = self.accepted_dense_graph_generations(snapshot)?;
         let actual = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"raw/")
             .map_err(storage_error)?;
@@ -201,6 +202,7 @@ impl NativeService {
                 if event.operation == "raw_projection"
                     || event.operation == bm25::OPERATION
                     || event.operation == dense::OPERATION
+                    || event.operation == dense::graph::OPERATION
                 {
                     return Err(integrity("published raw index state is absent"));
                 }
@@ -289,6 +291,11 @@ impl NativeService {
                     &generation,
                     dense_generations.get(&(workspace.to_owned(), number)),
                 )?;
+                self.validate_dense_graph_declaration(
+                    workspace,
+                    &generation,
+                    graph_generations.get(&(workspace.to_owned(), number)),
+                )?;
                 expected.insert(generation_key(workspace, number), encode(&generation)?);
                 if state
                     .reclaiming
@@ -307,6 +314,14 @@ impl NativeService {
                         )
                         .map_err(storage_error)?
                     {
+                        if row.key[generation_prefix(workspace, number).len()..]
+                            .starts_with(b"dense/graph/")
+                            && generation.dense_graph.is_none()
+                        {
+                            return Err(integrity(
+                                "reclaiming graph rows lost their accepted owner seal",
+                            ));
+                        }
                         if row.key[generation_prefix(workspace, number).len()..]
                             .starts_with(b"bm25/")
                             && generation.bm25.is_none()
@@ -460,6 +475,14 @@ impl NativeService {
                         .get(&(workspace.to_owned(), number))
                         .ok_or_else(|| integrity("dense accepted receipt absent"))?;
                     expected.insert(dense::receipt_key(workspace, number), encode(receipt)?);
+                }
+                if generation.dense_graph.is_some() {
+                    expected.extend(self.reconstruct_dense_graph_rows(
+                        snapshot,
+                        workspace,
+                        &generation,
+                        &mut super::super::retention::audit_budget(),
+                    )?);
                 }
                 for (id, labels) in domains {
                     for key in domain_eligibility_keys(workspace, number, &id, &labels)? {

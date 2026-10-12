@@ -21,13 +21,14 @@ use thiserror::Error;
 
 use crate::{
     ANN_V2_FORMAT_VERSION, ANN_V2_MAX_GENERATION_BYTES, ANN_V2_MAX_NODES, ANN_V2_MAX_OBJECT_BYTES,
-    ANN_V2_MAX_PAGE_BYTES, ANN_V2_MAX_PAGE_ENTRIES, AnnBuildParametersV2, AnnGenerationManifestV2,
-    AnnGenerationVerificationV2, AnnLevelV2, AnnMerkleGeometryV2, AnnMerkleScopeV2, AnnNodeV2,
-    AnnObjectKeyV2, AnnObjectPageRequestV2, AnnObjectPageV2, AnnObjectReadRequestV2,
-    AnnObjectReadResponseV2, AnnObjectReaderV2, AnnObjectV2, AnnPartitionManifestV2,
-    AnnSourceSealV2, AnnV2Error, IndexPolicy, IndexPrincipal, VectorIndex, VectorRecord,
-    VectorSpace, ann_v2_generation_prefix, ann_v2_merkle_internal, ann_v2_merkle_leaf,
-    ann_v2_merkle_root, ann_v2_partition_key, score, validate_values, verify_ann_generation_v2,
+    ANN_V2_MAX_PAGE_BYTES, ANN_V2_MAX_PAGE_ENTRIES, ANN_V2_MAX_VECTOR_DIMENSIONS,
+    AnnBuildParametersV2, AnnGenerationManifestV2, AnnGenerationVerificationV2, AnnLevelV2,
+    AnnMerkleGeometryV2, AnnMerkleScopeV2, AnnNodeV2, AnnObjectKeyV2, AnnObjectPageRequestV2,
+    AnnObjectPageV2, AnnObjectReadRequestV2, AnnObjectReadResponseV2, AnnObjectReaderV2,
+    AnnObjectV2, AnnPartitionManifestV2, AnnSourceSealV2, AnnV2Error, IndexPolicy, IndexPrincipal,
+    VectorIndex, VectorRecord, VectorSpace, ann_v2_generation_prefix, ann_v2_merkle_internal,
+    ann_v2_merkle_leaf, ann_v2_merkle_root, ann_v2_partition_key, score, validate_values,
+    verify_ann_generation_v2,
 };
 
 const OBJECT_KEYSPACE: &str = "ann_v2_objects";
@@ -52,8 +53,6 @@ const DEFAULT_BUILD_BATCH_OBJECTS: usize = 512;
 const MAX_QUERY_VISITS: usize = 65_536;
 const MAX_QUERY_EXACT_SCORES: usize = 1_000_000;
 pub(crate) const MAX_TARGET_BYTES: usize = 64 * 1024;
-/// Maximum full-precision dimensions materialized by one runtime point read.
-pub const ANN_V2_MAX_VECTOR_DIMENSIONS: usize = 65_536;
 const UNIVERSE_ID_DOMAIN: &[u8] = b"contextdb.ann-v2.universe-id/v1\0";
 const LEASE_ID_DOMAIN: &[u8] = b"contextdb.ann-v2.lease-id/v1\0";
 const ROUTE_GENERATION_DOMAIN: &[u8] = b"contextdb.ann-v2.persistent-routes/v1\0";

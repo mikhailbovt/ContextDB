@@ -4,7 +4,9 @@ use super::*;
 use contextdb_core::{EventPayload, OriginalSourceSpan, VectorSpaceId};
 use contextdb_service::{EmbeddedText, EmbeddingTextKind, TextEmbeddingProfile};
 
+pub(crate) mod graph;
 mod projection;
+pub use graph::DenseGraphManifest;
 pub(in crate::raw_index) use projection::receipt_key;
 #[cfg(test)]
 mod tests;
@@ -348,7 +350,10 @@ impl NativeService {
         vector.token = crate::keyed_token(&self.token_key, VECTOR_DOMAIN, &encode(vector)?);
         Ok(())
     }
-    fn check_dense_document_token(&self, document: &DenseDocument) -> ServiceResult<()> {
+    pub(in crate::raw_index) fn check_dense_document_token(
+        &self,
+        document: &DenseDocument,
+    ) -> ServiceResult<()> {
         let mut expected = document.clone();
         self.sign_dense_document(&mut expected)?;
         if expected.token != document.token {
@@ -356,7 +361,10 @@ impl NativeService {
         }
         Ok(())
     }
-    fn check_dense_vector_token(&self, vector: &DenseVector) -> ServiceResult<()> {
+    pub(in crate::raw_index) fn check_dense_vector_token(
+        &self,
+        vector: &DenseVector,
+    ) -> ServiceResult<()> {
         let mut expected = vector.clone();
         self.sign_dense_vector(&mut expected)?;
         if expected.token != vector.token {

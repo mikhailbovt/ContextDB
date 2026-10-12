@@ -326,6 +326,41 @@ fn real_encoder_projects_encrypted_originals_and_verifies_after_cold_reopen() {
     drop(first_snapshot);
     verify(&f.native).expect("exact originals and accepted real-vector commitments");
     let projection_millis = start.elapsed().as_millis();
+    let graph = f
+        .native
+        .publish_original_span_graph(&f.context, &mut budget())
+        .expect("owner publication of the actual source-vector graph");
+    verify(&f.native).expect("final graph rows and accepted source bindings");
+    let query_text = "Find the independent original.";
+    let mut query_budget = budget();
+    let query = encoder
+        .embed(EmbeddingTextKind::Query, query_text, &mut query_budget)
+        .expect("actual instructed query embedding under the same parent");
+    let query_limits = graph::DenseGraphQueryLimits {
+        limit: 3,
+        max_node_reads: 64,
+        max_vector_reads: 32,
+        max_discovered: 32,
+        ef_search: 16,
+    };
+    let discovered = f
+        .native
+        .search_original_spans(
+            &f.context,
+            query_text,
+            &query,
+            query_limits,
+            &mut query_budget,
+        )
+        .expect("point-only native query of actual accepted vectors");
+    assert!(
+        discovered
+            .hits
+            .iter()
+            .any(|hit| hit.source.event_id == f.second.event.event_id),
+        "small composed wiring fixture must rediscover its independent source"
+    );
+    assert!(discovered.node_reads <= 64 && discovered.vector_reads <= 32);
     encoder
         .shutdown(&mut QueryBudget::new(
             10_000,
@@ -341,9 +376,39 @@ fn real_encoder_projects_encrypted_originals_and_verifies_after_cold_reopen() {
         NativeService::open_encrypted(path, "source-dense-fixture", [17; 32], f.ledger, f.keys)
             .expect("cold encrypted native reopen");
     verify(&reopened).expect("cold exact source plans, MACs and retained commitments");
+    let mut cold_budget = budget();
+    let cold = reopened
+        .search_original_spans(
+            &f.context,
+            query_text,
+            &query,
+            query_limits,
+            &mut cold_budget,
+        )
+        .expect("cold point query without a neural rerun or rebuild");
+    assert_eq!(cold.hits, discovered.hits);
+    let independent = cold
+        .hits
+        .iter()
+        .find(|hit| hit.source.event_id == f.second.event.event_id)
+        .expect("retained exact original identity");
+    let snapshot = reopened
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("cold original materialization snapshot");
+    let bytes = reopened
+        .source_span_inner(
+            &snapshot,
+            Some(&f.context),
+            &independent.span,
+            true,
+            Some(&mut cold_budget),
+        )
+        .expect("authenticated original bytes with the query's parent allowance");
+    assert_eq!(bytes, b"independent original");
     println!(
         "{}",
-        serde_json::json!({"profile_digest":receipt.profile_digest,"sources":receipt.sources,"embedded_sources":receipt.embedded_sources,"spans":receipt.spans,"omitted_sources":receipt.omitted_sources,"caught_up":receipt.caught_up,"commitment":receipt.commitment,"projection_millis_observation":projection_millis,"cold_encrypted_native_verification":true,"query_retrieval_quality_evaluated":false,"main_reader_benefit_evaluated":false,"final_benchmarks_accessed":false})
+        serde_json::json!({"profile_digest":receipt.profile_digest,"sources":receipt.sources,"embedded_sources":receipt.embedded_sources,"spans":receipt.spans,"omitted_sources":receipt.omitted_sources,"caught_up":receipt.caught_up,"commitment":receipt.commitment,"projection_millis_observation":projection_millis,"graph_digest":graph.manifest.content_digest,"native_graph_query_wiring_verified":true,"query_node_reads":discovered.node_reads,"query_vector_reads":discovered.vector_reads,"cold_encrypted_native_verification":true,"cold_query_and_exact_original_materialization":true,"query_retrieval_quality_evaluated":false,"main_reader_benefit_evaluated":false,"final_benchmarks_accessed":false})
     );
 }
 

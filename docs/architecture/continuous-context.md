@@ -875,12 +875,26 @@ samples up to 4 KiB of current user/tool/working/assistant source excerpts and
 retains observational span provenance.
 
 `search_ann_partition_v2` provides a separate point-only best-first kernel with
-node/vector/discovery caps and typed owner failures. Its facade must establish
-the accepted graph seal, exact space, current cohort and member admission before
-reads, then recheck the owner epoch. Native graph publication and that facade,
-automatic query embedding, BM25/dense/causal fusion and protected candidate
-frontier are still required before hybrid activation. Real-encoder source recall,
-Kev utility and paired main-reader benefit remain separate acceptance gates.
+node/vector/discovery caps and typed owner failures. The storage-neutral builder
+accepts a complete finite cohort and produces canonical nodes and its final root
+under the caller's budget. Its deterministic construction revision is explicit.
+
+`publish_original_span_graph` publishes one immutable native graph per raw
+generation, with a whole-base ceiling of 4096 vectors and 64 exact compound
+policy cohorts. Final row authentication binds the graph content commitment,
+accepted source vectors and encoder profile. Member mappings are source-owned;
+topology, cohort headers and the graph receipt are shared copies. Retained
+declarations, deep reconstruction and paged generation GC cover these rows.
+
+`search_original_spans` validates an explicitly supplied query embedding, admits
+permitted cohorts and point-reads current members, nodes and vectors. It checks
+the owner fence at entry, during reads and at exit. Results contain attributed
+source spans and approximate traversal status; original bytes are verified at
+materialization. Advancing the source generation makes this initial graph stale
+and requires rebuilding. Bounded fresh-vector tails, automatic query embedding,
+BM25/dense/causal fusion and the protected candidate frontier are still required
+before automatic hybrid activation. Real-encoder source recall, Kev utility and
+paired main-reader benefit remain separate acceptance gates.
 
 Scope eligibility precedes domain labels and content search. Each domain includes
 the original's policy and every source dependency's policy. Ranking uses match

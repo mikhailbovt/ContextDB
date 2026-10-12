@@ -87,6 +87,10 @@ pub use payload::{
     CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS, NativePayloadKeyInventory,
     NativePayloadPruningProgress,
 };
+pub use raw_index::dense::graph::{
+    DenseGraphHit, DenseGraphManifest, DenseGraphQueryLimits, DenseGraphQueryResult,
+    DenseGraphReceipt,
+};
 pub use raw_index::{
     DenseProjectionReceipt, NativeRawCopyKind, NativeRawCopyObservation, NativeRawCopyReceipt,
     NativeRawCopyWitness, NativeRawSourceControl, NativeRawValueVersion, OriginalRevocationReceipt,
@@ -3483,6 +3487,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != raw_index::INDEX_FEATURE
                 && feature != raw_index::bm25::FEATURE
                 && feature != raw_index::dense::FEATURE
+                && feature != raw_index::dense::graph::FEATURE
                 && feature != raw_index::GC_FEATURE
                 && feature != raw_index::COPY_FEATURE
                 && feature != raw_index::REMOVAL_FEATURE
@@ -3560,6 +3565,8 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
             && (!manifest.features.contains(raw_index::bm25::FEATURE)
                 || !manifest.features.contains(capture::RECOVERY_FEATURE)
                 || !manifest.features.contains(custody::CUSTODY_FEATURE)))
+        || (manifest.features.contains(raw_index::dense::graph::FEATURE)
+            && !manifest.features.contains(raw_index::dense::FEATURE))
         || (manifest.features.contains(retention::PRUNING_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || (manifest.features.contains(assertions::PRUNING_FEATURE)

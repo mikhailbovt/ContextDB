@@ -173,6 +173,31 @@ impl NativeService {
             .map_err(storage_error)?;
         Ok(!page.entries.is_empty())
     }
+    /// Shared topology may outlive source-owned member rows during paged GC.
+    /// Refuse pruning while any graph row remains, even if its profile was lost.
+    pub(in crate::raw_index) fn has_dense_graph_rows<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+        generation: u64,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<bool> {
+        let prefix = graph::graph_prefix(workspace, generation);
+        crate::budgeted::metadata(snapshot, budget, |reader| {
+            reader
+                .scan_prefix_page(
+                    &self.keyspaces.continuous,
+                    ScanPageRequest {
+                        prefix: &prefix,
+                        start_after: None,
+                        max_entries: 1,
+                        max_bytes: 128 * 1024,
+                    },
+                )
+                .map(|page| !page.entries.is_empty())
+                .map_err(storage_error)
+        })
+    }
     pub(in crate::raw_index) fn verify_dense_receipt_copy<S: ReadSnapshot>(
         &self,
         snapshot: &S,

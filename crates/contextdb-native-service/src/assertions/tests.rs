@@ -483,6 +483,20 @@ fn branches_conflicts_and_scoped_freshness_do_not_choose_a_similarity_winner() {
     );
     assert_eq!(value(&query(&service, &input, 0, None)), Some("local-only"));
     assert_eq!(value(&query(&service, &branch, 0, None)), Some("cloud"));
+    let scoped_request = ResolveStateRequest {
+        context: input.context.clone(),
+        key: key(&input),
+        known_at: None,
+        valid_at: TimestampMicros(0),
+        after_receipt: None,
+    };
+    let mut baseline =
+        QueryBudget::new(128, 128 * 1024, Duration::from_secs(5), Default::default());
+    let before_noise = service
+        .resolve_state(scoped_request.clone(), &mut baseline)
+        .expect("bounded scoped resolution before unrelated events");
+    assert_eq!(value(&before_noise), Some("local-only"));
+    let baseline_work = 128 - baseline.remaining_work();
     for sequence in 2..=145 {
         let mut noise = branch.clone();
         noise.event.event_id = ObservationId::new();
@@ -492,20 +506,25 @@ fn branches_conflicts_and_scoped_freshness_do_not_choose_a_similarity_winner() {
             .append_event(noise)
             .expect("native assertion fixture");
     }
-    let mut bounded = QueryBudget::new(12, 128 * 1024, Duration::from_secs(5), Default::default());
+    let mut bounded = QueryBudget::new(128, 128 * 1024, Duration::from_secs(5), Default::default());
     let view = service
-        .resolve_state(
-            ResolveStateRequest {
-                context: input.context.clone(),
-                key: key(&input),
-                known_at: None,
-                valid_at: TimestampMicros(0),
-                after_receipt: None,
-            },
-            &mut bounded,
-        )
+        .resolve_state(scoped_request.clone(), &mut bounded)
         .expect("native assertion fixture");
     assert_eq!(value(&view), Some("local-only"));
+    assert_eq!(
+        128 - bounded.remaining_work(),
+        baseline_work,
+        "144 unrelated branch events must not increase scoped resolution work"
+    );
+    let mut insufficient =
+        QueryBudget::new(12, 128 * 1024, Duration::from_secs(5), Default::default());
+    assert_eq!(
+        service
+            .resolve_state(scoped_request, &mut insufficient)
+            .expect_err("nested authorization reads share the insufficient parent")
+            .code,
+        ErrorCode::BudgetExhausted
+    );
     let contradictory = capture(2, "Можно облако.");
     service
         .append_event(contradictory.clone())

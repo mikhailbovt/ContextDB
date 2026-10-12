@@ -87,6 +87,9 @@ pub(super) struct Generation {
     /// Independently bounded source-span encoding of this same raw prefix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dense: Option<dense::DenseManifest>,
+    /// One immutable ANN base. Any later raw/dense advance makes queries stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dense_graph: Option<dense::DenseGraphManifest>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -182,6 +185,7 @@ impl NativeService {
                         receipt.event_id,
                         budget,
                     )?)
+                || self.has_dense_graph_rows(snapshot, workspace, number, budget)?
             {
                 return Err(ServiceError::new(
                     ErrorCode::IndexTooStale,
@@ -279,6 +283,7 @@ impl NativeService {
                     .map(|_| world.watermarks.journal),
                 bm25: request_bm25.then(bm25::Bm25Profile::fixed),
                 dense: None,
+                dense_graph: None,
             }
         } else {
             let number = state
