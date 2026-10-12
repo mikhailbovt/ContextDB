@@ -340,9 +340,10 @@ python learning/context-router/kev/matched_train.py verify-bundle --corpus ABS -
 
 Verification infers the saved training profile; an explicit conflicting selector
 refuses. The v3 bundle binds the exact optimization plan, report, nine source
-hashes and existing data profile. Earlier matched-v2 bundles require their
-original eight-source revision (`e6d42d5`); retain that checkout to reproduce
-their checks. The four original trainer sources remain unchanged.
+hashes and existing data profile. Exact source revisions for the measured runs
+are `e6d42d5` (matched-v2, eight sources) and `f81bd46` (paired-v3, nine sources).
+Retain those checkouts to reproduce their checks after source changes. The four
+original trainer sources remain unchanged.
 
 One v3 epoch completed 16 updates with changes in all 376 trainable tensors.
 Strict same-runtime and fresh-process cold checks passed. Development produced
@@ -352,3 +353,33 @@ passed 35/60 comparisons. The prior-control and family gates failed, including
 zero recall for audio routing and zero specificity for transport. This remains
 a diagnostic result. Native useful scoring and downstream reader benefit are
 still open; the default R0 path remains unchanged.
+
+## Controlled resident data
+
+`controlled.py` admits a separate fixed v4 population: sixteen authored histories,
+eight per fold, with sufficient, irrelevant-or-stale and partial resident states.
+The 48 bases retain all four singleton and six pair proposals, producing 480
+actual compiler callbacks. Originals, corrections and tool call/result bindings
+remain chronological; annotations are joined after callback capture.
+
+```text
+cargo run -p contextdb-bench --example router_corpus -- build-controlled ABS_NEW_CORPUS
+cargo run -p contextdb-bench --example router_corpus -- verify-controlled ABS_CORPUS
+python -I learning/context-router/kev/controlled_check.py --corpus ABS_CORPUS
+```
+
+The independently verified manifest is
+`faa9476d7d6a85249acc65b4cd19f9c43d41f47c59e71523f55072c077b29950`.
+Five fixed artifact pins, authoring ancestry and source/cost commitments guard
+intake. Each fold has 24 bases, 64 positive labels, 164 negatives and 12 masked
+entries, including eight all-zero and fourteen multi-positive bases. No bases
+are excluded. All sixteen histories have known positive/negative comparisons
+at equal nonzero original-content and actual reference-protocol costs, for both
+singletons and pairs. The new collector scores singletons first; existing
+scorer revisions keep their previous traversal and corpus bytes.
+
+Native reconstruction and model-free intake pass. This profile shares the
+lossless codec and unchanged byte/token ceilings; Kev token/resource admission,
+training, useful native scoring and reader benefit remain unverified. Shared
+synthetic structure does not establish real-conversation independence or replace
+the final paired-reader benchmarks.

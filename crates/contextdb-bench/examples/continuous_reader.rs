@@ -222,6 +222,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             role: outgoing_role,
             tool_calls: vec![],
             tool_result: None,
+            tool_page: None,
         });
     }
     project(&owner, &context)?;

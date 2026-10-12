@@ -175,6 +175,40 @@ pub struct PayloadReceipt {
     pub durability: CaptureDurability,
 }
 
+/// Authenticated bounded UTF-8 page request for a fully retained original.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadOriginalPageRequest {
+    /// Current host authorization; the model supplies no grants.
+    pub context: AuthenticatedRequestContext,
+    /// Expected complete original identity/version/length.
+    pub handle: contextdb_continuity::OriginalPageHandle,
+    /// Requested byte cursor; an incomplete UTF-8 boundary may advance by at most three bytes.
+    pub start: u64,
+    /// Maximum range bytes, at most the declared tool page ceiling.
+    pub max_bytes: u32,
+    /// Host reader locality; external use requires ModelProcessing admission.
+    pub external_processing: bool,
+}
+
+/// Verified original page. Bytes never stand in for the complete archived payload.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OriginalPage {
+    /// Exact page and full-original identities.
+    pub view: contextdb_continuity::ToolResultPageView,
+    /// Byte-exact UTF-8 original range.
+    pub bytes: Vec<u8>,
+}
+impl std::fmt::Debug for OriginalPage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OriginalPage")
+            .field("view", &self.view)
+            .field("byte_length", &self.bytes.len())
+            .finish()
+    }
+}
+
 /// Bounded original staging and source-span materialization for host adapters.
 pub trait PayloadPort: CapturePort {
     /// Synchronize a complete large original before any event can reference it.
@@ -186,4 +220,18 @@ pub trait PayloadPort: CapturePort {
         context: &AuthenticatedRequestContext,
         span: &contextdb_core::OriginalSourceSpan,
     ) -> ServiceResult<Vec<u8>>;
+
+    /// Authenticate and hash a bounded original page using the caller's remaining budget.
+    /// Ports without a proved paging implementation refuse rather than crop source data.
+    fn read_original_page(
+        &self,
+        _request: ReadOriginalPageRequest,
+        _budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<OriginalPage> {
+        Err(crate::ServiceError::new(
+            crate::ErrorCode::Unsupported,
+            "original paging is not supported by this host",
+            false,
+        ))
+    }
 }

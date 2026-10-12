@@ -253,6 +253,7 @@ fn planned_fixture_with_profile(
                             role: OutgoingRole::User,
                             tool_calls: Vec::new(),
                             tool_result: None,
+                            tool_page: None,
                         }],
                     }],
                     obligations: Vec::new(),
@@ -790,6 +791,7 @@ fn revocation_for_profile(trace_profile: RouterTraceProfile) {
         role: OutgoingRole::Assistant,
         tool_calls: Vec::new(),
         tool_result: None,
+        tool_page: None,
     });
     let saved = service
         .save_run_checkpoint(

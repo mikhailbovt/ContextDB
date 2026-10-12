@@ -24,6 +24,7 @@ use super::{
 };
 
 pub(super) const OWNED_FEATURE: &str = "continuous-owned-runtime-v1";
+pub(super) const TOOL_PAGES_FEATURE: &str = "continuous-owned-tool-pages-v1";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +49,9 @@ pub(super) struct CheckpointControl {
     producer_id: contextdb_core::StreamId,
     next_sequence: u64,
     status: OwnedRunStatus,
+    // This format requirement survives explicit removal of the checkpoint body.
+    #[serde(default, skip_serializing_if = "is_false")]
+    tool_pages: bool,
 }
 
 pub(super) struct RecoveredRunHead {
@@ -138,6 +142,7 @@ impl OwnedRunPort for NativeService {
                     event,
                 },
                 Some(&request),
+                Some(budget),
             )?
             .receipt;
         Ok(SavedRunCheckpoint {
@@ -191,6 +196,8 @@ impl OwnedRunPort for NativeService {
             return Err(integrity("run head differs from its captured checkpoint"));
         }
         self.validate_pending_model(&snapshot, context, &checkpoint)?;
+        self.validate_persisted_tool_page_feature(&snapshot, &checkpoint, budget)?;
+        self.validate_checkpoint_tool_pages(&snapshot, context, &checkpoint, budget)?;
         Ok(Some(SavedRunCheckpoint {
             checkpoint,
             receipt: head.receipt,
@@ -219,6 +226,7 @@ impl OwnedRunPort for NativeService {
         }
         let state = decode_checkpoint(&original.event)?;
         check_identity(context, &state.identity)?;
+        self.validate_persisted_tool_page_feature(&snapshot, &state, budget)?;
         let head: RunHead = decode(
             &snapshot
                 .get(
@@ -296,6 +304,7 @@ impl NativeService {
         snapshot: &S,
         context: &AuthenticatedRequestContext,
         receipt: &CaptureReceipt,
+        budget: &mut QueryBudget,
     ) -> ServiceResult<OwnedRunCheckpoint> {
         self.authorized_capture_policy(snapshot, context, receipt.event_id)?;
         self.authorize_capture_dependencies(snapshot, context, receipt.event_id)?;
@@ -328,13 +337,39 @@ impl NativeService {
                 true,
             ));
         }
+        self.validate_persisted_tool_page_feature(snapshot, &checkpoint, budget)?;
+        self.validate_checkpoint_tool_pages(snapshot, context, &checkpoint, budget)?;
         Ok(checkpoint)
+    }
+
+    fn validate_persisted_tool_page_feature<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        checkpoint: &OwnedRunCheckpoint,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        if !has_tool_pages(checkpoint) {
+            return Ok(());
+        }
+        budget.charge(1, 0).map_err(budget_error)?;
+        let bytes = snapshot
+            .get(&self.keyspaces.meta, super::META_MANIFEST_KEY)
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("native manifest absent"))?;
+        if bytes.len() > super::MAX_JSON_BYTES {
+            return Err(integrity("native manifest exceeds its metadata bound"));
+        }
+        budget.charge(0, bytes.len() as u64).map_err(budget_error)?;
+        let manifest: super::Manifest = decode(&bytes, "native manifest")?;
+        super::validate_manifest(&manifest, &self.database_id)?;
+        require_tool_page_feature(checkpoint, &manifest.features)
     }
 
     pub(super) fn validate_checkpoint_publication<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         request: &SaveRunCheckpointRequest,
+        budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         require_capability(&request.context, Capability::Runtime)?;
         require_capability(&request.context, Capability::ReadEvidence)?;
@@ -370,9 +405,28 @@ impl NativeService {
             ));
         }
         for source in request.checkpoint.required_sources() {
-            self.source_span(snapshot, Some(&request.context), source, true)?;
+            let page_source = request
+                .checkpoint
+                .groups
+                .iter()
+                .flat_map(|group| &group.messages)
+                .any(|message| {
+                    message
+                        .tool_page
+                        .as_ref()
+                        .is_some_and(|page| source == &message.source || source == &page.preview)
+                });
+            if !page_source {
+                self.source_span(snapshot, Some(&request.context), source, true)?;
+            }
         }
         self.validate_pending_model(snapshot, &request.context, &request.checkpoint)?;
+        self.validate_checkpoint_tool_pages(
+            snapshot,
+            &request.context,
+            &request.checkpoint,
+            budget,
+        )?;
         if let Some(id) = request.checkpoint.last_model_output {
             self.authorized_capture_policy(snapshot, &request.context, id)?;
             self.authorize_capture_dependencies(snapshot, &request.context, id)?;
@@ -439,6 +493,196 @@ impl NativeService {
         Ok(())
     }
 
+    // This runs at publication, reopen and dispatch admission. A durable locator
+    // never bypasses the current policy of either its protocol anchor or original.
+    fn validate_checkpoint_tool_pages<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        checkpoint: &OwnedRunCheckpoint,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        use contextdb_continuity::{TOOL_RESULT_PAGE_BYTES, ToolResultPageView};
+        for message in checkpoint.groups.iter().flat_map(|group| &group.messages) {
+            let Some(page) = &message.tool_page else {
+                continue;
+            };
+            page.validate()
+                .map_err(|_| invalid("invalid checkpointed tool page"))?;
+            let original =
+                self.validate_tool_page_original(snapshot, context, &page.handle, budget)?;
+            if original.event.run_id != Some(checkpoint.identity.run_id)
+                || original.event.session_id != Some(checkpoint.identity.session_id)
+                || !matches!(
+                    original.event.provenance,
+                    Some(EventProvenance::Tool { .. })
+                )
+            {
+                return Err(invalid(
+                    "tool page original belongs to another run or protocol",
+                ));
+            }
+            let preview = self.read_tool_original_page_at(
+                snapshot,
+                contextdb_service::ReadOriginalPageRequest {
+                    context: context.clone(),
+                    handle: page.handle.clone(),
+                    start: page.preview.start,
+                    max_bytes: u32::try_from(page.preview.end - page.preview.start)
+                        .map_err(|_| invalid("page range size is invalid"))?,
+                    external_processing: checkpoint.model_profile.external_processing,
+                },
+                budget,
+            )?;
+            if preview.view != *page
+                || preview.bytes.len() as u64 != page.preview.end - page.preview.start
+                || ContentDigest::from_bytes(*blake3::hash(&preview.bytes).as_bytes())
+                    != page.preview.span_digest
+            {
+                return Err(invalid(
+                    "checkpointed page differs from its authenticated bytes",
+                ));
+            }
+            self.authorized_capture_policy_with_budget(
+                snapshot,
+                context,
+                message.source.event_id,
+                budget,
+            )?;
+            self.authorize_derived_custody_with_budget(
+                snapshot,
+                context,
+                message.source.event_id,
+                budget,
+            )?;
+            let anchor =
+                self.load_captured_original_with_budget(snapshot, message.source.event_id, budget)?;
+            let Some(EventProvenance::Tool {
+                call_id,
+                request_event_id,
+                action_digest,
+            }) = anchor.event.provenance
+            else {
+                return Err(invalid("tool page anchor has no captured call identity"));
+            };
+            if message.role != OutgoingRole::Tool
+                || message.tool_result.as_deref() != Some(call_id.to_string().as_str())
+                || !message.tool_calls.is_empty()
+                || anchor.event.role != EventRole::Tool
+                || anchor.event.run_id != Some(checkpoint.identity.run_id)
+                || anchor.event.session_id != Some(checkpoint.identity.session_id)
+            {
+                return Err(invalid("tool page anchor differs from the owned protocol"));
+            }
+            if message.source == page.preview {
+                if page.preview.start != 0
+                    || page.handle.byte_length <= u64::from(TOOL_RESULT_PAGE_BYTES)
+                {
+                    return Err(invalid(
+                        "initial tool preview does not describe an oversized original",
+                    ));
+                }
+                continue;
+            }
+            if anchor.event.kind != EventKind::ToolCompleted
+                || message.source.start != 0
+                || message.source.end
+                    != contextdb_core::RawSource::from(&anchor.event)
+                        .byte_length
+                        .unwrap_or(0)
+                || message.source.end > u64::from(TOOL_RESULT_PAGE_BYTES)
+            {
+                return Err(invalid(
+                    "tool page result metadata exceeds its bounded full anchor",
+                ));
+            }
+            let metadata = self.read_tool_original_page_at(
+                snapshot,
+                contextdb_service::ReadOriginalPageRequest {
+                    context: context.clone(),
+                    handle: contextdb_continuity::OriginalPageHandle {
+                        database_id: self.database_id.clone(),
+                        event_id: message.source.event_id,
+                        payload_digest: message.source.payload_digest,
+                        byte_length: message.source.end,
+                    },
+                    start: 0,
+                    max_bytes: u32::try_from(message.source.end)
+                        .map_err(|_| invalid("page metadata size is invalid"))?,
+                    external_processing: checkpoint.model_profile.external_processing,
+                },
+                budget,
+            )?;
+            if metadata.view.preview != message.source {
+                return Err(invalid(
+                    "page metadata anchor differs from its authenticated bytes",
+                ));
+            }
+            let bytes = metadata.bytes;
+            let actual: ToolResultPageView = serde_json::from_slice(&bytes)
+                .map_err(|_| invalid("page result anchor is not captured page metadata"))?;
+            if actual != *page || encode(&actual)? != bytes {
+                return Err(invalid(
+                    "tool page differs from its exact captured metadata",
+                ));
+            }
+            self.authorized_capture_policy_with_budget(
+                snapshot,
+                context,
+                request_event_id,
+                budget,
+            )?;
+            self.authorize_derived_custody_with_budget(
+                snapshot,
+                context,
+                request_event_id,
+                budget,
+            )?;
+            let request =
+                self.load_captured_original_with_budget(snapshot, request_event_id, budget)?;
+            if request.event.kind != EventKind::ToolRequested
+                || request.event.role != EventRole::Host
+                || request.event.run_id != Some(checkpoint.identity.run_id)
+                || request.event.session_id != Some(checkpoint.identity.session_id)
+                || request.event.provenance
+                    != Some(EventProvenance::Tool {
+                        call_id,
+                        request_event_id,
+                        action_digest,
+                    })
+                || !request
+                    .event
+                    .parent_event_ids
+                    .contains(&page.handle.event_id)
+            {
+                return Err(invalid(
+                    "page result lacks its captured original-dependent request",
+                ));
+            }
+            let action_bytes = request
+                .event
+                .payload
+                .original_bytes()
+                .filter(|bytes| bytes.len() <= 16 * 1024)
+                .ok_or_else(|| invalid("page action metadata is unavailable or oversized"))?;
+            let selector = captured_original_page_arguments(action_bytes, action_digest)?;
+            if selector.handle != page.handle
+                || page.preview.start < selector.start
+                || page.preview.start - selector.start > 3
+                || page.preview.end
+                    > selector
+                        .start
+                        .saturating_add(u64::from(selector.max_bytes))
+                        .min(page.handle.byte_length)
+            {
+                return Err(invalid(
+                    "page result range differs from its captured selector",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn validate_pending_model<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -489,6 +733,11 @@ impl NativeService {
         receipt: &CaptureReceipt,
     ) -> ServiceResult<()> {
         self.enable_capture_extension(tx, OWNED_FEATURE)?;
+        if has_tool_pages(&request.checkpoint) {
+            // Never remove the requirement when the current hot window changes:
+            // accepted historical checkpoints and recovery controls retain it.
+            self.enable_capture_extension(tx, TOOL_PAGES_FEATURE)?;
+        }
         let head = RunHead {
             identity: request.checkpoint.identity.clone(),
             revision: request.checkpoint.revision,
@@ -575,7 +824,42 @@ impl NativeService {
     }
 }
 
+pub(crate) fn captured_original_page_arguments(
+    bytes: &[u8],
+    digest: ContentDigest,
+) -> ServiceResult<contextdb_continuity::OriginalPageArguments> {
+    if bytes.len() > 16 * 1024
+        || ContentDigest::from_bytes(*blake3::hash(bytes).as_bytes()) != digest
+    {
+        return Err(invalid("page action binding differs from its capture"));
+    }
+    let action: PageAction =
+        serde_json::from_slice(bytes).map_err(|_| invalid("page action metadata is invalid"))?;
+    if action.operation != contextdb_continuity::ORIGINAL_PAGE_OPERATION
+        || action.expected_target_version.is_some()
+        || encode(&action)? != bytes
+    {
+        return Err(invalid(
+            "original page classification differs from the captured action",
+        ));
+    }
+    contextdb_continuity::OriginalPageArguments::from_json(&action.input)
+        .map_err(|_| invalid("original page selector is invalid or exceeds its declared bounds"))
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageAction {
+    operation: String,
+    input: Vec<u8>,
+    expected_target_version: Option<String>,
+}
+
 impl CheckpointControl {
+    pub(super) fn requires_tool_pages(&self) -> bool {
+        self.tool_pages
+    }
+
     pub(super) fn from_event(event: &EventEnvelope) -> ServiceResult<Option<Self>> {
         let Some(EventProvenance::OwnedCheckpoint {
             expected_revision,
@@ -610,8 +894,31 @@ impl CheckpointControl {
             producer_id: checkpoint.producer_id,
             next_sequence: checkpoint.next_sequence,
             status: checkpoint.status,
+            tool_pages: has_tool_pages(&checkpoint),
         }))
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn has_tool_pages(checkpoint: &OwnedRunCheckpoint) -> bool {
+    checkpoint
+        .groups
+        .iter()
+        .flat_map(|group| &group.messages)
+        .any(|message| message.tool_page.is_some())
+}
+
+pub(super) fn require_tool_page_feature(
+    checkpoint: &OwnedRunCheckpoint,
+    features: &BTreeSet<String>,
+) -> ServiceResult<()> {
+    if has_tool_pages(checkpoint) && !features.contains(TOOL_PAGES_FEATURE) {
+        return Err(integrity("checkpoint tool page format feature is absent"));
+    }
+    Ok(())
 }
 
 fn identity_digest(identity: &OwnedRunIdentity) -> ServiceResult<ContentDigest> {

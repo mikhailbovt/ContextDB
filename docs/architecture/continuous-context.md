@@ -1021,8 +1021,30 @@ Completed captured groups alone may be evicted. Active obligations occupy an
 attributed working-data zone and unpin on completion/cancellation. Checkpoints
 hold at most 64 groups, 256 messages, 32 active obligations and 8 MiB of referenced
 active text. Terminal runs cannot advance; source permissions are rechecked on
-publication and rehydration. The initial text adapter accepts bounded 1 MiB
-messages; larger current groups need an explicit range/media adapter.
+publication and rehydration. Ordinary text messages retain the 1 MiB bound.
+
+### Original tool-result pages
+
+Tool results above 4 KiB use an explicit original-page view: the full capture
+remains immutable, while the checkpoint retains a complete source locator and
+an authenticated UTF-8 range. The reader sees the original call/result binding,
+partial visibility, full length and next cursor. The complete encoded request
+still has to fit its configured budget.
+
+The reserved pure operation `contextdb.original.page` accepts that locator,
+a byte cursor and at most 4 KiB. Native reads validate current source policy,
+inherited custody, database/version/length and processing grants. A later page
+keeps both its captured tool-result metadata and its original source range;
+it does not become independent evidence. Page reads, checkpoint validation and
+rehydration charge authenticated storage IO to the parent budget. Ports without
+this adapter return `Unsupported`; binary and opaque media require separate
+profiles.
+
+This paging profile accepts locators retained in owned tool views. Discovery of
+evicted locators and binary/media adapters remain separate work. Persisted page
+views and their retained recovery markers require the monotonic native feature
+`continuous-owned-tool-pages-v1`; checkpoints without pages keep their previous
+serialized shape.
 
 A planned model call reserves its request identity before preparation. Its exact
 request is captured before handoff. After a crash, a captured request with no
@@ -1047,7 +1069,7 @@ executable actions. Recovery cannot claim the request was never accepted after
 output was observed. Malformed or unsupported proposals are also retained without
 dispatch. An historical capture gap remains explicit until a supported coverage
 repair proves closure; a later answer alone cannot erase it. Live streaming and
-oversized/non-text protocol groups require explicit adapter profiles. The initial
+non-text protocol groups require explicit adapter profiles. The initial
 hot-message profile is 1 MiB per source and 32 messages per interaction group;
 captured overflow remains durable and returns a typed error. The
 `continuous-model-protocol-v1` feature fences these new provenance contracts.
@@ -1074,6 +1096,11 @@ and operational checkpoints from new input, semantics or tool results requiring
 replanning. External effects require established current interpretation; the
 host-selected built-in memory expansion can read originals while interpretation
 is still explicitly incomplete. Operation text cannot choose the effect class.
+
+A restarted `contextdb.original.page` read authenticates the captured
+model/request/action chain and current owned locator directly, under the parent
+budget and current source, custody and processing grants. It does not depend on
+the historical process lease. External effects retain the live decision checks.
 
 The initial profile retains at most 64 leases / 16 MiB of dependency metadata,
 checks at most 64 intervening commits, and caps validity at 30 seconds or the next

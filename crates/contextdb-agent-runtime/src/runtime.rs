@@ -274,7 +274,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         }
         let changed = !tail.events.is_empty();
         for original in tail.events {
-            runtime.apply_original(&original)?;
+            runtime.apply_original(&original, budget)?;
         }
         // No request receipt after the planned checkpoint proves no permitted send.
         if matches!(runtime.phase, CallPhase::Planned) {

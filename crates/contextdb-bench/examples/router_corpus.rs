@@ -1,9 +1,10 @@
 //! Generate or cold verify the built-in synthetic router corpus. No model calls.
 
 use contextdb_bench::router_corpus::{
-    verify_builtin_router_conditional_corpus, verify_builtin_router_corpus,
-    verify_builtin_router_matched_corpus, verify_builtin_router_replay_corpus,
-    write_builtin_router_conditional_corpus, write_builtin_router_corpus,
+    verify_builtin_router_conditional_corpus, verify_builtin_router_controlled_corpus,
+    verify_builtin_router_corpus, verify_builtin_router_matched_corpus,
+    verify_builtin_router_replay_corpus, write_builtin_router_conditional_corpus,
+    write_builtin_router_controlled_corpus, write_builtin_router_corpus,
     write_builtin_router_matched_corpus, write_builtin_router_replay_corpus,
 };
 use contextdb_recall::QueryBudget;
@@ -22,9 +23,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | "verify-conditional"
                 | "build-matched"
                 | "verify-matched"
+                | "build-controlled"
+                | "verify-controlled"
         )
     {
-        return Err("usage: router_corpus build|verify|build-replay|verify-replay|build-conditional|verify-conditional|build-matched|verify-matched ABSOLUTE_OUTPUT_DIRECTORY".into());
+        return Err("usage: router_corpus build|verify|build-replay|verify-replay|build-conditional|verify-conditional|build-matched|verify-matched|build-controlled|verify-controlled ABSOLUTE_OUTPUT_DIRECTORY".into());
     }
     let mut budget = QueryBudget::new(
         20_000_000,
@@ -53,6 +56,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         "verify-matched" => {
             serde_json::to_value(verify_builtin_router_matched_corpus(root, &mut budget)?)?
+        }
+        "build-controlled" => {
+            serde_json::to_value(write_builtin_router_controlled_corpus(root, &mut budget)?)?
+        }
+        "verify-controlled" => {
+            serde_json::to_value(verify_builtin_router_controlled_corpus(root, &mut budget)?)?
         }
         _ => unreachable!("command checked"),
     };

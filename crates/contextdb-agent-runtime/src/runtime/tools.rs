@@ -118,6 +118,42 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         now: TimestampMicros,
         budget: &mut QueryBudget,
     ) -> ServiceResult<ToolOutcome> {
+        self.execute_tool_target(
+            registered_operation,
+            Some(target),
+            fence,
+            class,
+            now,
+            budget,
+        )
+    }
+
+    /// Execute the reserved pure page operation under the same tool fence and capture protocol.
+    pub fn execute_next_original_page(
+        &mut self,
+        fence: &dyn ToolDispatchFence,
+        now: TimestampMicros,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<ToolOutcome> {
+        self.execute_tool_target(
+            ORIGINAL_PAGE_OPERATION,
+            None,
+            fence,
+            ToolAdmissionClass::OriginalPage,
+            now,
+            budget,
+        )
+    }
+
+    fn execute_tool_target(
+        &mut self,
+        registered_operation: &str,
+        target: Option<&dyn ExternalTool>,
+        fence: &dyn ToolDispatchFence,
+        class: ToolAdmissionClass,
+        now: TimestampMicros,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<ToolOutcome> {
         self.ensure_active()?;
         if !matches!(self.phase, CallPhase::Ready) {
             return Err(invalid("model attempt is not at a tool boundary"));
@@ -128,6 +164,31 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         if queued.requested.action.operation != registered_operation {
             return Err(invalid("tool operation differs from the registered target"));
         }
+        let page = if registered_operation == ORIGINAL_PAGE_OPERATION {
+            if target.is_some() {
+                return Err(invalid(
+                    "original paging requires the owned local page operation",
+                ));
+            }
+            let args = original_page_arguments(&queued.requested.action)?;
+            if !self
+                .state
+                .groups
+                .iter()
+                .flat_map(|group| &group.messages)
+                .any(|message| {
+                    message
+                        .tool_page
+                        .as_ref()
+                        .is_some_and(|page| page.handle == args.handle)
+                })
+            {
+                return Err(invalid("page handle is absent from the owned tool views"));
+            }
+            Some(args)
+        } else {
+            None
+        };
         let action_bytes = serde_json::to_vec(&queued.requested.action)
             .map_err(|_| invalid("action encoding failed"))?;
         let digest = ContentDigest::from_bytes(*blake3::hash(&action_bytes).as_bytes());
@@ -175,12 +236,18 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             .event
             .parent_event_ids
             .insert(planned.proposal.event_id);
+        if let Some(page) = &page {
+            request.event.parent_event_ids.insert(page.handle.event_id);
+        }
         let guarded = GuardedTool {
             class,
             target,
             fence,
             checkpoint: &self.checkpoint_receipt,
             planned: &planned,
+            owner: self.owner.as_ref(),
+            page: page.as_ref(),
+            external_processing: self.state.model_profile.external_processing,
             budget: Mutex::new(budget),
         };
         let result = CaptureHost::new(Arc::clone(&self.owner)).run_tool(
@@ -247,7 +314,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 after_receipt: Some(receipt.clone()),
             })?;
             if original.event.producer_sequence >= self.state.next_sequence {
-                self.apply_original(&original)?;
+                self.apply_original(&original, budget)?;
             }
         }
         if self.checkpoint_position_available() {
@@ -267,6 +334,8 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         &mut self,
         event: &EventEnvelope,
         metadata: &RawSource,
+        receipt: &CaptureReceipt,
+        budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         let planned = self
             .state
@@ -314,7 +383,72 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 .ok_or_else(|| exhausted("producer sequence exhausted"))?;
             planned.outcome_recorded_at = event.recorded_at;
         } else {
-            let mut message = persistence::captured_message(metadata, OutgoingRole::Tool)?;
+            let is_page = event.kind == EventKind::ToolCompleted
+                && self.next_tool(budget)?.is_some_and(|queued| {
+                    queued.requested.action.operation == ORIGINAL_PAGE_OPERATION
+                });
+            let mut message = if is_page {
+                let mut message = persistence::captured_message(metadata, OutgoingRole::Tool)?;
+                charge(budget, 1, message.source.end - message.source.start)?;
+                let bytes = self
+                    .owner
+                    .read_original_span(&self.context, &message.source)?;
+                let view: ToolResultPageView = serde_json::from_slice(&bytes)
+                    .map_err(|_| invalid("captured original-page result metadata is invalid"))?;
+                view.validate()
+                    .map_err(|_| invalid("captured original-page view is invalid"))?;
+                let page = self.owner.read_original_page(
+                    ReadOriginalPageRequest {
+                        context: self.context.clone(),
+                        handle: view.handle.clone(),
+                        start: view.preview.start,
+                        max_bytes: u32::try_from(view.preview.end - view.preview.start)
+                            .map_err(|_| invalid("page range size is invalid"))?,
+                        external_processing: self.state.model_profile.external_processing,
+                    },
+                    budget,
+                )?;
+                if page.view != view {
+                    return Err(invalid("captured page metadata differs from its original"));
+                }
+                message.tool_page = Some(view);
+                message
+            } else if metadata
+                .byte_length
+                .is_some_and(|length| length > u64::from(TOOL_RESULT_PAGE_BYTES))
+            {
+                let handle = OriginalPageHandle {
+                    database_id: receipt.database_id.clone(),
+                    event_id: metadata.event_id,
+                    payload_digest: metadata
+                        .payload_digest
+                        .ok_or_else(|| invalid("tool original digest is absent"))?,
+                    byte_length: metadata
+                        .byte_length
+                        .ok_or_else(|| invalid("tool original length is absent"))?,
+                };
+                let page = self.owner.read_original_page(
+                    ReadOriginalPageRequest {
+                        context: self.context.clone(),
+                        handle,
+                        start: 0,
+                        max_bytes: TOOL_RESULT_PAGE_BYTES,
+                        external_processing: self.state.model_profile.external_processing,
+                    },
+                    budget,
+                )?;
+                CapturedMessage {
+                    id: BlockId::new(format!("event:{}", metadata.event_id))
+                        .map_err(context_error)?,
+                    source: page.view.preview.clone(),
+                    role: OutgoingRole::Tool,
+                    tool_calls: vec![],
+                    tool_result: None,
+                    tool_page: Some(page.view),
+                }
+            } else {
+                persistence::captured_message(metadata, OutgoingRole::Tool)?
+            };
             message.tool_result = Some(planned.call_id.to_string());
             self.state
                 .groups
@@ -328,17 +462,54 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
     }
 }
 
-struct GuardedTool<'a> {
+struct GuardedTool<'a, S: ?Sized> {
     class: ToolAdmissionClass,
-    target: &'a dyn ExternalTool,
+    target: Option<&'a dyn ExternalTool>,
     fence: &'a dyn ToolDispatchFence,
     checkpoint: &'a CaptureReceipt,
     planned: &'a PendingToolInvocation,
     budget: Mutex<&'a mut QueryBudget>,
+    owner: &'a S,
+    page: Option<&'a OriginalPageArguments>,
+    external_processing: bool,
 }
-impl ExternalTool for GuardedTool<'_> {
+impl<S: PayloadPort + ?Sized> GuardedTool<'_, S> {
+    fn page_observation(
+        &self,
+        context: &AuthenticatedRequestContext,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<ToolObservation> {
+        let args = self
+            .page
+            .ok_or_else(|| invalid("original page arguments absent"))?;
+        let page = self.owner.read_original_page(
+            ReadOriginalPageRequest {
+                context: context.clone(),
+                handle: args.handle.clone(),
+                start: args.start,
+                max_bytes: args.max_bytes,
+                external_processing: self.external_processing,
+            },
+            budget,
+        )?;
+        // Capture only authenticated page metadata, not another independent copy of source prose.
+        let bytes = serde_json::to_vec(&page.view)
+            .map_err(|_| invalid("original page metadata encoding failed"))?;
+        charge(budget, 1, bytes.len() as u64)?;
+        Ok(ToolObservation {
+            outcome: ToolOutcome::Completed,
+            bytes: Some(bytes),
+            media_type: "application/json".into(),
+            upstream_truncated: false,
+        })
+    }
+}
+impl<S: PayloadPort + ?Sized> ExternalTool for GuardedTool<'_, S> {
     fn replay_safety(&self) -> ToolReplaySafety {
-        self.target.replay_safety()
+        self.target
+            .map_or(ToolReplaySafety::NoAutomaticReplay, |target| {
+                target.replay_safety()
+            })
     }
     fn execute(
         &self,
@@ -368,8 +539,21 @@ impl ExternalTool for GuardedTool<'_> {
                 upstream_truncated: false,
             });
         }
+        if self.page.is_some() {
+            if call_id != self.planned.call_id
+                || &original_page_arguments(action)?
+                    != self
+                        .page
+                        .ok_or_else(|| invalid("original page arguments absent"))?
+            {
+                return Err(invalid("original page action binding differs"));
+            }
+            return self.page_observation(context, &mut budget);
+        }
         drop(budget);
-        self.target.execute(context, call_id, action)
+        self.target
+            .ok_or_else(|| invalid("external target absent"))?
+            .execute(context, call_id, action)
     }
     fn reconcile(
         &self,
@@ -382,7 +566,18 @@ impl ExternalTool for GuardedTool<'_> {
             .lock()
             .map_err(|_| invalid("tool recovery budget lock poisoned"))?;
         charge(&mut budget, 1, 0)?;
+        if self.page.is_some() {
+            if call_id != self.planned.call_id || action_digest != self.planned.action_digest {
+                return Err(invalid("original page reconciliation binding differs"));
+            }
+            return Ok(ToolReconciliation::Observed {
+                action_digest,
+                observation: self.page_observation(context, &mut budget)?,
+            });
+        }
         drop(budget);
-        self.target.reconcile(context, call_id, action_digest)
+        self.target
+            .ok_or_else(|| invalid("external target absent"))?
+            .reconcile(context, call_id, action_digest)
     }
 }

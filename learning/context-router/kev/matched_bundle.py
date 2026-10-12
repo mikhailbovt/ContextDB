@@ -5,7 +5,6 @@ import os
 import hashlib
 import importlib.metadata
 import math
-import math
 import sys
 from pathlib import Path
 
@@ -75,7 +74,6 @@ def cold_reference(path, model_profile=None):
             and value["from_partition"] == "validation" and value["test_evaluated"] == 0,
             "existing matched development reference required")
     matched.digest(value["association"])
-    import math
     require(type(value["utility_logits"]) is list and 0 < len(value["utility_logits"]) <= matched.LIMITS["questions"]
             and all(type(item) in {int, float} and math.isfinite(item) for item in value["utility_logits"]),
             "bounded finite cold matched logits required")

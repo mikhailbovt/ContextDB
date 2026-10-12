@@ -266,6 +266,7 @@ fn pruned_v2_retains_header_and_all_descendants_and_refuses_feature_or_header_do
         role: OutgoingRole::Assistant,
         tool_calls: Vec::new(),
         tool_result: None,
+        tool_page: None,
     });
     let checkpoint = f
         .service

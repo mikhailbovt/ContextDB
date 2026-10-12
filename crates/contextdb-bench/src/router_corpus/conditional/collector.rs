@@ -10,6 +10,7 @@ pub(super) enum Exploration {
     AlwaysStop,
     FirstInventorySingleThenStop(BlockId),
     UnresolvedStopV2,
+    ControlledStopV4,
 }
 
 struct Pending {
@@ -38,11 +39,15 @@ impl ContextScorer for Collector {
             Exploration::ConstantPositive | Exploration::AlwaysStop => {
                 "contextdb.synthetic-conditional-exploration.v1"
             }
+            Exploration::ControlledStopV4 => "contextdb.synthetic-controlled-resident-stop.v4",
             _ => "contextdb.synthetic-matched-exploration.v2",
         }
     }
     fn revision(&self) -> &str {
         self.id()
+    }
+    fn score_singletons_first(&self) -> bool {
+        self.exploration == Exploration::ControlledStopV4
     }
     fn failure_policy(&self) -> ScorerFailurePolicy {
         match &self.exploration {
@@ -105,7 +110,9 @@ impl ContextScorer for Collector {
         });
         Ok(match &self.exploration {
             Exploration::ConstantPositive => Some(1_000_000),
-            Exploration::AlwaysStop | Exploration::UnresolvedStopV2 => None,
+            Exploration::AlwaysStop
+            | Exploration::UnresolvedStopV2
+            | Exploration::ControlledStopV4 => None,
             Exploration::FirstInventorySingleThenStop(id) => {
                 let selected = unit
                     .selected

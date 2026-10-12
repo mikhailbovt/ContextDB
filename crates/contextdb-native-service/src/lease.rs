@@ -241,6 +241,7 @@ impl NativeService {
             &request.context,
             checkpoint
                 .ok_or_else(|| invalid("prepared capture requires the current owned checkpoint"))?,
+            budget,
         )?;
         let pending = state
             .pending_model

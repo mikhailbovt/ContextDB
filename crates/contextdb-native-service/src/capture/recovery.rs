@@ -118,6 +118,11 @@ impl CaptureRecovery {
                 .contains(crate::payload::MODEL_PROTOCOL_FEATURE))
             || (self.checkpoint.is_some()
                 && !manifest.features.contains(crate::owned::OWNED_FEATURE))
+            || (self
+                .checkpoint
+                .as_ref()
+                .is_some_and(|checkpoint| checkpoint.requires_tool_pages())
+                && !manifest.features.contains(crate::owned::TOOL_PAGES_FEATURE))
             || ((self.provenance.is_some()
                 || matches!(
                     self.payload.shape,

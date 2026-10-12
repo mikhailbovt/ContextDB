@@ -163,6 +163,11 @@ pub trait ContextScorer: std::fmt::Debug + Send + Sync {
     fn revision(&self) -> &str {
         self.id()
     }
+    /// Host-selected proposal order, covered by the immutable scorer revision.
+    /// The default preserves existing singleton/pair traversal.
+    fn score_singletons_first(&self) -> bool {
+        false
+    }
     /// Cooperative aggregate scorer deadline for the opt-in router stage.
     fn latency_limit_micros(&self) -> u64 {
         1_000_000

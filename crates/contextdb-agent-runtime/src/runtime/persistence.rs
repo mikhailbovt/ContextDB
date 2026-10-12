@@ -103,7 +103,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             event_id: receipt.event_id,
             after_receipt: Some(receipt.clone()),
         })?;
-        self.apply_original(&original)?;
+        self.apply_original(&original, budget)?;
         if let PendingCapture::ModelRequest { prepared, .. } = pending {
             self.phase = CallPhase::Captured {
                 prepared,
@@ -114,7 +114,11 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         Ok(receipt)
     }
 
-    pub(super) fn apply_original(&mut self, original: &CapturedOriginal) -> ServiceResult<()> {
+    pub(super) fn apply_original(
+        &mut self,
+        original: &CapturedOriginal,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
         let event = &original.event;
         if event.producer_id != self.state.producer_id
             || event.producer_sequence != self.state.next_sequence
@@ -233,7 +237,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 EventKind::ToolCompleted | EventKind::ToolFailed | EventKind::ToolOutcomeUnknown,
                 EventRole::Tool,
             ) => {
-                self.apply_tool_event(event, &metadata)?;
+                self.apply_tool_event(event, &metadata, &original.receipt, budget)?;
             }
             _ => {
                 return Err(ServiceError::new(
@@ -322,5 +326,6 @@ pub(super) fn captured_message(
         role,
         tool_calls: vec![],
         tool_result: None,
+        tool_page: None,
     })
 }

@@ -9,7 +9,8 @@ use contextdb_core::{
 use contextdb_recall::QueryBudget as PayloadBudget;
 use contextdb_service::{
     AccessPolicy, AuthenticatedRequestContext, Capability, CaptureDurability, ErrorCode,
-    PayloadPort, PayloadReceipt, ServiceError, ServiceResult, StagePayloadRequest,
+    OriginalPage, PayloadPort, PayloadReceipt, ReadOriginalPageRequest, ServiceError,
+    ServiceResult, StagePayloadRequest,
 };
 use contextdb_storage::{
     Durability, ReadSnapshot, SnapshotSelector, StorageEngine, WriteTransaction,
@@ -33,6 +34,7 @@ pub const CAPTURE_MAX_REQUEST_PARTS: usize = 512;
 const CHUNK_BYTES: usize = 256 * 1024;
 
 pub(crate) mod keys;
+mod page;
 mod pruning;
 pub use keys::NativePayloadKeyInventory;
 pub use pruning::NativePayloadPruningProgress;
@@ -174,6 +176,14 @@ impl PayloadPort for NativeService {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         self.source_span(&snapshot, Some(context), span, false)
+    }
+
+    fn read_original_page(
+        &self,
+        request: ReadOriginalPageRequest,
+        budget: &mut PayloadBudget,
+    ) -> ServiceResult<OriginalPage> {
+        self.read_tool_original_page(request, budget)
     }
 }
 
@@ -552,7 +562,7 @@ impl NativeService {
         self.source_span_inner(snapshot, context, span, independent_root, None)
     }
 
-    fn source_span_inner<S: ReadSnapshot>(
+    pub(crate) fn source_span_inner<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         context: Option<&AuthenticatedRequestContext>,

@@ -42,6 +42,11 @@ struct PreparedCapture<'a> {
     budget: &'a mut contextdb_recall::QueryBudget,
 }
 
+struct CheckpointCapture<'a> {
+    request: &'a SaveRunCheckpointRequest,
+    budget: &'a mut contextdb_recall::QueryBudget,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CaptureRecord {
@@ -105,7 +110,7 @@ impl CapturePort for NativeService {
         &self,
         request: CaptureRequest,
     ) -> ServiceResult<CaptureAcceptance> {
-        self.append_owned_capture(request, None)
+        self.append_owned_capture(request, None, None)
     }
 
     fn read_original(&self, request: ReadOriginalRequest) -> ServiceResult<CapturedOriginal> {
@@ -261,7 +266,13 @@ impl NativeService {
         &self,
         request: CaptureRequest,
         checkpoint: Option<&SaveRunCheckpointRequest>,
+        budget: Option<&mut contextdb_recall::QueryBudget>,
     ) -> ServiceResult<CaptureAcceptance> {
+        let checkpoint = match (checkpoint, budget) {
+            (None, None) => None,
+            (Some(request), Some(budget)) => Some(CheckpointCapture { request, budget }),
+            _ => return Err(invalid("checkpoint capture requires its parent budget")),
+        };
         self.append_capture(request, checkpoint, None)
     }
 
@@ -286,7 +297,7 @@ impl NativeService {
     fn append_capture(
         &self,
         request: CaptureRequest,
-        checkpoint: Option<&SaveRunCheckpointRequest>,
+        mut checkpoint: Option<CheckpointCapture<'_>>,
         mut prepared: Option<PreparedCapture<'_>>,
     ) -> ServiceResult<CaptureAcceptance> {
         let traced = matches!(&request.event.payload, EventPayload::Assembly { manifest }
@@ -306,7 +317,10 @@ impl NativeService {
         {
             require_capability(&request.context, Capability::Runtime)?;
         }
-        match (&request.event.provenance, checkpoint) {
+        match (
+            &request.event.provenance,
+            checkpoint.as_ref().map(|checkpoint| checkpoint.request),
+        ) {
             (
                 Some(EventProvenance::OwnedCheckpoint {
                     expected_revision,
@@ -375,7 +389,7 @@ impl NativeService {
                 &producer,
                 &idempotency,
                 &request_digest,
-                checkpoint,
+                checkpoint.as_mut(),
                 prepared.as_mut(),
             )? {
                 return Ok(receipt);
@@ -445,7 +459,7 @@ impl NativeService {
         producer: &str,
         idempotency: &str,
         request_digest: &str,
-        checkpoint: Option<&SaveRunCheckpointRequest>,
+        mut checkpoint: Option<&mut CheckpointCapture<'_>>,
         prepared: Option<&mut PreparedCapture<'_>>,
     ) -> ServiceResult<Option<CaptureAcceptance>> {
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
@@ -462,8 +476,12 @@ impl NativeService {
                 newly_accepted: false,
             }));
         }
-        if let Some(checkpoint) = checkpoint {
-            self.validate_checkpoint_publication(&transaction, checkpoint)?;
+        if let Some(checkpoint) = checkpoint.as_deref_mut() {
+            self.validate_checkpoint_publication(
+                &transaction,
+                checkpoint.request,
+                checkpoint.budget,
+            )?;
         }
         if let Some(admission) = prepared {
             if self.engine.keys.is_none() {
@@ -685,7 +703,7 @@ impl NativeService {
                 .map_err(storage_error)?;
         }
         if let Some(checkpoint) = checkpoint {
-            self.publish_checkpoint_head(&mut transaction, checkpoint, &receipt)?;
+            self.publish_checkpoint_head(&mut transaction, checkpoint.request, &receipt)?;
         }
         self.finish_frame(
             &mut transaction,

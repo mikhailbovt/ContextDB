@@ -2,11 +2,17 @@
 //! Source-coverage labels are a declared surrogate, not reader benefit or rights.
 
 mod collector;
+mod controlled;
 mod files;
 mod fixture;
 mod matched;
 mod targets;
 
+pub use controlled::{
+    CONTROLLED_BUILDER, CONTROLLED_CORPUS_FORMAT, CONTROLLED_DATA_PROFILE, CONTROLLED_GENERATOR,
+    MAX_CONTROLLED_ROWS, verify_builtin_router_controlled_corpus,
+    write_builtin_router_controlled_corpus,
+};
 pub use matched::{
     MATCHED_BUILDER, MATCHED_CORPUS_FORMAT, MATCHED_GENERATOR, MATCHED_MODEL_PROFILE,
     MAX_MATCHED_ROWS, verify_builtin_router_matched_corpus, write_builtin_router_matched_corpus,

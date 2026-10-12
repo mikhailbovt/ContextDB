@@ -364,6 +364,7 @@ fn discarded_origin_removal_reaches_trace_output_and_checkpoint_and_preserves_in
         role: OutgoingRole::Assistant,
         tool_calls: Vec::new(),
         tool_result: None,
+        tool_page: None,
     });
     let checkpoint = f
         .service

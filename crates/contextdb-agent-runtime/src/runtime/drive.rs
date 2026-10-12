@@ -10,6 +10,20 @@ use crate::ToolDispatchFence;
 /// Reserved pure operation. Arguments are JSON encoding of up to eight IndexedQuery values.
 pub const MEMORY_EXPAND_OPERATION: &str = "contextdb.memory.expand";
 
+pub use contextdb_continuity::OriginalPageArguments;
+pub(super) fn original_page_arguments(action: &ToolAction) -> ServiceResult<OriginalPageArguments> {
+    if action.operation != ORIGINAL_PAGE_OPERATION
+        || action.input.len() > 4096
+        || action.expected_target_version.is_some()
+    {
+        return Err(invalid(
+            "original paging requires bounded selector JSON without external preconditions",
+        ));
+    }
+    OriginalPageArguments::from_json(&action.input)
+        .map_err(|_| invalid("original page selector is invalid or exceeds its declared bounds"))
+}
+
 /// Host registry; model-provided names never construct arbitrary executable targets.
 pub trait RuntimeToolRegistry: std::fmt::Debug + Send + Sync {
     /// Return only a host-authorized adapter for this exact operation.
@@ -91,6 +105,18 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 }
                 tool_steps += 1;
                 let operation = &queued.requested.action.operation;
+                if operation == ORIGINAL_PAGE_OPERATION {
+                    if self.execute_next_original_page(adapters.tool_fence, now, budget)?
+                        == ToolOutcome::Unknown
+                    {
+                        return Err(ServiceError::new(
+                            ErrorCode::ProviderUnavailable,
+                            "original page outcome remains unknown; reconcile before continuing",
+                            false,
+                        ));
+                    }
+                    continue;
+                }
                 let target: Arc<dyn ExternalTool> = if operation == MEMORY_EXPAND_OPERATION {
                     // Validate before recording execution; no LLM grants or arbitrary handlers.
                     expansion_queries(&queued.requested.action)?;

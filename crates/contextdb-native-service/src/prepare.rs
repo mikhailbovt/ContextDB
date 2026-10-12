@@ -2,9 +2,9 @@
 
 use contextdb_context::*;
 use contextdb_core::{
-    AcceptanceState, ContentDigest, EpistemicBasis, EpistemicState, EventRole, LifecycleState,
-    OriginalSourceSpan, PolicyDecision, ResolvedState, ScopeId, StateKey, TemporalConstraint,
-    TimestampMicros,
+    AcceptanceState, ContentDigest, EpistemicBasis, EpistemicState, EventKind, EventRole,
+    LifecycleState, OriginalSourceSpan, PolicyDecision, RawSource, ResolvedState, ScopeId,
+    StateKey, TemporalConstraint, TimestampMicros,
 };
 use contextdb_recall::{
     IndexedRecallProvider, ProviderSnapshot, QueryBudget, RecallPrincipal, RecallWatermarks,
@@ -50,6 +50,7 @@ struct NativeAssemblyProvider<'a> {
     binding: AssemblyBinding,
     fence: PrepareFence,
     trace_controls: Option<RouterTraceControls>,
+    external_processing: bool,
 }
 
 impl ContextProvider for NativeAssemblyProvider<'_> {
@@ -96,16 +97,57 @@ impl AssemblyProvider for NativeAssemblyProvider<'_> {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(context_error)?;
-        let original = self
-            .service
-            .source_span(&snapshot, Some(self.context), span, false)
+        self.service
+            .authorized_capture_policy_with_budget(&snapshot, self.context, span.event_id, budget)
             .map_err(context_error)?;
-        let receipt = self
+        self.service
+            .authorize_derived_custody_with_budget(&snapshot, self.context, span.event_id, budget)
+            .map_err(context_error)?;
+        let captured = self
             .service
-            .load_captured_original(&snapshot, span.event_id)
-            .map_err(context_error)?
-            .receipt;
-        if original != bytes || receipt.workspace_commit > self.fence.known_at {
+            .load_captured_original_with_budget(&snapshot, span.event_id, budget)
+            .map_err(context_error)?;
+        let length = RawSource::from(&captured.event).byte_length.unwrap_or(0);
+        let original = if captured.event.role == EventRole::Tool
+            && matches!(
+                captured.event.kind,
+                EventKind::ToolCompleted | EventKind::ToolFailed
+            )
+            && length > u64::from(contextdb_continuity::TOOL_RESULT_PAGE_BYTES)
+            && span.end.checked_sub(span.start).is_some_and(|length| {
+                length > 0 && length <= u64::from(contextdb_continuity::TOOL_RESULT_PAGE_BYTES)
+            }) {
+            let page = self
+                .service
+                .read_tool_original_page_at(
+                    &snapshot,
+                    contextdb_service::ReadOriginalPageRequest {
+                        context: self.context.clone(),
+                        handle: contextdb_continuity::OriginalPageHandle {
+                            database_id: self.service.database_id.clone(),
+                            event_id: span.event_id,
+                            payload_digest: span.payload_digest,
+                            byte_length: length,
+                        },
+                        start: span.start,
+                        max_bytes: (span.end - span.start) as u32,
+                        external_processing: self.external_processing,
+                    },
+                    budget,
+                )
+                .map_err(context_error)?;
+            if page.view.preview != *span {
+                return Err(ContextError::Provider(
+                    "original page range or digest changed".into(),
+                ));
+            }
+            page.bytes
+        } else {
+            self.service
+                .source_span(&snapshot, Some(self.context), span, false)
+                .map_err(context_error)?
+        };
+        if original != bytes || captured.receipt.workspace_commit > self.fence.known_at {
             return Err(ContextError::Provider(
                 "source bytes/version exceed the pinned knowledge view".into(),
             ));
@@ -611,6 +653,7 @@ impl PrepareContextPort for NativeService {
             binding,
             fence,
             trace_controls,
+            external_processing: request.model_profile.external_processing,
         };
         let principal = RecallPrincipal {
             subject: request.context.request.subject_id.clone(),

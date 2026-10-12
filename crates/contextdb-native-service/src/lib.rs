@@ -1237,6 +1237,7 @@ impl NativeService {
     }
 
     fn verify_all_records<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<String> {
+        let manifest = self.raw_manifest(snapshot)?;
         for entry in snapshot
             .scan_prefix(&self.keyspaces.policy_history, b"")
             .map_err(storage_error)?
@@ -1354,6 +1355,18 @@ impl NativeService {
                 return Err(integrity(
                     "native observation policy/content binding is invalid",
                 ));
+            }
+            if content.metadata.get("capture_format")
+                == Some(&serde_json::json!(contextdb_service::NATIVE_CAPTURE_DOMAIN))
+                && content.content.get("kind")
+                    == Some(&serde_json::json!(
+                        contextdb_core::EventKind::RunCheckpointed
+                    ))
+            {
+                let event: contextdb_core::EventEnvelope = serde_json::from_value(content.content)
+                    .map_err(|_| integrity("captured checkpoint envelope is invalid"))?;
+                let checkpoint = owned::decode_checkpoint(&event)?;
+                owned::require_tool_page_feature(&checkpoint, &manifest.features)?;
             }
         }
         for entry in snapshot
@@ -3461,6 +3474,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != router_trace::TRACE_FEATURE
                 && feature != router_trace::TRACE_REPLAY_FEATURE
                 && feature != owned::OWNED_FEATURE
+                && feature != owned::TOOL_PAGES_FEATURE
                 && feature != payload::SOURCE_FEATURE
                 && feature != payload::MODEL_PROTOCOL_FEATURE
                 && feature != payload::REQUEST_TRANSFORM_FEATURE
@@ -3497,6 +3511,8 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
             .features
             .contains(router_trace::TRACE_REPLAY_FEATURE)
             && !manifest.features.contains(router_trace::TRACE_FEATURE))
+        || (manifest.features.contains(owned::TOOL_PAGES_FEATURE)
+            && !manifest.features.contains(owned::OWNED_FEATURE))
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
         || ((manifest.features.contains(record_journal::CONTROL_FEATURE)
             || manifest

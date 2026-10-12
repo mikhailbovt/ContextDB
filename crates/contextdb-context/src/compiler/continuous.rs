@@ -899,7 +899,16 @@ fn select_prepared(
         }
         let covered = covered_facets(&prepared, &selected);
         let mut winner: Option<SelectionWinner> = None;
-        for seeds in units_to_score {
+        let singletons_first = scorer.score_singletons_first();
+        let proposals = units_to_score
+            .iter()
+            .filter(|seeds| !singletons_first || seeds.len() == 1)
+            .chain(
+                units_to_score
+                    .iter()
+                    .filter(|seeds| singletons_first && seeds.len() != 1),
+            );
+        for seeds in proposals.cloned() {
             if evaluations >= context.budgets.max_selection_evaluations {
                 break;
             }

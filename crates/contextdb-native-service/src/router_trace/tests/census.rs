@@ -653,7 +653,8 @@ fn allowance() -> QueryBudget {
     QueryBudget::new(
         20_000_000,
         2 * 1024 * 1024 * 1024,
-        Duration::from_secs(60),
+        // The whole census opens twelve native databases, including on slow CI.
+        Duration::from_secs(300),
         Default::default(),
     )
 }

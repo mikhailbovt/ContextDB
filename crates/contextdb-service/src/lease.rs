@@ -34,6 +34,8 @@ pub enum ContextLeaseStatus {
 pub enum ToolAdmissionClass {
     /// The built-in bounded original-context expansion, with no external effect.
     MemoryExpansion,
+    /// The built-in authenticated original-page reader, with no external effect.
+    OriginalPage,
     /// A registered external target; unresolved interpretation blocks admission.
     ExternalEffect,
 }
