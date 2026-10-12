@@ -872,7 +872,11 @@ The initial projection supports independent UTF-8 originals up to 64 KiB and
 have explicit omissions. `caught_up` names the frozen raw prefix, rather than
 semantic retrieval coverage. The syntax-preserving `dense_step_query` helper
 samples up to 4 KiB of current user/tool/working/assistant source excerpts and
-retains observational span provenance.
+retains observational span provenance. Explicit refinements re-form that sample
+at 4096/2048/1024/512 bytes with new exact ranges and visible gaps. The adapter's
+separate token measurement includes the instruction and special tokens without
+inference; an oversized measurement leaves the owned encoder available. Actual
+embedding still refuses inputs above 2048 exact tokens without truncation.
 
 `search_ann_partition_v2` provides a separate point-only best-first kernel with
 node/vector/discovery caps and typed owner failures. The storage-neutral builder
@@ -890,11 +894,24 @@ declarations, deep reconstruction and paged generation GC cover these rows.
 permitted cohorts and point-reads current members, nodes and vectors. It checks
 the owner fence at entry, during reads and at exit. Results contain attributed
 source spans and approximate traversal status; original bytes are verified at
-materialization. Advancing the source generation makes this initial graph stale
-and requires rebuilding. Bounded fresh-vector tails, automatic query embedding,
-BM25/dense/causal fusion and the protected candidate frontier are still required
-before automatic hybrid activation. Real-encoder source recall, Kev utility and
-paired main-reader benefit remain separate acceptance gates.
+materialization. This strict API refuses an advanced source generation.
+
+The separate `search_original_spans_with_tail` path serves that immutable base
+alongside a bounded fresh dense prefix. It authenticates accepted capture work
+and complete tagged source documents, then reproduces the exact latest ordered
+dense commitment before reading tail vectors. At most 128 work items and 256
+permitted tail vectors share the operation's ANN and parent budgets. Profile,
+active generation, epoch and removal boundaries remain fixed; changed authority
+refuses the attempt. Proof limits, dense lag, omissions and traversal limits stay
+explicit. Queries perform no graph build, neural forward or original-body census.
+
+Preparation unions matching ranges across routes before materializing one
+immutable source. Conflicting versions or equal-range digests refuse; the bounded
+rendering frontier cannot silently discard additional ranges. Protected routing
+retains inspected raw origins alongside generic discovery. Automatic owned query
+admission, BM25/dense/causal fusion and the full hybrid frontier remain activation
+gates. Real-encoder source recall, Kev utility and paired main-reader benefit
+remain separate acceptance gates.
 
 Scope eligibility precedes domain labels and content search. Each domain includes
 the original's policy and every source dependency's policy. Ranking uses match

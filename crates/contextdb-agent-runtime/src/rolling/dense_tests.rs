@@ -269,3 +269,59 @@ fn dense_cues_refuse_bad_render_spans_and_use_the_parent_limits() {
     dense_step_query(&input, &mut allowance).expect("actual charged sample");
     assert!(allowance.remaining_work() < before.0 && allowance.remaining_bytes() < before.1);
 }
+
+#[test]
+fn explicit_byte_refinements_reform_exact_utf8_provenance_and_keep_newest_correction() {
+    let user = "Where is it now? ".to_owned() + &"🙂 原文? ".repeat(900) + " USER_END";
+    let tool =
+        "Correction: moved today. ".to_owned() + &"é tool observation ".repeat(900) + " TOOL_END";
+    let input = base(vec![
+        observed("user", OutgoingRole::User, &user, ""),
+        observed("tool", OutgoingRole::Tool, &tool, "host_header\n"),
+    ]);
+    let original = input.clone();
+    let mut previous_inspected = u64::MAX;
+    for cap in DENSE_QUERY_PREFLIGHT_BYTE_LIMITS {
+        let cues = dense_step_query_with_byte_limit(&input, cap, &mut budget())
+            .expect("explicit source-preserving refinement");
+        assert_eq!(cues.revision, DENSE_QUERY_REFINEMENT_REVISION);
+        assert!(cues.text.len() <= cap);
+        assert!(
+            cues.text.contains("Where is it now?")
+                && cues.text.contains("Correction: moved today.")
+                && cues.text.contains("USER_END")
+                && cues.text.contains("TOOL_END")
+        );
+        assert!(!cues.text.contains("host_header") && cues.text.contains("[omitted]"));
+        assert!(cues.inspected_bytes <= previous_inspected);
+        previous_inspected = cues.inspected_bytes;
+        assert_eq!(
+            cues.inspected_bytes + cues.omitted_bytes,
+            (user.len() + tool.len()) as u64
+        );
+        for fragment in cues.fragments {
+            let message = input
+                .current
+                .iter()
+                .find(|message| message.id == fragment.message_id)
+                .expect("observed message");
+            let excerpt =
+                &message.text[fragment.message_start as usize..fragment.message_end as usize];
+            assert_eq!(
+                &cues.text[fragment.query_start as usize..fragment.query_end as usize],
+                excerpt
+            );
+            assert_eq!(
+                fragment.source.expect("exact attributed span").span_digest,
+                ContentDigest::from_bytes(*blake3::hash(excerpt.as_bytes()).as_bytes())
+            );
+        }
+    }
+    assert_eq!(input, original);
+    assert_eq!(
+        dense_step_query_with_byte_limit(&input, 511, &mut budget())
+            .expect_err("unsupported sample cap")
+            .code,
+        contextdb_service::ErrorCode::InvalidArgument
+    );
+}

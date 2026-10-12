@@ -22,6 +22,14 @@ impl NativeService {
     ) -> ServiceResult<std::result::Result<Vec<PreparedRawSpan>, OriginalRenderOmission>> {
         const WHOLE_LIMIT: u64 = 32 * 1024;
         const CONTEXT: u64 = 1024;
+        if hit.matches.len() > 64 {
+            return Err(super::super::exhausted(
+                "raw matched range inventory exceeds its bound",
+            ));
+        }
+        budget
+            .charge(hit.matches.len() as u64 + 1, hit.matches.len() as u64 * 256)
+            .map_err(budget_error)?;
         let Some(length) = hit.source.byte_length.filter(|length| *length > 0) else {
             return Ok(Err(OriginalRenderOmission::Unavailable));
         };
@@ -59,12 +67,16 @@ impl NativeService {
             } else {
                 hit.matches
                     .iter()
-                    .take(8)
                     .map(|span| span.start.saturating_sub(CONTEXT))
                     .collect::<BTreeSet<_>>()
                     .into_iter()
                     .collect()
             };
+            if starts.len() > 8 {
+                return Err(super::super::exhausted(
+                    "matched tool page cursors exceed the rendering frontier",
+                ));
+            }
             let mut spans = Vec::new();
             for start in starts {
                 let page = self.read_tool_original_page_at(
@@ -94,7 +106,6 @@ impl NativeService {
             let mut ranges: Vec<(u64, u64)> = hit
                 .matches
                 .iter()
-                .take(8)
                 .map(|span| {
                     (
                         span.start.saturating_sub(CONTEXT),
@@ -112,6 +123,11 @@ impl NativeService {
                 } else {
                     merged.push((start, end));
                 }
+            }
+            if merged.len() > 8 {
+                return Err(super::super::exhausted(
+                    "matched original ranges exceed the rendering frontier",
+                ));
             }
             merged
         };

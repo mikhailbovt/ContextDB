@@ -158,6 +158,108 @@ pub enum EmbeddingTextKind {
     Query,
 }
 
+/// Hard bound for a tokenize-only observation, independent of inference capacity.
+/// An oversized measured input is never admitted to the embedding model.
+pub const MAX_MEASURED_EMBEDDING_TOKENS: u32 = 16_384;
+
+/// Exact tokenizer observation, without a vector or neural-forward authority.
+/// Text must already be owner-admitted before it reaches the trusted tokenizer.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TokenizedText {
+    /// Full compatibility identity actually used for tokenization.
+    pub profile_digest: ContentDigest,
+    /// Source/query preprocessing role actually measured.
+    pub kind: EmbeddingTextKind,
+    /// BLAKE3 of exact original query/source bytes before preprocessing.
+    pub text_digest: ContentDigest,
+    /// BLAKE3 of actual input including the query instruction, when applicable.
+    pub input_digest: ContentDigest,
+    /// BLAKE3 of every exact ordered little-endian nonnegative i32 token ID.
+    pub tokens_digest: ContentDigest,
+    /// Exact token count, including added special tokens; may exceed inference.
+    pub token_count: u32,
+}
+
+impl TokenizedText {
+    /// Validate exact role/text/profile binding and the separate measurement cap.
+    /// A validated observation does not prove encoder quality or grant permission.
+    pub fn validate(
+        &self,
+        profile: &TextEmbeddingProfile,
+        kind: EmbeddingTextKind,
+        text: &str,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        profile.validate()?;
+        if text.is_empty()
+            || text.len() > profile.max_text_bytes as usize
+            || self.token_count == 0
+            || self.token_count > MAX_MEASURED_EMBEDDING_TOKENS
+            || self.tokens_digest == ContentDigest::from_bytes([0; 32])
+        {
+            return Err(invalid("token measurement bounds refused"));
+        }
+        charge_profile_observation(profile, budget)?;
+        charge(
+            budget,
+            text.len() as u64 * 2 + profile.query_instruction.len() as u64 + 1,
+            (text.len() + profile.query_instruction.len() + 20) as u64 * 2,
+        )?;
+        let input = profile.input_text(kind, text)?;
+        if self.profile_digest != profile.digest()?
+            || self.kind != kind
+            || self.text_digest != digest(text.as_bytes())
+            || self.input_digest != digest(input.as_bytes())
+        {
+            return Err(invalid("token measurement binding mismatch"));
+        }
+        Ok(())
+    }
+
+    /// Check exact profile binding before interpreting its inference capacity.
+    /// This is a capacity comparison only; it performs no inference or admission.
+    pub fn fits_inference_limit(
+        &self,
+        profile: &TextEmbeddingProfile,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<bool> {
+        profile.validate()?;
+        if self.token_count == 0
+            || self.token_count > MAX_MEASURED_EMBEDDING_TOKENS
+            || self.tokens_digest == ContentDigest::from_bytes([0; 32])
+        {
+            return Err(invalid("token measurement bounds refused"));
+        }
+        charge_profile_observation(profile, budget)?;
+        if self.profile_digest != profile.digest()? {
+            return Err(invalid("token measurement profile mismatch"));
+        }
+        Ok(self.token_count <= profile.max_input_tokens)
+    }
+}
+
+fn charge_profile_observation(
+    profile: &TextEmbeddingProfile,
+    budget: &mut QueryBudget,
+) -> ServiceResult<()> {
+    // Validated strings are bounded. JSON escaping and Vec growth need at most
+    // twelve bytes per input byte, with fixed scalar/field-name overhead.
+    let metadata = [
+        &profile.revision,
+        &profile.model_family,
+        &profile.model_revision,
+        &profile.weights_sha256,
+        &profile.backend_revision,
+        &profile.query_instruction,
+    ]
+    .into_iter()
+    .map(|value| value.len() as u64)
+    .sum::<u64>()
+        + 1024;
+    charge(budget, metadata * 6 + 1, metadata * 12)
+}
+
 /// Encoder observation. The native owner must bind this to authorized originals
 /// and publish derived rows itself; this is not a storage or disclosure lease.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -252,6 +354,22 @@ impl EmbeddedText {
 pub trait TextEmbeddingAdapter: std::fmt::Debug + Send + Sync {
     /// Immutable configuration actually used by this adapter.
     fn profile(&self) -> &TextEmbeddingProfile;
+    /// Measure exact tokens without neural inference, truncation or fallback.
+    /// Oversized inference input may be a valid bounded measurement. Existing
+    /// adapters must explicitly implement this separate processing operation.
+    fn measure_tokens(
+        &self,
+        _kind: EmbeddingTextKind,
+        _text: &str,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<TokenizedText> {
+        charge(budget, 1, 0)?;
+        Err(ServiceError::new(
+            ErrorCode::Unsupported,
+            "embedding token measurement is unsupported",
+            false,
+        ))
+    }
     /// Encode one complete source span or current query; refuse oversized input.
     fn embed(
         &self,

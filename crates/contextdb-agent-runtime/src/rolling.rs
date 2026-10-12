@@ -25,6 +25,10 @@ mod dense_tests;
 pub const DENSE_QUERY_CUE_REVISION: &str = "contextdb.owned-step-syntax-cues.v1";
 /// Complete query-text ceiling, including channel labels and omission markers.
 pub const MAX_DENSE_QUERY_CUE_BYTES: usize = 4096;
+/// Explicit byte refinements measured before any query inference.
+pub const DENSE_QUERY_PREFLIGHT_BYTE_LIMITS: [usize; 4] = [4096, 2048, 1024, 512];
+/// Quota-preserving excerpts with an explicit byte limit and fresh provenance.
+pub const DENSE_QUERY_REFINEMENT_REVISION: &str = "contextdb.owned-step-syntax-cues.bytes.v2";
 
 /// Observational channel; no channel grants instruction or source authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -110,6 +114,35 @@ pub fn dense_step_query(
     base: &OutgoingBase,
     budget: &mut QueryBudget,
 ) -> ServiceResult<DenseQueryCues> {
+    sample_dense_query(
+        base,
+        MAX_DENSE_QUERY_CUE_BYTES,
+        DENSE_QUERY_CUE_REVISION,
+        budget,
+    )
+}
+
+/// Re-form a complete source-preserving sample at an explicit smaller byte cap.
+/// This is a new observation, not truncation of a tokenized or embedded input.
+/// The caller still needs owner admission and exact token measurement before
+/// inference; a byte limit alone does not establish encoder capacity.
+pub fn dense_step_query_with_byte_limit(
+    base: &OutgoingBase,
+    max_bytes: usize,
+    budget: &mut QueryBudget,
+) -> ServiceResult<DenseQueryCues> {
+    if !(512..=MAX_DENSE_QUERY_CUE_BYTES).contains(&max_bytes) {
+        return Err(invalid("dense query refinement byte cap is invalid"));
+    }
+    sample_dense_query(base, max_bytes, DENSE_QUERY_REFINEMENT_REVISION, budget)
+}
+
+fn sample_dense_query(
+    base: &OutgoingBase,
+    max_bytes: usize,
+    revision: &'static str,
+    budget: &mut QueryBudget,
+) -> ServiceResult<DenseQueryCues> {
     const MAX_MESSAGES: usize = 256;
     const MAX_PARTS: usize = 2048;
     const MAX_CHANNEL_PARTS: usize = 8;
@@ -132,9 +165,9 @@ pub fn dense_step_query(
     charge(
         budget,
         1,
-        MAX_DENSE_QUERY_CUE_BYTES as u64 + 64 * size_of::<DenseCueFragment>() as u64,
+        max_bytes as u64 + 64 * size_of::<DenseCueFragment>() as u64,
     )?;
-    let mut text = String::with_capacity(MAX_DENSE_QUERY_CUE_BYTES);
+    let mut text = String::with_capacity(max_bytes);
     let mut fragments = Vec::with_capacity(64);
     let mut eligible_bytes = 0_u64;
     let mut inspected_bytes = 0_u64;
@@ -250,7 +283,7 @@ pub fn dense_step_query(
             MAX_CHANNEL_PARTS as u64 * size_of::<DenseSample<'_>>() as u64,
         )?;
         let mut samples = Vec::with_capacity(MAX_CHANNEL_PARTS);
-        let mut remaining = quota - label.len();
+        let mut remaining = quota * max_bytes / MAX_DENSE_QUERY_CUE_BYTES - label.len();
         for part in parts.into_iter().rev() {
             if samples.len() == MAX_CHANNEL_PARTS || remaining <= GAP.len() + 2 {
                 break;
@@ -332,12 +365,12 @@ pub fn dense_step_query(
             }
         }
     }
-    if text.len() > MAX_DENSE_QUERY_CUE_BYTES {
+    if text.len() > max_bytes {
         return Err(invalid("dense query sample exceeds its complete byte cap"));
     }
     charge(budget, text.len() as u64 + 1, 0)?;
     Ok(DenseQueryCues {
-        revision: DENSE_QUERY_CUE_REVISION,
+        revision,
         text_digest: ContentDigest::from_bytes(*blake3::hash(text.as_bytes()).as_bytes()),
         text,
         fragments,

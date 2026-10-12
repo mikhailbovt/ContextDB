@@ -372,9 +372,14 @@ fn real_encoder_projects_encrypted_originals_and_verifies_after_cold_reopen() {
     drop(encoder);
     let path = f.root.path().join("native");
     drop(f.native);
-    let reopened =
-        NativeService::open_encrypted(path, "source-dense-fixture", [17; 32], f.ledger, f.keys)
-            .expect("cold encrypted native reopen");
+    let reopened = NativeService::open_encrypted(
+        path,
+        "source-dense-fixture",
+        [17; 32],
+        f.ledger.clone(),
+        f.keys.clone(),
+    )
+    .expect("cold encrypted native reopen");
     verify(&reopened).expect("cold exact source plans, MACs and retained commitments");
     let mut cold_budget = budget();
     let cold = reopened
@@ -406,9 +411,156 @@ fn real_encoder_projects_encrypted_originals_and_verifies_after_cold_reopen() {
         )
         .expect("authenticated original bytes with the query's parent allowance");
     assert_eq!(bytes, b"independent original");
+    drop(snapshot);
+    // A separate maintenance/query attempt extends the cold source prefix;
+    // neither serving path rebuilds the already accepted immutable graph.
+    let snapshot = reopened
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("frozen graph snapshot");
+    let graph_prefix = graph::graph_prefix(&workspace, receipt.generation);
+    let graph_rows_before = snapshot
+        .scan_prefix(&reopened.keyspaces.continuous, &graph_prefix)
+        .expect("fixture graph row proof");
+    drop(snapshot);
+    let mut tail_encoder = OwnedLocalEmbedding::launch(
+        &config,
+        &mut QueryBudget::new(
+            1_000_000,
+            4 * 1024 * 1024 * 1024,
+            Duration::from_secs(120),
+            QueryCancellation::default(),
+        ),
+    )
+    .expect("pinned encoder for fresh source maintenance");
+    let tool_text = "Correction from the latest tool observation: the spare batteries are now beside the front entrance.";
+    let mut fresh = crate::capture::tests::request(4, tool_text);
+    fresh.event.role = contextdb_core::EventRole::Tool;
+    fresh.event.kind = EventKind::ToolCompleted;
+    reopened
+        .append_event(fresh.clone())
+        .expect("fresh tool original capture");
+    reopened
+        .project_originals_bm25(&f.context, false, 64, &mut budget())
+        .expect("advance raw prefix without rebuilding graph");
+    let tail_receipt = reopened
+        .project_original_spans(&f.context, &tail_encoder, 64, &mut budget())
+        .expect("complete fresh dense source projection");
+    assert_eq!(tail_receipt.sources, 4);
+    let tail_text = "Where did the latest observation place the extra batteries?";
+    let mut tail_budget = budget();
+    let oversized = "x|".repeat(2200);
+    let oversize_measurement = tail_encoder
+        .measure_tokens(EmbeddingTextKind::Query, &oversized, &mut tail_budget)
+        .expect("exact oversized token observation without inference");
+    assert!(
+        !oversize_measurement
+            .fits_inference_limit(tail_encoder.profile(), &mut tail_budget)
+            .expect("exact pinned token capacity")
+    );
+    let measurement = tail_encoder
+        .measure_tokens(EmbeddingTextKind::Query, tail_text, &mut tail_budget)
+        .expect("fresh exact token preflight with same live backend");
+    let tail_query = tail_encoder
+        .embed(EmbeddingTextKind::Query, tail_text, &mut tail_budget)
+        .expect("one valid fresh query forward");
+    assert_eq!(
+        (
+            measurement.token_count,
+            measurement.tokens_digest,
+            measurement.input_digest
+        ),
+        (
+            tail_query.token_count,
+            tail_query.tokens_digest,
+            tail_query.input_digest
+        )
+    );
+    let tail_limits = graph::DenseGraphTailQueryLimits {
+        graph: graph::DenseGraphQueryLimits {
+            limit: 7,
+            ..query_limits
+        },
+        max_tail_work: 128,
+        max_tail_vectors: 256,
+    };
+    let tail_result = reopened
+        .search_original_spans_with_tail(
+            &f.context,
+            tail_text,
+            &tail_query,
+            tail_limits,
+            &mut tail_budget,
+        )
+        .expect("actual point base plus fresh-vector tail");
+    assert_eq!(tail_result.graph_digest, graph.manifest.content_digest);
+    assert!(
+        tail_result.tail_witness_complete
+            && tail_result.tail_scoring_complete
+            && !tail_result.dense_lag
+    );
+    assert_eq!(tail_result.tail_vector_reads, 1);
+    let fresh_hit = tail_result
+        .hits
+        .iter()
+        .find(|hit| hit.source.event_id == fresh.event.event_id)
+        .expect("fresh exact tool original candidate");
+    let snapshot = reopened
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("served fresh original snapshot");
+    assert_eq!(
+        reopened
+            .source_span_inner(
+                &snapshot,
+                Some(&f.context),
+                &fresh_hit.span,
+                true,
+                Some(&mut tail_budget)
+            )
+            .expect("fresh authorized source bytes"),
+        tool_text.as_bytes()
+    );
+    assert_eq!(
+        snapshot
+            .scan_prefix(&reopened.keyspaces.continuous, &graph_prefix)
+            .expect("unchanged graph row proof"),
+        graph_rows_before
+    );
+    drop(snapshot);
+    tail_encoder
+        .shutdown(&mut QueryBudget::new(
+            10_000,
+            1024 * 1024,
+            Duration::from_secs(5),
+            QueryCancellation::default(),
+        ))
+        .expect("bounded fresh encoder cleanup");
+    drop(tail_encoder);
+    verify(&reopened).expect("complete cold advanced dense graph custody");
+    drop(reopened);
+    let reopened = NativeService::open_encrypted(
+        f.root.path().join("native"),
+        "source-dense-fixture",
+        [17; 32],
+        f.ledger.clone(),
+        f.keys.clone(),
+    )
+    .expect("second cold encrypted owner");
+    let cold_tail = reopened
+        .search_original_spans_with_tail(
+            &f.context,
+            tail_text,
+            &tail_query,
+            tail_limits,
+            &mut budget(),
+        )
+        .expect("cold base-tail without encoder");
+    assert_eq!(cold_tail.hits, tail_result.hits);
+    verify(&reopened).expect("cold advanced graph reconstruction");
     println!(
         "{}",
-        serde_json::json!({"profile_digest":receipt.profile_digest,"sources":receipt.sources,"embedded_sources":receipt.embedded_sources,"spans":receipt.spans,"omitted_sources":receipt.omitted_sources,"caught_up":receipt.caught_up,"commitment":receipt.commitment,"projection_millis_observation":projection_millis,"graph_digest":graph.manifest.content_digest,"native_graph_query_wiring_verified":true,"query_node_reads":discovered.node_reads,"query_vector_reads":discovered.vector_reads,"cold_encrypted_native_verification":true,"cold_query_and_exact_original_materialization":true,"query_retrieval_quality_evaluated":false,"main_reader_benefit_evaluated":false,"final_benchmarks_accessed":false})
+        serde_json::json!({"profile_digest":receipt.profile_digest,"sources":receipt.sources,"embedded_sources":receipt.embedded_sources,"spans":receipt.spans,"omitted_sources":receipt.omitted_sources,"caught_up":receipt.caught_up,"commitment":receipt.commitment,"projection_millis_observation":projection_millis,"graph_digest":graph.manifest.content_digest,"native_graph_query_wiring_verified":true,"query_node_reads":discovered.node_reads,"query_vector_reads":discovered.vector_reads,"cold_encrypted_native_verification":true,"cold_query_and_exact_original_materialization":true,"base_tail_cold_wiring_verified":true,"immutable_graph_rows_unchanged":true,"tail_vector_reads":tail_result.tail_vector_reads,"tail_sources":tail_receipt.sources,"oversize_preflight_tokens":oversize_measurement.token_count,"valid_query_preflight_tokens":measurement.token_count,"automatic_owned_query_embedding_enabled":false,"query_retrieval_quality_evaluated":false,"main_reader_benefit_evaluated":false,"final_benchmarks_accessed":false})
     );
 }
 

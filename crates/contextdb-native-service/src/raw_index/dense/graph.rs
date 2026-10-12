@@ -7,6 +7,9 @@ use contextdb_index::{AnnPartitionManifestV2, VectorMetric, VectorSpace};
 
 mod publication;
 mod query;
+mod tail;
+#[cfg(test)]
+mod tail_tests;
 #[cfg(test)]
 mod tests;
 mod verification;
@@ -144,6 +147,110 @@ pub struct DenseGraphQueryResult {
     pub discovered: u64,
     /// Authenticated graph base used; no default runtime activation follows.
     pub graph_digest: ContentDigest,
+}
+
+/// Opt-in finite base plus tail limits; the parent budget never resets.
+#[derive(Clone, Copy, Debug)]
+pub struct DenseGraphTailQueryLimits {
+    /// Operation-wide ANN and tail vector/discovery allowance.
+    pub graph: DenseGraphQueryLimits,
+    /// Complete capture-work witness cap, from one through 128.
+    pub max_tail_work: usize,
+    /// Permitted exact tail vector cap, from one through 256.
+    pub max_tail_vectors: usize,
+}
+
+/// Coverage of this declared path, never semantic recall completeness.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DenseGraphTailCompletion {
+    /// Projected tail witness and scoring complete within local bounds.
+    Complete,
+    /// Current raw prefix includes work outside the projected dense prefix.
+    DenseLag,
+    /// Accepted capture work remains outside the current raw projection.
+    RawLag,
+    /// Complete tail witness was not proved; only the base is returned.
+    TailWorkLimit,
+    /// Permitted tail scoring reached its explicit local vector bound.
+    TailVectorLimit,
+    /// Shared operation vector allowance was exhausted.
+    VectorLimit,
+    /// Shared operation discovery allowance was exhausted.
+    DiscoveryLimit,
+    /// ANN traversal reported a separate local limit.
+    BaseLimit,
+}
+
+/// Authenticated observations with separate observed and proved prefix states.
+#[derive(Clone, PartialEq, Serialize)]
+pub struct DenseGraphTailQueryResult {
+    /// Stable ranked source-span observations, never a disclosure lease.
+    pub hits: Vec<DenseGraphHit>,
+    /// Overall declared path completion; the booleans retain independent gaps.
+    pub completion: DenseGraphTailCompletion,
+    /// Actual unchanged ANN kernel completion.
+    pub base_completion: contextdb_index::AnnPartitionQueryCompletionV2,
+    /// Whether every projected tail document extended the accepted base witness.
+    pub tail_witness_complete: bool,
+    /// Whether every permitted projected tail vector was scored.
+    pub tail_scoring_complete: bool,
+    /// Raw projection currently extends beyond the observed dense prefix.
+    pub dense_lag: bool,
+    /// Accepted capture work currently lies beyond the chosen raw cutoff.
+    pub raw_lag: bool,
+    /// Genuine omitted or upstream partial sources in permitted tail domains.
+    pub permitted_tail_omissions: bool,
+    /// Owner-authenticated immutable ANN content.
+    pub graph_digest: ContentDigest,
+    /// Observed owner-authenticated latest dense commitment, not proof of tail IO.
+    pub observed_dense_commitment: ContentDigest,
+    /// Last completely proved dense document commitment (base on work limit).
+    pub proven_dense_commitment: ContentDigest,
+    /// Immutable base source cutoff.
+    #[serde(skip_serializing)]
+    pub(crate) base_through: u64,
+    /// Observed latest dense cutoff.
+    #[serde(skip_serializing)]
+    pub(crate) observed_dense_through: u64,
+    /// Completely proved witness cutoff; no partial proof is promoted.
+    #[serde(skip_serializing)]
+    pub(crate) proven_through: u64,
+    /// Frozen current raw source cutoff.
+    #[serde(skip_serializing)]
+    pub(crate) raw_through: u64,
+    /// Actual ANN node reads, excluding forbidden cohorts.
+    pub node_reads: u64,
+    /// Actual permitted base and tail full-vector reads.
+    pub vector_reads: u64,
+    /// Actual permitted distinct base and tail identities.
+    pub discovered: u64,
+    /// Actual permitted full-dimensional tail reads.
+    pub tail_vector_reads: u64,
+    /// Whole bounded admitted frontier, including discarded and omitted sources.
+    #[serde(skip_serializing)]
+    pub(crate) admitted_sources: BTreeMap<ObservationId, RawSource>,
+}
+impl std::fmt::Debug for DenseGraphTailQueryResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DenseGraphTailQueryResult")
+            .field("hits", &self.hits)
+            .field("completion", &self.completion)
+            .field("base_completion", &self.base_completion)
+            .field("tail_witness_complete", &self.tail_witness_complete)
+            .field("tail_scoring_complete", &self.tail_scoring_complete)
+            .field("dense_lag", &self.dense_lag)
+            .field("raw_lag", &self.raw_lag)
+            .field("permitted_tail_omissions", &self.permitted_tail_omissions)
+            .field("graph_digest", &self.graph_digest)
+            .field("observed_dense_commitment", &self.observed_dense_commitment)
+            .field("proven_dense_commitment", &self.proven_dense_commitment)
+            .field("node_reads", &self.node_reads)
+            .field("vector_reads", &self.vector_reads)
+            .field("discovered", &self.discovered)
+            .field("tail_vector_reads", &self.tail_vector_reads)
+            .finish()
+    }
 }
 
 pub(crate) fn graph_prefix(workspace: &str, generation: u64) -> Vec<u8> {

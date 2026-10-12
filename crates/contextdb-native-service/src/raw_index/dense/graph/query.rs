@@ -17,6 +17,11 @@ struct Reader<'a, S> {
     partition: &'a AnnPartitionManifestV2,
     budget: &'a mut QueryBudget,
     members: BTreeMap<RepresentationId, GraphMember>,
+    with_tail: bool,
+}
+pub(super) struct GraphBaseDiscovery {
+    pub(super) result: DenseGraphQueryResult,
+    pub(super) admitted_sources: BTreeMap<ObservationId, RawSource>,
 }
 impl NativeService {
     fn graph_query_fence(
@@ -87,21 +92,7 @@ impl NativeService {
         ] {
             require_capability(context, c)?;
         }
-        if limits.limit == 0
-            || limits.limit > MAX_NODES
-            || limits.ef_search < limits.limit
-            || [
-                limits.max_node_reads,
-                limits.max_vector_reads,
-                limits.max_discovered,
-                limits.ef_search,
-            ]
-            .iter()
-            .any(|v| *v == 0 || *v > contextdb_index::ANN_PARTITION_QUERY_MAX_READS_V2)
-            || limits.ef_search > limits.max_discovered
-        {
-            return Err(crate::invalid("native graph query caps invalid"));
-        }
+        validate_limits(limits)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
         let snapshot = self
             .engine
@@ -135,19 +126,51 @@ impl NativeService {
             query_text,
             budget,
         )?;
+        let result = self.search_graph_base(
+            &snapshot,
+            context,
+            &workspace,
+            &generation,
+            &receipt,
+            query,
+            limits,
+            false,
+            budget,
+        )?;
+        self.graph_query_fence(context, &workspace, &generation, &receipt, budget)?;
+        Ok(result.result)
+    }
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "frozen base, current envelope and parent budget remain explicit"
+    )]
+    pub(super) fn search_graph_base<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        workspace: &str,
+        generation: &Generation,
+        receipt: &DenseGraphReceipt,
+        query: &EmbeddedText,
+        limits: DenseGraphQueryLimits,
+        with_tail: bool,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<GraphBaseDiscovery> {
+        let number = generation.number;
         budget
             .charge(1, (limits.max_discovered.min(MAX_NODES) * 2048) as u64)
             .map_err(budget_error)?;
         let space = vector_space(&receipt.manifest.dense);
         let mut hits = Vec::new();
+        let mut admitted_sources = BTreeMap::<ObservationId, RawSource>::new();
         let mut completion = AnnPartitionQueryCompletionV2::Complete;
         let (mut node_reads, mut vector_reads, mut discovered) = (0_u64, 0_u64, 0_u64);
         for summary in &receipt.manifest.cohorts {
             let cohort: GraphCohort = self
                 .graph_read(
-                    &snapshot,
+                    snapshot,
                     &self.keyspaces.continuous,
-                    &cohort_key(&workspace, number, &summary.policy_domain),
+                    &cohort_key(workspace, number, &summary.policy_domain),
                     budget,
                 )?
                 .ok_or_else(|| integrity("query graph cohort absent"))?;
@@ -180,15 +203,16 @@ impl NativeService {
             let beam = limits.ef_search.min(dr);
             let mut reader = Reader {
                 native: self,
-                snapshot: &snapshot,
+                snapshot,
                 context,
-                workspace: &workspace,
-                generation: &generation,
-                receipt: &receipt,
+                workspace,
+                generation,
+                receipt,
                 cohort: &cohort,
                 partition: &partition,
                 budget,
                 members: BTreeMap::new(),
+                with_tail,
             };
             let result = search_ann_partition_v2(
                 &mut reader,
@@ -225,6 +249,30 @@ impl NativeService {
                     score: hit.score,
                 });
             }
+            if with_tail {
+                for member in reader.members.values() {
+                    reader
+                        .budget
+                        .charge(
+                            1,
+                            2048 + member
+                                .source
+                                .source_version
+                                .as_ref()
+                                .map_or(0, |s| s.len() as u64 * 8),
+                        )
+                        .map_err(budget_error)?;
+                    if admitted_sources
+                        .get(&member.source.event_id)
+                        .is_some_and(|previous| previous != &member.source)
+                    {
+                        return Err(integrity("admitted graph source version differs"));
+                    }
+                    admitted_sources
+                        .entry(member.source.event_id)
+                        .or_insert_with(|| member.source.clone());
+                }
+            }
             if result.completion != AnnPartitionQueryCompletionV2::Complete {
                 completion = result.completion;
                 break;
@@ -239,26 +287,43 @@ impl NativeService {
                 .then(a.representation_id.cmp(&b.representation_id))
         });
         hits.truncate(limits.limit);
-        self.graph_query_fence(context, &workspace, &generation, &receipt, budget)?;
-        Ok(DenseGraphQueryResult {
-            hits,
-            completion,
-            node_reads,
-            vector_reads,
-            discovered,
-            graph_digest: receipt.manifest.content_digest,
+        Ok(GraphBaseDiscovery {
+            result: DenseGraphQueryResult {
+                hits,
+                completion,
+                node_reads,
+                vector_reads,
+                discovered,
+                graph_digest: receipt.manifest.content_digest,
+            },
+            admitted_sources,
         })
     }
 }
 impl<S: ReadSnapshot> Reader<'_, S> {
+    fn fence(&mut self) -> ServiceResult<()> {
+        if self.with_tail {
+            self.native
+                .graph_tail_fence(
+                    self.context,
+                    self.workspace,
+                    self.generation,
+                    self.receipt,
+                    self.budget,
+                )
+                .map(|_| ())
+        } else {
+            self.native.graph_query_fence(
+                self.context,
+                self.workspace,
+                self.generation,
+                self.receipt,
+                self.budget,
+            )
+        }
+    }
     fn fresh_member(&mut self, member: &GraphMember) -> ServiceResult<()> {
-        self.native.graph_query_fence(
-            self.context,
-            self.workspace,
-            self.generation,
-            self.receipt,
-            self.budget,
-        )?;
+        self.fence()?;
         let current = self
             .native
             .engine
@@ -300,13 +365,7 @@ impl<S: ReadSnapshot> AnnPartitionQueryReaderV2 for Reader<'_, S> {
         if partition != self.partition || space != &vector_space(&self.receipt.manifest.dense) {
             return Err(integrity("query partition/space differs"));
         }
-        self.native.graph_query_fence(
-            self.context,
-            self.workspace,
-            self.generation,
-            self.receipt,
-            self.budget,
-        )
+        self.fence()
     }
     fn admit_member(
         &mut self,
@@ -425,28 +484,62 @@ impl<S: ReadSnapshot> AnnPartitionQueryReaderV2 for Reader<'_, S> {
         {
             return Err(integrity("query vector source/profile differs"));
         }
-        self.budget
-            .charge(dimensions as u64, dimensions as u64 * 4)
-            .map_err(budget_error)?;
-        let mut hash = blake3::Hasher::new();
-        let mut norm = 0_f64;
-        let mut values = Vec::with_capacity(dimensions);
-        for bits in v.values_bits {
-            let value = f32::from_bits(bits);
-            if !value.is_finite() {
-                return Err(integrity("query vector is nonfinite"));
-            }
-            norm += f64::from(value).powi(2);
-            hash.update(&value.to_le_bytes());
-            values.push(value);
-        }
-        if (norm - 1.0).abs() > 0.001
-            || ContentDigest::from_bytes(*hash.finalize().as_bytes()) != member.vector_digest
-        {
-            return Err(integrity(
-                "query vector values differ from owner commitment",
-            ));
-        }
-        Ok(values)
+        query_vector_values(&self.receipt.manifest.dense.profile, v, self.budget)
     }
+}
+
+pub(super) fn validate_limits(limits: DenseGraphQueryLimits) -> ServiceResult<()> {
+    if limits.limit == 0
+        || limits.limit > MAX_NODES
+        || limits.ef_search < limits.limit
+        || [
+            limits.max_node_reads,
+            limits.max_vector_reads,
+            limits.max_discovered,
+            limits.ef_search,
+        ]
+        .iter()
+        .any(|v| *v == 0 || *v > contextdb_index::ANN_PARTITION_QUERY_MAX_READS_V2)
+        || limits.ef_search > limits.max_discovered
+    {
+        return Err(crate::invalid("native graph query caps invalid"));
+    }
+    Ok(())
+}
+pub(super) fn query_vector_values(
+    profile: &TextEmbeddingProfile,
+    v: DenseVector,
+    budget: &mut QueryBudget,
+) -> ServiceResult<Vec<f32>> {
+    let dimensions = profile.dimensions as usize;
+    if v.values_bits.len() != dimensions
+        || v.tokens_digest.as_bytes() == &[0; 32]
+        || v.token_count == 0
+        || v.token_count > profile.max_input_tokens
+    {
+        return Err(integrity("query vector profile/token binding differs"));
+    }
+    budget
+        .charge(dimensions as u64, dimensions as u64 * 4)
+        .map_err(budget_error)?;
+    let mut hash = blake3::Hasher::new();
+    let mut norm = 0_f64;
+    let mut values = Vec::with_capacity(dimensions);
+    for bits in v.values_bits {
+        let value = f32::from_bits(bits);
+        if !value.is_finite() {
+            return Err(integrity("query vector is nonfinite"));
+        }
+        norm += f64::from(value).powi(2);
+        hash.update(&value.to_le_bytes());
+        values.push(value);
+    }
+    if (norm - 1.0).abs() > 0.001
+        || ContentDigest::from_bytes(*hash.finalize().as_bytes()) != v.vector_digest
+    {
+        return Err(integrity(
+            "query vector values differ from owner commitment",
+        ));
+    }
+    Ok(values)
 }

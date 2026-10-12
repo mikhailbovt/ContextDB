@@ -12,8 +12,8 @@ use std::{
 use contextdb_core::ContentDigest;
 use contextdb_recall::QueryBudget;
 use contextdb_service::{
-    EmbeddedText, EmbeddingTextKind, ErrorCode, ServiceError, ServiceResult, TextEmbeddingAdapter,
-    TextEmbeddingProfile,
+    EmbeddedText, EmbeddingTextKind, ErrorCode, MAX_MEASURED_EMBEDDING_TOKENS, ServiceError,
+    ServiceResult, TextEmbeddingAdapter, TextEmbeddingProfile, TokenizedText,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +21,8 @@ use super::{charge, exhausted, invalid};
 
 mod assets;
 mod http;
+#[cfg(test)]
+mod preflight_tests;
 #[cfg(test)]
 mod tests;
 
@@ -336,22 +338,25 @@ impl OwnedLocalEmbedding {
         Ok(())
     }
 
-    fn encode(
+    fn tokenize_exact(
         &self,
         kind: EmbeddingTextKind,
         text: &str,
         backend: &mut Option<Backend>,
         budget: &mut QueryBudget,
-    ) -> ServiceResult<EmbeddedText> {
+    ) -> ServiceResult<MeasuredInput> {
+        self.profile.validate()?;
         if text.is_empty() || text.len() > self.profile.max_text_bytes as usize {
             return Err(invalid("embedding text length refused"));
         }
         charge(
             budget,
             1,
-            (text.len() + self.profile.query_instruction.len() + 20) as u64,
+            (text.len() + self.profile.query_instruction.len() + 20) as u64 * 2,
         )?;
         let input = self.profile.input_text(kind, text)?;
+        charge(budget, 8192, 16384)?;
+        let profile_digest = self.profile.digest()?;
         self.check_live(backend, budget)?;
         self.props(budget)?;
         let tokenize = TokenizeRequest {
@@ -361,12 +366,21 @@ impl OwnedLocalEmbedding {
             with_pieces: false,
         };
         let tokens: Tokenized = self.post("/tokenize", &tokenize, 128 * 1024, budget)?;
-        if tokens.tokens.is_empty()
-            || tokens.tokens.len() > self.profile.max_input_tokens as usize
-            || tokens.tokens.iter().any(|t| *t < 0)
-        {
+        self.check_live(backend, budget)?;
+        self.props(budget)?;
+        self.profile.validate()?;
+        charge(budget, 8192, 16384)?;
+        if self.profile.digest()? != profile_digest {
+            return Err(invalid("tokenizer profile changed during measurement"));
+        }
+        if tokens.tokens.is_empty() {
+            return Err(invalid("embedding token sequence is empty"));
+        }
+        let token_count = u32::try_from(tokens.tokens.len())
+            .map_err(|_| invalid("embedding token count overflow"))?;
+        if token_count > MAX_MEASURED_EMBEDDING_TOKENS {
             return Err(invalid(
-                "embedding token sequence refused; input was not truncated",
+                "embedding token measurement exceeds its hard bound",
             ));
         }
         let mut token_hash = blake3::Hasher::new();
@@ -374,12 +388,45 @@ impl OwnedLocalEmbedding {
             charge(budget, 1, 4)?;
             token_hash.update(&token.to_le_bytes());
         }
+        charge(budget, input.len() as u64 + text.len() as u64 + 1, 0)?;
+        let observation = TokenizedText {
+            profile_digest,
+            kind,
+            text_digest: digest(text.as_bytes()),
+            input_digest: digest(input.as_bytes()),
+            tokens_digest: ContentDigest::from_bytes(*token_hash.finalize().as_bytes()),
+            token_count,
+        };
+        observation.validate(&self.profile, kind, text, budget)?;
+        self.check_live(backend, budget)?;
+        Ok(MeasuredInput {
+            observation,
+            tokens: tokens.tokens,
+        })
+    }
+
+    fn encode(
+        &self,
+        kind: EmbeddingTextKind,
+        text: &str,
+        backend: &mut Option<Backend>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<EmbeddedText> {
+        let measured = self.tokenize_exact(kind, text, backend, budget)?;
+        if !measured
+            .observation
+            .fits_inference_limit(&self.profile, budget)?
+        {
+            return Err(invalid(
+                "embedding token sequence refused; input was not truncated",
+            ));
+        }
         // Exact token-array branch in the pinned backend adds no further specials.
         // The request's model string is routing data, not loaded-weight evidence.
         self.check_live(backend, budget)?;
         let inference = EmbeddingRequest {
             model: "contextdb-qwen3-06b-q8",
-            input: &tokens.tokens,
+            input: &measured.tokens,
             encoding_format: "float",
             embd_normalize: 2,
         };
@@ -390,7 +437,7 @@ impl OwnedLocalEmbedding {
             || output.data[0].index != 0
             || output.data[0].object != "embedding"
             || output.model != "contextdb-qwen3-06b-q8"
-            || output.usage.prompt_tokens != tokens.tokens.len() as u32
+            || output.usage.prompt_tokens != measured.observation.token_count
             || output.usage.total_tokens != output.usage.prompt_tokens
         {
             return Err(invalid("embedding response or token accounting mismatch"));
@@ -407,12 +454,12 @@ impl OwnedLocalEmbedding {
             vector_hash.update(&value.to_le_bytes());
         }
         let result = EmbeddedText {
-            profile_digest: self.profile.digest()?,
+            profile_digest: measured.observation.profile_digest,
             kind,
-            text_digest: digest(text.as_bytes()),
-            input_digest: digest(input.as_bytes()),
-            tokens_digest: ContentDigest::from_bytes(*token_hash.finalize().as_bytes()),
-            token_count: tokens.tokens.len() as u32,
+            text_digest: measured.observation.text_digest,
+            input_digest: measured.observation.input_digest,
+            tokens_digest: measured.observation.tokens_digest,
+            token_count: measured.observation.token_count,
             values,
             vector_digest: ContentDigest::from_bytes(*vector_hash.finalize().as_bytes()),
         };
@@ -433,7 +480,7 @@ impl OwnedLocalEmbedding {
         let wire =
             serde_json::to_vec(value).map_err(|_| invalid("embedding request encoding failed"))?;
         let bytes = http::request(self.port, "POST", path, &wire, cap, budget)?;
-        charge(budget, 1, (bytes.len() * 4) as u64)?;
+        charge(budget, bytes.len() as u64 + 1, (bytes.len() * 4) as u64)?;
         serde_json::from_slice(&bytes).map_err(|_| invalid("embedding response is malformed"))
     }
 }
@@ -441,6 +488,23 @@ impl OwnedLocalEmbedding {
 impl TextEmbeddingAdapter for OwnedLocalEmbedding {
     fn profile(&self) -> &TextEmbeddingProfile {
         &self.profile
+    }
+    fn measure_tokens(
+        &self,
+        kind: EmbeddingTextKind,
+        text: &str,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<TokenizedText> {
+        let mut backend = self.lock(budget)?;
+        let result = self
+            .tokenize_exact(kind, text, &mut backend, budget)
+            .map(|measured| measured.observation);
+        // A successfully measured oversize is a certain tokenizer observation,
+        // not an inference failure. Other refusals preserve existing cleanup.
+        if result.is_err() {
+            backend.take();
+        }
+        result
     }
     fn embed(
         &self,
@@ -476,7 +540,46 @@ struct EmbeddingRequest<'a> {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Tokenized {
+    #[serde(deserialize_with = "bounded_token_ids")]
     tokens: Vec<i32>,
+}
+
+struct MeasuredInput {
+    observation: TokenizedText,
+    tokens: Vec<i32>,
+}
+
+fn bounded_token_ids<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<i32>, D::Error> {
+    struct TokenVisitor;
+    impl<'de> serde::de::Visitor<'de> for TokenVisitor {
+        type Value = Vec<i32>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a bounded array of nonnegative i32 token IDs")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut sequence: A,
+        ) -> Result<Self::Value, A::Error> {
+            // Grow only for actually decoded scalars, never an untrusted size
+            // hint. post() admitted the bounded body's decode allocations.
+            let mut values = Vec::new();
+            while let Some(value) = sequence.next_element::<i32>()? {
+                if values.len() == MAX_MEASURED_EMBEDDING_TOKENS as usize {
+                    return Err(serde::de::Error::custom(
+                        "token count exceeds measurement cap",
+                    ));
+                }
+                if value < 0 {
+                    return Err(serde::de::Error::custom("token ID is negative"));
+                }
+                values.push(value);
+            }
+            Ok(values)
+        }
+    }
+    deserializer.deserialize_seq(TokenVisitor)
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

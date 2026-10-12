@@ -170,6 +170,18 @@ impl NativeService {
         {
             return Err(stale_index());
         }
+        self.accepted_graph_receipt(snapshot, workspace, generation, budget)
+    }
+    /// Accepted immutable base only; advancement admission belongs to the
+    /// separate opt-in tail envelope, never to the strict serving API.
+    pub(super) fn accepted_graph_receipt<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+        generation: &Generation,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<DenseGraphReceipt> {
+        let manifest = generation.dense_graph.as_ref().ok_or_else(stale_index)?;
         self.require_graph_feature(snapshot, budget)?;
         let receipt: DenseGraphReceipt = self
             .graph_read(

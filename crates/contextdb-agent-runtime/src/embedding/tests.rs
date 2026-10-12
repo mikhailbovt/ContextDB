@@ -1,7 +1,6 @@
 use std::{
     io::{Read, Write},
     net::TcpListener,
-    time::Instant,
 };
 
 use contextdb_recall::QueryCancellation;
@@ -192,12 +191,36 @@ fn local_http_reads_only_bounded_exact_body_and_propagates_cancellation() {
 #[test]
 fn local_http_wait_does_not_reset_parent_deadline() {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("fixture listener");
+    listener
+        .set_nonblocking(true)
+        .expect("fixture accept is releasable before IO");
     let port = listener.local_addr().expect("fixture address").port();
+    let (release, released) = std::sync::mpsc::channel();
     let fixture = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("request");
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    // The parent may already expire before its first connect
+                    // when the scheduler pauses it. That must not strand join.
+                    if released.try_recv().is_ok() {
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("fixture accept: {error}"),
+            }
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("bounded fixture read");
         let mut request = [0; 512];
         let _ = stream.read(&mut request);
-        thread::sleep(Duration::from_millis(80));
+        // Keep this response pending until the parent observes its deadline.
+        // The watchdog only ends a broken client; it never supplies a response.
+        released
+            .recv_timeout(Duration::from_secs(2))
+            .expect("parent deadline release");
     });
     let mut allowance = QueryBudget::new(
         10_000,
@@ -205,14 +228,23 @@ fn local_http_wait_does_not_reset_parent_deadline() {
         Duration::from_millis(20),
         QueryCancellation::default(),
     );
-    let start = Instant::now();
     assert_eq!(
         http::request(port, "GET", "/props", &[], 2, &mut allowance)
             .expect_err("parent deadline")
             .code,
         ErrorCode::BudgetExhausted
     );
-    assert!(start.elapsed() < Duration::from_millis(70));
+    assert!(matches!(
+        allowance.check(),
+        Err(contextdb_recall::QueryLimit::Deadline)
+    ));
+    assert_eq!(
+        http::request(port, "GET", "/props", &[], 2, &mut allowance)
+            .expect_err("same expired allowance cannot start another request")
+            .code,
+        ErrorCode::BudgetExhausted
+    );
+    release.send(()).expect("release blocked fixture");
     fixture.join().expect("fixture done");
 }
 
@@ -289,6 +321,21 @@ fn real_pinned_local_encoder_exact_tokens_cold_launch_and_oversize_refusal() {
     // Below byte limit, above exact token limit; no backend truncation is accepted.
     let oversized = "x|".repeat(2200);
     assert!(oversized.len() < cold.profile().max_text_bytes as usize);
+    let oversized_measurement = cold
+        .measure_tokens(EmbeddingTextKind::Source, &oversized, &mut request())
+        .expect("bounded oversize token measurement without inference");
+    assert!(oversized_measurement.token_count > cold.profile().max_input_tokens);
+    assert!(
+        !oversized_measurement
+            .fits_inference_limit(cold.profile(), &mut request())
+            .expect("exact profile-bound oversize")
+    );
+    assert!(
+        cold.backend
+            .lock()
+            .expect("still live measured backend")
+            .is_some()
+    );
     let error = cold
         .embed(EmbeddingTextKind::Source, &oversized, &mut request())
         .expect_err("too many tokens before inference");
@@ -298,6 +345,6 @@ fn real_pinned_local_encoder_exact_tokens_cold_launch_and_oversize_refusal() {
         .expect("already closed encoder cleanup");
     println!(
         "{}",
-        serde_json::json!({"profile_digest":profile_digest,"source_tokens":source_tokens,"query_tokens":query_tokens,"dimensions":first.values.len(),"source_vector_digest":first.vector_digest,"cold_vector_digest":second.vector_digest,"query_source_cosine_observation":similarity,"cold_source_cosine":cold_similarity,"oversized_token_input_refused":true,"retrieval_quality_evaluated":false})
+        serde_json::json!({"profile_digest":profile_digest,"source_tokens":source_tokens,"query_tokens":query_tokens,"dimensions":first.values.len(),"source_vector_digest":first.vector_digest,"cold_vector_digest":second.vector_digest,"query_source_cosine_observation":similarity,"cold_source_cosine":cold_similarity,"oversized_measured_tokens":oversized_measurement.token_count,"oversized_token_input_refused":true,"retrieval_quality_evaluated":false})
     );
 }

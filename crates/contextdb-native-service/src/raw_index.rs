@@ -87,7 +87,8 @@ pub(super) struct Generation {
     /// Independently bounded source-span encoding of this same raw prefix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dense: Option<dense::DenseManifest>,
-    /// One immutable ANN base. Any later raw/dense advance makes queries stale.
+    /// One immutable ANN base. The strict query API refuses raw/dense advance;
+    /// the separate bounded-tail path proves extensions before serving them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dense_graph: Option<dense::DenseGraphManifest>,
 }

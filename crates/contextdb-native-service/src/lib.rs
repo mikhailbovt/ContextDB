@@ -89,7 +89,8 @@ pub use payload::{
 };
 pub use raw_index::dense::graph::{
     DenseGraphHit, DenseGraphManifest, DenseGraphQueryLimits, DenseGraphQueryResult,
-    DenseGraphReceipt,
+    DenseGraphReceipt, DenseGraphTailCompletion, DenseGraphTailQueryLimits,
+    DenseGraphTailQueryResult,
 };
 pub use raw_index::{
     DenseProjectionReceipt, NativeRawCopyKind, NativeRawCopyObservation, NativeRawCopyReceipt,

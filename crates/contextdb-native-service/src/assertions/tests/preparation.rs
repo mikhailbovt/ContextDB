@@ -4,6 +4,7 @@ use contextdb_recall::{IndexedQuery, IndexedSelection};
 use contextdb_service::{Capability, PrepareContextPort, PrepareContextRequest};
 
 mod leases;
+mod multi_route;
 
 fn allowance() -> QueryBudget {
     QueryBudget::new(
