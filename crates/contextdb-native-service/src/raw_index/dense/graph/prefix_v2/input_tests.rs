@@ -15,12 +15,12 @@ use std::{cell::Cell, sync::Arc, time::Duration};
 #[path = "input_boundary_tests.rs"]
 mod boundaries;
 
-pub(in crate::raw_index::dense::graph::prefix_v2) const DATABASE: &str = "prefix-v2-input-fixture";
-pub(in crate::raw_index::dense::graph::prefix_v2) const TOKEN_KEY: [u8; 32] = [31; 32];
+pub(in crate::raw_index::dense::graph) const DATABASE: &str = "prefix-v2-input-fixture";
+pub(in crate::raw_index::dense::graph) const TOKEN_KEY: [u8; 32] = [31; 32];
 
 #[derive(Debug)]
-pub(in crate::raw_index::dense::graph::prefix_v2) struct Encoder(
-    pub(in crate::raw_index::dense::graph::prefix_v2) TextEmbeddingProfile,
+pub(in crate::raw_index::dense::graph) struct Encoder(
+    pub(in crate::raw_index::dense::graph) TextEmbeddingProfile,
 );
 impl TextEmbeddingAdapter for Encoder {
     fn profile(&self) -> &TextEmbeddingProfile {
@@ -57,21 +57,20 @@ impl TextEmbeddingAdapter for Encoder {
     }
 }
 
-pub(in crate::raw_index::dense::graph::prefix_v2) struct Fixture {
-    pub(in crate::raw_index::dense::graph::prefix_v2) native: NativeService,
-    pub(in crate::raw_index::dense::graph::prefix_v2) context: AuthenticatedRequestContext,
-    pub(in crate::raw_index::dense::graph::prefix_v2) root: tempfile::TempDir,
-    pub(in crate::raw_index::dense::graph::prefix_v2) ledger: Arc<crate::NativeSuppressionLedger>,
-    pub(in crate::raw_index::dense::graph::prefix_v2) keys: Arc<crate::NativeCustodyKeys>,
-    pub(in crate::raw_index::dense::graph::prefix_v2) _ledger: tempfile::TempDir,
-    pub(in crate::raw_index::dense::graph::prefix_v2) _keys: tempfile::TempDir,
-    pub(in crate::raw_index::dense::graph::prefix_v2) encoder: Encoder,
-    pub(in crate::raw_index::dense::graph::prefix_v2) target:
-        crate::raw_index::dense::DenseProjectionReceipt,
-    pub(in crate::raw_index::dense::graph::prefix_v2) sources: [ObservationId; 3],
+pub(in crate::raw_index::dense::graph) struct Fixture {
+    pub(in crate::raw_index::dense::graph) native: NativeService,
+    pub(in crate::raw_index::dense::graph) context: AuthenticatedRequestContext,
+    pub(in crate::raw_index::dense::graph) root: tempfile::TempDir,
+    pub(in crate::raw_index::dense::graph) ledger: Arc<crate::NativeSuppressionLedger>,
+    pub(in crate::raw_index::dense::graph) keys: Arc<crate::NativeCustodyKeys>,
+    pub(in crate::raw_index::dense::graph) _ledger: tempfile::TempDir,
+    pub(in crate::raw_index::dense::graph) _keys: tempfile::TempDir,
+    pub(in crate::raw_index::dense::graph) encoder: Encoder,
+    pub(in crate::raw_index::dense::graph) target: crate::raw_index::dense::DenseProjectionReceipt,
+    pub(in crate::raw_index::dense::graph) sources: [ObservationId; 3],
 }
 
-pub(in crate::raw_index::dense::graph::prefix_v2) fn budget() -> QueryBudget {
+pub(in crate::raw_index::dense::graph) fn budget() -> QueryBudget {
     QueryBudget::new(
         20_000_000,
         1024 * 1024 * 1024,
@@ -80,7 +79,7 @@ pub(in crate::raw_index::dense::graph::prefix_v2) fn budget() -> QueryBudget {
     )
 }
 
-pub(in crate::raw_index::dense::graph::prefix_v2) fn fixture() -> Fixture {
+pub(in crate::raw_index::dense::graph) fn fixture() -> Fixture {
     let root = tempfile::tempdir().expect("prefix-v2 native directory");
     let (ld, ledger) = crate::suppression::tests::authority(DATABASE);
     let (kd, keys) = crate::encryption::tests::authority(DATABASE);
@@ -166,7 +165,7 @@ fn generation_at<S: ReadSnapshot>(
         .ok_or_else(stale_index)
 }
 
-pub(in crate::raw_index::dense::graph::prefix_v2) fn read_generation(
+pub(in crate::raw_index::dense::graph) fn read_generation(
     native: &NativeService,
     context: &AuthenticatedRequestContext,
     parent: &mut QueryBudget,

@@ -206,7 +206,7 @@ impl NativeService {
             .charge(1, graph::prefix_v2::types::KEY_BYTES)
             .map_err(budget_error)?;
         let prefix = graph::prefix_v2::types::prefix_key(workspace, generation)?;
-        crate::budgeted::metadata(snapshot, budget, |reader| {
+        let prefix_present = crate::budgeted::metadata(snapshot, budget, |reader| {
             reader
                 .scan_prefix_page(
                     &self.keyspaces.continuous,
@@ -219,7 +219,39 @@ impl NativeService {
                 )
                 .map(|page| !page.entries.is_empty() || page.continuation.is_some())
                 .map_err(storage_error)
-        })
+        })?;
+        if prefix_present {
+            return Ok(true);
+        }
+        budget
+            .charge(2, graph::prefix_segments_v2::types::KEY_BYTES * 2)
+            .map_err(budget_error)?;
+        let family = format!(
+            "{}dense/prefix-segment-v2/",
+            generation_prefix(workspace, generation)
+        )
+        .into_bytes();
+        let head = graph::prefix_segments_v2::types::directory_head_key(workspace, generation)?;
+        for prefix in [family, head] {
+            let present = crate::budgeted::metadata(snapshot, budget, |reader| {
+                reader
+                    .scan_prefix_page(
+                        &self.keyspaces.continuous,
+                        ScanPageRequest {
+                            prefix: &prefix,
+                            start_after: None,
+                            max_entries: 1,
+                            max_bytes: graph::prefix_segments_v2::types::ROW_BYTES + 1024,
+                        },
+                    )
+                    .map(|page| !page.entries.is_empty() || page.continuation.is_some())
+                    .map_err(storage_error)
+            })?;
+            if present {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
     pub(in crate::raw_index) fn verify_dense_receipt_copy<S: ReadSnapshot>(
         &self,

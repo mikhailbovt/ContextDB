@@ -3,7 +3,7 @@
 use super::*;
 
 impl NativeService {
-    pub(super) fn check_prefix_generation_binding<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn check_prefix_generation_binding<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -98,6 +98,7 @@ impl NativeService {
             dense_graph: None,
             dense_segments: None,
             dense_prefix_base: None,
+            dense_prefix_segments: None,
         };
         let input =
             self.prefix_build_input(snapshot, None, workspace, &admission, &target, budget)?;

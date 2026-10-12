@@ -192,6 +192,7 @@ impl NativeService {
         let segment_generations =
             self.accepted_dense_segment_generations(snapshot, &mut segment_budget)?;
         let prefix_generations = self.prefix_base_declarations(snapshot, &mut segment_budget)?;
+        let prefix_segments = self.prefix_segment_declarations(snapshot, &mut segment_budget)?;
         let actual = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"raw/")
             .map_err(storage_error)?;
@@ -315,6 +316,21 @@ impl NativeService {
                     prefix_base,
                     &mut segment_budget,
                 )?;
+                segment_budget.charge(1, 4096).map_err(budget_error)?;
+                let mut intervals = Vec::new();
+                for (_, publication) in prefix_segments.range(
+                    (workspace.to_owned(), number, 0)..=(workspace.to_owned(), number, u64::MAX),
+                ) {
+                    segment_budget.charge(1, 1024).map_err(budget_error)?;
+                    intervals.push(publication);
+                }
+                self.validate_prefix_segment_declarations(
+                    snapshot,
+                    workspace,
+                    &generation,
+                    &intervals,
+                    &mut segment_budget,
+                )?;
                 expected.insert(generation_key(workspace, number), encode(&generation)?);
                 if state
                     .reclaiming
@@ -333,6 +349,15 @@ impl NativeService {
                         )
                         .map_err(storage_error)?
                     {
+                        let suffix = &row.key[generation_prefix(workspace, number).len()..];
+                        if (suffix.starts_with(b"dense/prefix-segment-v2/")
+                            || suffix == b"dense/prefix-segments-v2/head")
+                            && generation.dense_prefix_segments.is_none()
+                        {
+                            return Err(integrity(
+                                "reclaiming prefix intervals lost their accepted directory",
+                            ));
+                        }
                         if row.key[generation_prefix(workspace, number).len()..]
                             .starts_with(b"dense/prefix-base-v2/")
                             && generation.dense_prefix_base.is_none()
@@ -389,6 +414,36 @@ impl NativeService {
                                 "prefix reconstruction overlaps another key family",
                             ));
                         }
+                    }
+                }
+                for publication in &intervals {
+                    for (key, value) in self.reconstruct_prefix_segment_rows(
+                        snapshot,
+                        workspace,
+                        publication,
+                        &mut segment_budget,
+                    )? {
+                        if expected.insert(key, value).is_some() {
+                            return Err(integrity(
+                                "prefix interval reconstruction overlaps another family",
+                            ));
+                        }
+                    }
+                }
+                if let Some(last) = intervals.last() {
+                    segment_budget.charge(1, 2048).map_err(budget_error)?;
+                    let key = dense::graph::prefix_segments_v2::types::directory_head_key(
+                        workspace, number,
+                    )?;
+                    let value = dense::graph::segments::crypto::metered_encode(
+                        &last.directory,
+                        &mut segment_budget,
+                        dense::graph::prefix_segments_v2::types::ROW_BYTES,
+                    )?;
+                    if expected.insert(key, value).is_some() {
+                        return Err(integrity(
+                            "prefix directory reconstruction overlaps another family",
+                        ));
                     }
                 }
                 let mut domains = BTreeMap::<String, PolicyDomain>::new();

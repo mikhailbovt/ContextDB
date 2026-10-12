@@ -166,11 +166,13 @@ impl NativeService {
     ) -> ServiceResult<()> {
         validate_prefix_bases(state)?;
         let roots = state.prefix_bases.as_ref().map_or(0, BTreeMap::len)
-            + state.segment_heads.as_ref().map_or(0, BTreeMap::len);
+            + state.segment_heads.as_ref().map_or(0, BTreeMap::len)
+            + state.prefix_segment_heads.as_ref().map_or(0, BTreeMap::len);
+        let extra_stamp = u64::from(state.prefix_segment_heads.is_some());
         parent
             .charge(
-                8 + roots as u64,
-                roots as u64 * 4096 + self.database_id.len() as u64 * 12 + 4096,
+                8 + roots as u64 + extra_stamp,
+                (roots as u64 + extra_stamp) * 4096 + self.database_id.len() as u64 * 12 + 4096,
             )
             .map_err(crate::raw_index::budget_error)
     }
@@ -224,7 +226,11 @@ impl NativeService {
             parent,
         )?;
         if state.watermarks.journal == 0 {
-            if mapping.is_some() || state.prefix_bases.is_some() || state.segment_heads.is_some() {
+            if mapping.is_some()
+                || state.prefix_bases.is_some()
+                || state.segment_heads.is_some()
+                || state.prefix_segment_heads.is_some()
+            {
                 return Err(integrity("genesis workspace has committed derived roots"));
             }
         } else {
@@ -257,6 +263,7 @@ impl NativeService {
                 return Err(integrity("current prefix workspace event binding differs"));
             }
             self.check_prefix_base_predecessor(&state, &event, &manifest)?;
+            self.check_prefix_segment_head_predecessor(&state, &event, &manifest)?;
             if (state.segment_heads.is_some() || event.segment_heads.is_some())
                 && !manifest
                     .features

@@ -83,6 +83,31 @@ impl NativeService {
         let workspace = digest_bytes(workspace_id.as_bytes());
         let prefix = generation_prefix(&workspace, generation.number);
         self.validate_raw_bm25_generation(snapshot, generation, budget)?;
+        let prefix_interval_rows = entries.iter().any(|entry| {
+            std::str::from_utf8(&entry.key)
+                .ok()
+                .and_then(|key| key.strip_prefix(&prefix))
+                .is_some_and(|key| {
+                    key.starts_with("dense/prefix-segment-v2/")
+                        || key == "dense/prefix-segments-v2/head"
+                })
+        });
+        if generation.dense_prefix_base.is_some()
+            || generation.dense_prefix_segments.is_some()
+            || prefix_interval_rows
+        {
+            let current = self.current_prefix_segment_heads(snapshot, workspace_id, budget)?;
+            if current
+                .prefix_segment_heads
+                .as_ref()
+                .and_then(|heads| heads.get(&generation.number))
+                != generation.dense_prefix_segments.as_ref()
+            {
+                return Err(integrity(
+                    "live raw copy generation differs from certified prefix directory",
+                ));
+            }
+        }
         let mut sources = BTreeMap::new();
         let mut documents = BTreeMap::new();
         let mut rows = Vec::new();
@@ -91,10 +116,23 @@ impl NativeService {
                 .ok()
                 .and_then(|key| key.strip_prefix(&prefix));
             if relative.is_some_and(|key| {
-                key.starts_with("dense/graph/") || key.starts_with("dense/prefix-base-v2/")
+                key.starts_with("dense/graph/")
+                    || key.starts_with("dense/prefix-base-v2/")
+                    || key.starts_with("dense/prefix-segment-v2/")
+                    || key == "dense/prefix-segments-v2/head"
             }) {
-                let owner = if relative.is_some_and(|key| key.starts_with("dense/prefix-base-v2/"))
-                {
+                let owner = if relative.is_some_and(|key| {
+                    key.starts_with("dense/prefix-segment-v2/")
+                        || key == "dense/prefix-segments-v2/head"
+                }) {
+                    self.verify_dense_prefix_segment_copy(
+                        snapshot,
+                        generation,
+                        &entry.key,
+                        &entry.value,
+                        budget,
+                    )?
+                } else if relative.is_some_and(|key| key.starts_with("dense/prefix-base-v2/")) {
                     self.verify_dense_prefix_base_copy(
                         snapshot,
                         generation,

@@ -5,7 +5,7 @@
 
 mod construction;
 mod copies;
-pub(in crate::raw_index::dense::graph) mod crypto;
+pub(in crate::raw_index) mod crypto;
 pub(crate) mod heads;
 mod publication;
 pub(crate) mod query;

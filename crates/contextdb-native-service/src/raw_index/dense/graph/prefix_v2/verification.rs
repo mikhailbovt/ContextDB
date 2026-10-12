@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 pub(super) const LOCATOR_OPERATION: &str = "raw_span_ann_prefix_locator_v2";
 
 /// Only this module can mint the target consumed by complete prefix replay.
-pub(super) struct VerifiedDensePrefixTarget {
+pub(in crate::raw_index::dense::graph) struct VerifiedDensePrefixTarget {
     reference: AcceptedPublicationRef,
     receipt: DenseProjectionReceipt,
     manifest: DenseManifest,
@@ -15,16 +15,16 @@ pub(super) struct VerifiedDensePrefixTarget {
 }
 
 impl VerifiedDensePrefixTarget {
-    pub(super) fn reference(&self) -> &AcceptedPublicationRef {
+    pub(in crate::raw_index::dense::graph) fn reference(&self) -> &AcceptedPublicationRef {
         &self.reference
     }
-    pub(super) fn receipt(&self) -> &DenseProjectionReceipt {
+    pub(in crate::raw_index::dense::graph) fn receipt(&self) -> &DenseProjectionReceipt {
         &self.receipt
     }
-    pub(super) fn manifest(&self) -> &DenseManifest {
+    pub(in crate::raw_index::dense::graph) fn manifest(&self) -> &DenseManifest {
         &self.manifest
     }
-    pub(super) fn work(&self) -> &[crate::capture::CaptureWork] {
+    pub(in crate::raw_index::dense::graph) fn work(&self) -> &[crate::capture::CaptureWork] {
         &self.work
     }
 }
@@ -37,7 +37,7 @@ pub(super) fn request_digest(
     canonical_digest(&(types::OPERATION, database, workspace, request))
 }
 
-pub(super) fn decode_allowance(
+pub(in crate::raw_index::dense::graph) fn decode_allowance(
     bytes: &[u8],
     cap: usize,
     budget: &mut QueryBudget,
@@ -51,7 +51,10 @@ pub(super) fn decode_allowance(
 }
 
 impl NativeService {
-    pub(super) fn prefix_read<T: DeserializeOwned + Serialize, S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn prefix_read<
+        T: DeserializeOwned + Serialize,
+        S: ReadSnapshot,
+    >(
         &self,
         snapshot: &S,
         keyspace: &contextdb_storage::Keyspace,
@@ -61,7 +64,10 @@ impl NativeService {
         self.prefix_read_at(snapshot, keyspace, key, types::ROW_BYTES, budget)
     }
 
-    fn prefix_read_at<T: DeserializeOwned + Serialize, S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn prefix_read_at<
+        T: DeserializeOwned + Serialize,
+        S: ReadSnapshot,
+    >(
         &self,
         snapshot: &S,
         keyspace: &contextdb_storage::Keyspace,
@@ -80,7 +86,7 @@ impl NativeService {
         Ok(Some(value))
     }
 
-    fn prefix_accepted_response<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn prefix_accepted_response<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -127,7 +133,7 @@ impl NativeService {
         Ok((event, stored))
     }
 
-    pub(super) fn prefix_publication_ref<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn prefix_publication_ref<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         global_commit: u64,
@@ -156,7 +162,9 @@ impl NativeService {
         })
     }
 
-    pub(super) fn verify_accepted_prefix_dense_target<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn verify_accepted_prefix_dense_target<
+        S: ReadSnapshot,
+    >(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -180,7 +188,7 @@ impl NativeService {
         })
     }
 
-    fn prefix_dense_target_binding<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn prefix_dense_target_binding<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -318,7 +326,9 @@ impl NativeService {
         self.verify_accepted_prefix_dense_target(snapshot, workspace, &reference, budget)
     }
 
-    pub(super) fn recheck_current_prefix_dense_target<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn recheck_current_prefix_dense_target<
+        S: ReadSnapshot,
+    >(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -377,7 +387,7 @@ impl NativeService {
         Ok(())
     }
 
-    pub(super) fn check_prefix_base_acceptance<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn check_prefix_base_acceptance<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,

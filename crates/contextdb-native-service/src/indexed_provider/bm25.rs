@@ -145,6 +145,7 @@ impl NativeIndexedRecallProvider<'_> {
                         dense_graph: None,
                         dense_segments: None,
                         dense_prefix_base: None,
+                        dense_prefix_segments: None,
                     }
                 };
                 let current = state.watermarks.journal == latest.watermarks.journal;

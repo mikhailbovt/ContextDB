@@ -934,6 +934,19 @@ immutable after indexing advances. This family is exclusive with v1 graph bases
 per generation and has no serving, runtime or CLI profile yet. Prefixes above the
 finite bootstrap gates, arbitrary-directory routing and useful recall remain open.
 
+`seal_original_span_prefix_segment` extends this independent base through the
+separate `continuous-raw-span-ann-prefix-segments-v2` maintenance family. Each
+interval covers at most 128 accepted capture work items, 256 whole-plan vectors
+and 64 policy cohorts; total history is not capped at 128. An authenticated
+capture boundary starts the complete native journal range. Neither dense nor
+base publication time can serve as that boundary: a raw backlog may predate both.
+Signed before/after states and exact outbox joins include omission-only intervals
+without inventing vectors. Current owner stamps, immutable ordinal locators,
+cold reconstruction and source/shared copy proofs remain valid through paged GC.
+An exact old request returns its historical receipt without replacing the current
+directory. Full scans can exhaust the operator budget. This family has no serving,
+runtime, CLI or coarse-routing activation; high-recall discovery remains a gate.
+
 Preparation unions matching ranges across routes before materializing one
 immutable source. Conflicting versions or equal-range digests refuse; the bounded
 rendering frontier cannot silently discard additional ranges. Protected routing

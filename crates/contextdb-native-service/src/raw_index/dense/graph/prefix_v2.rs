@@ -4,11 +4,11 @@ mod construction;
 mod copies;
 mod crypto;
 pub(crate) mod heads;
-mod inputs;
+pub(in crate::raw_index::dense::graph) mod inputs;
 mod publication;
 mod reconstruction;
 pub(crate) mod types;
-mod verification;
+pub(in crate::raw_index::dense::graph) mod verification;
 
 use super::*;
 use types::{

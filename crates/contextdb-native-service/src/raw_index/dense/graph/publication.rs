@@ -64,11 +64,38 @@ impl NativeService {
         if generation.authorization_epoch != self.graph_epoch(&snapshot, &workspace, budget)? {
             return Err(stale_index());
         }
-        if generation.dense_prefix_base.is_some() {
+        if generation.dense_prefix_base.is_some() || generation.dense_prefix_segments.is_some() {
             return Err(stale_index());
         }
         if generation.dense_graph.is_some() {
             return self.current_graph_receipt(&snapshot, &workspace, &generation, budget);
+        }
+        // First activation also refuses an independently retained prefix family.
+        // A stripped generation field cannot permit a second format to claim it.
+        budget
+            .charge(1, prefix_v2::types::KEY_BYTES)
+            .map_err(budget_error)?;
+        let prefix_locator = prefix_v2::types::retained_locator_key(&workspace, number)?;
+        if crate::budgeted::read_value(
+            &snapshot,
+            &self.keyspaces.idempotency,
+            &prefix_locator,
+            prefix_v2::types::ROW_BYTES,
+            budget,
+        )?
+        .is_some()
+        {
+            return Err(integrity(
+                "accepted prefix family cannot become a legacy graph base",
+            ));
+        }
+        if self
+            .prefix_base_declarations(&snapshot, budget)?
+            .contains_key(&(workspace.clone(), number))
+        {
+            return Err(integrity(
+                "retained prefix acceptance prevents a second graph family",
+            ));
         }
         self.validate_dense_generation(&snapshot, &workspace, &generation, budget)?;
         let dense = generation.dense.as_ref().ok_or_else(stale_index)?;

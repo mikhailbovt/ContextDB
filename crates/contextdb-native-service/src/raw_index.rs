@@ -97,6 +97,10 @@ pub(super) struct Generation {
     /// Independently accepted bounded prefix base; absent on legacy generations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dense_prefix_base: Option<dense::graph::prefix_v2::types::PrefixBaseRefV2>,
+    /// Immutable interval directory over the independent accepted prefix base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dense_prefix_segments:
+        Option<dense::graph::prefix_segments_v2::types::PrefixSegmentDirectoryRefV2>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -293,6 +297,7 @@ impl NativeService {
                 dense_graph: None,
                 dense_segments: None,
                 dense_prefix_base: None,
+                dense_prefix_segments: None,
             }
         } else {
             let number = state

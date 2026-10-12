@@ -220,6 +220,12 @@ impl NativeService {
             bases.remove(&number);
         }
         let digest = canonical_digest(&(&workspace, frame.global_commit, &progress))?;
+        if finished
+            && let Some(heads) = &mut frame.state.prefix_segment_heads
+            && let Some(number) = progress.generation
+        {
+            heads.remove(&number);
+        }
         self.finish_frame(
             &mut tx,
             &frame,

@@ -6,6 +6,169 @@ use contextdb_core::RawSource;
 use contextdb_recall::QueryBudget;
 
 impl NativeService {
+    /// Resolve the actual capture event that precedes a complete journal range.
+    /// This authenticates controls only; neither a capture boundary nor its
+    /// receipt grants access to the original or any derived content.
+    pub(crate) fn verified_capture_boundary_metadata<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+        work: &CaptureWork,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<(u64, String, ContentDigest, ContentDigest)> {
+        budget.charge(1, 4096).map_err(budget_error)?;
+        let bytes = crate::budgeted::read_value(
+            snapshot,
+            &self.keyspaces.continuous,
+            &record_key(work.event_id),
+            MAX_CAPTURE_CONTROL_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("capture boundary control is absent"))?;
+        budget
+            .charge(bytes.len() as u64 * 8 + 1, bytes.len() as u64 * 16 + 8192)
+            .map_err(budget_error)?;
+        let record: CaptureRecord = decode(&bytes, "canonical capture boundary control")?;
+        let recovery = record.recovery.as_ref().ok_or_else(|| {
+            ServiceError::new(
+                ErrorCode::Unsupported,
+                "capture boundary requires retained recovery controls",
+                false,
+            )
+        })?;
+        if encode(&record)? != bytes
+            || record.work()? != *work
+            || record.producer_sequence == 0
+            || record.receipt.workspace_commit == 0
+            || blake3::Hash::from_hex(&record.producer_key).is_err()
+            || blake3::Hash::from_hex(&record.idempotency_digest).is_err()
+        {
+            return Err(integrity(
+                "capture boundary canonical control or work differs",
+            ));
+        }
+        crate::budgeted::metadata(snapshot, budget, |reader| {
+            self.verify_recovery_features(reader, recovery)
+        })?;
+        let receipt = &record.receipt;
+        let mut unsigned = receipt.clone();
+        unsigned.token.clear();
+        if receipt.token
+            != keyed_token(
+                &self.token_key,
+                b"contextdb/capture-receipt/v1\0",
+                &encode(&unsigned)?,
+            )
+            || receipt.event_id != work.event_id
+            || receipt.database_id != self.database_id
+            || receipt.domain != NATIVE_CAPTURE_DOMAIN
+            || receipt.durability != CaptureDurability::Sync
+            || digest_bytes(receipt.workspace_id.to_string().as_bytes()) != workspace
+        {
+            return Err(integrity("capture boundary receipt authentication differs"));
+        }
+        let receipt_bytes = encode(receipt)?;
+        let (global, _) = crate::budgeted::metadata(snapshot, budget, |reader| {
+            self.select_snapshot(
+                reader,
+                &receipt.workspace_id.to_string(),
+                Some(receipt.workspace_commit),
+            )
+        })?;
+        // Native events retain a generic 8 MiB bound. A capture-control row's
+        // smaller bound must not be applied to the surrounding journal format.
+        let event_bytes = crate::budgeted::read_value(
+            snapshot,
+            &self.keyspaces.events,
+            &global.to_be_bytes(),
+            crate::MAX_JSON_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("capture boundary accepted event is absent"))?;
+        budget
+            .charge(
+                event_bytes.len() as u64 * 8 + 1,
+                event_bytes.len() as u64 * 16 + 8192,
+            )
+            .map_err(budget_error)?;
+        let event: crate::StoredEvent = decode(&event_bytes, "capture boundary accepted event")?;
+        if event_bytes != encode(&event)?
+            || event.schema_version != SCHEMA_VERSION
+            || event.operation != "capture"
+            || event.global_commit != global
+            || event.workspace_digest != workspace
+            || event.workspace_commit != receipt.workspace_commit
+            || event.accepted_original.as_ref() != Some(work)
+            || event.event_digest != crate::event_digest(&event)?
+            || event.response_digest != digest_bytes(&receipt_bytes)
+        {
+            return Err(integrity("capture boundary event or accepted work differs"));
+        }
+        // Capture uses its producer/retry digest as primary identity. The
+        // journal's request_digest hashes the observed envelope and is NOT that
+        // key. Join the actual record identity rather than guessing a lookup.
+        let retry_bytes = crate::budgeted::read_value(
+            snapshot,
+            &self.keyspaces.idempotency,
+            record.idempotency_digest.as_bytes(),
+            MAX_CAPTURE_CONTROL_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("capture boundary primary receipt is absent"))?;
+        budget
+            .charge(
+                retry_bytes.len() as u64 * 8 + 1,
+                retry_bytes.len() as u64 * 16 + 8192,
+            )
+            .map_err(budget_error)?;
+        let retry: crate::StoredIdempotency =
+            decode(&retry_bytes, "capture boundary primary receipt")?;
+        if encode(&retry)? != retry_bytes
+            || retry.schema_version != SCHEMA_VERSION
+            || retry.operation != "capture"
+            || retry.request_digest != event.request_digest
+            || retry.response_digest != event.response_digest
+            || retry.response_digest != digest_bytes(&retry.response_bytes)
+            || retry.response_bytes != receipt_bytes
+        {
+            return Err(integrity(
+                "capture boundary primary accepted receipt differs",
+            ));
+        }
+        budget.charge(1, 1024).map_err(budget_error)?;
+        let position = position_key(&record.producer_key, record.producer_sequence);
+        let positioned_bytes = crate::budgeted::read_value(
+            snapshot,
+            &self.keyspaces.continuous,
+            &position,
+            1024,
+            budget,
+        )?
+        .ok_or_else(|| integrity("capture boundary producer position is absent"))?;
+        budget
+            .charge(
+                positioned_bytes.len() as u64 + 1,
+                positioned_bytes.len() as u64 * 8 + 256,
+            )
+            .map_err(budget_error)?;
+        let positioned: ObservationId =
+            decode(&positioned_bytes, "capture boundary producer position")?;
+        if positioned != work.event_id || encode(&positioned)? != positioned_bytes {
+            return Err(integrity("capture boundary producer position differs"));
+        }
+        budget
+            .charge(bytes.len() as u64 + receipt_bytes.len() as u64 + 1, 256)
+            .map_err(budget_error)?;
+        let result = (
+            global,
+            event.event_digest,
+            digest(&receipt_bytes),
+            control_digest(&bytes),
+        );
+        budget.check().map_err(budget_error)?;
+        Ok(result)
+    }
+
     /// The caller must currently authorize the source and all custody inputs
     /// before reading its derived document. This verifies immutable attribution,
     /// not permission, and never loads the original payload.

@@ -24,7 +24,7 @@ use std::{
 
 #[cfg(test)]
 #[path = "input_tests.rs"]
-pub(super) mod tests;
+pub(in crate::raw_index::dense::graph) mod tests;
 
 const RAW_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 
@@ -517,7 +517,7 @@ impl NativeService {
         })
     }
 
-    fn admit_prefix_source(
+    pub(in crate::raw_index::dense::graph) fn admit_prefix_source(
         &self,
         context: Option<&AuthenticatedRequestContext>,
         workspace: &str,

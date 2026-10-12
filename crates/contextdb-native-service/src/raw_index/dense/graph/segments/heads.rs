@@ -121,12 +121,20 @@ impl NativeService {
         let prefix_format = manifest
             .features
             .contains(super::super::prefix_v2::types::FEATURE);
+        let prefix_segment_format = manifest
+            .features
+            .contains(super::super::prefix_segments_v2::types::FEATURE);
         if state.segment_heads.is_some() && !activated_format {
             return Err(integrity("workspace predecessor lost its segment feature"));
         }
         if state.prefix_bases.is_some() && !prefix_format {
             return Err(integrity(
                 "workspace predecessor lost its prefix-base feature",
+            ));
+        }
+        if state.prefix_segment_heads.is_some() && !prefix_segment_format {
+            return Err(integrity(
+                "workspace predecessor lost its prefix-segment feature",
             ));
         }
         let key = workspace_map_key(&state.workspace_digest, state.watermarks.journal);
@@ -137,7 +145,11 @@ impl NativeService {
             HEAD_BYTES,
         )?;
         if state.watermarks.journal == 0 {
-            if mapping.is_some() || state.segment_heads.is_some() || state.prefix_bases.is_some() {
+            if mapping.is_some()
+                || state.segment_heads.is_some()
+                || state.prefix_bases.is_some()
+                || state.prefix_segment_heads.is_some()
+            {
                 return Err(integrity(
                     "genesis workspace has a committed segment predecessor",
                 ));
@@ -172,11 +184,14 @@ impl NativeService {
             }
             self.check_segment_head_stamp(state, &event)?;
             self.check_prefix_base_predecessor(state, &event, &manifest)?;
+            self.check_prefix_segment_head_predecessor(state, &event, &manifest)?;
         } else {
             if activated_format
                 || prefix_format
+                || prefix_segment_format
                 || state.segment_heads.is_some()
                 || state.prefix_bases.is_some()
+                || state.prefix_segment_heads.is_some()
             {
                 return Err(integrity("activated workspace predecessor map absent"));
             }
@@ -190,7 +205,9 @@ impl NativeService {
                 crate::MAX_JSON_BYTES,
             )? && (event.prefix_bases.is_some()
                 || event.segment_heads.is_some()
+                || event.prefix_segment_heads.is_some()
                 || event.operation == super::super::prefix_v2::types::OPERATION
+                || event.operation == super::super::prefix_segments_v2::types::OPERATION
                 || event.operation == OPERATION)
             {
                 return Err(integrity(
@@ -349,11 +366,14 @@ impl NativeService {
             )?
             .unwrap_or_else(|| WorkspaceState::genesis(workspace.clone()));
         validate_workspace_state(&state, &workspace)?;
+        if state.prefix_segment_heads.is_some() {
+            return self.current_prefix_segment_heads(snapshot, workspace_id, budget);
+        }
         // Historical legacy maps may expire. Do not alter None admission.
         if state.segment_heads.is_none() {
             return Ok(state);
         }
-        self.require_segment_heads_feature(snapshot, budget)?;
+        let manifest = self.require_segment_heads_feature(snapshot, budget)?;
         budget
             .charge(1, 1024)
             .map_err(crate::raw_index::budget_error)?;
@@ -395,6 +415,7 @@ impl NativeService {
             ));
         }
         self.check_segment_head_stamp(&state, &event)?;
+        self.check_prefix_segment_head_predecessor(&state, &event, &manifest)?;
         let head = crate::budgeted::read_value(
             snapshot,
             &self.keyspaces.meta,
@@ -464,15 +485,20 @@ impl NativeService {
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         validate_segment_heads(state)?;
+        let extra_roots = state
+            .prefix_segment_heads
+            .as_ref()
+            .map_or(0, |roots| roots.len() + 1);
         // Event digest cloning was prepaid from actual row bytes in head_read.
         // Map serialization and the keyed tuple have separate small envelopes.
         budget
             .charge(
-                8 + state.segment_heads.as_ref().map_or(0, |m| m.len() as u64),
+                8 + state.segment_heads.as_ref().map_or(0, |m| m.len() as u64) + extra_roots as u64,
                 state
                     .segment_heads
                     .as_ref()
                     .map_or(0, |m| m.len() as u64 * 4096)
+                    + extra_roots as u64 * 4096
                     + self.database_id.len() as u64 * 12
                     + 4096,
             )
@@ -484,7 +510,7 @@ impl NativeService {
         &self,
         snapshot: &S,
         budget: &mut QueryBudget,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Manifest> {
         let manifest = self
             .head_read::<Manifest, _>(
                 snapshot,
@@ -501,7 +527,7 @@ impl NativeService {
         if !manifest.features.contains(FEATURE) {
             return Err(integrity("segment heads retained format feature absent"));
         }
-        Ok(())
+        Ok(manifest)
     }
 
     /// Offline deep verification. None-only histories keep their prior behavior;
