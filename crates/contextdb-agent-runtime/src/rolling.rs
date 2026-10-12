@@ -5,7 +5,8 @@ use contextdb_context::{
     VisibleOriginal,
 };
 use contextdb_continuity::{
-    ORIGINAL_PAGE_OPERATION, ObligationStatus, OwnedRunCheckpoint, ToolResultPageView,
+    ORIGINAL_PAGE_DEFINITION, ORIGINAL_PAGE_OPERATION, ObligationStatus, OwnedRunCheckpoint,
+    ToolResultPageView,
 };
 use contextdb_core::{OriginalSourceSpan, RawFilter, RawTextQuery};
 use contextdb_recall::{IndexedQuery, IndexedSelection, QueryBudget};
@@ -82,9 +83,12 @@ pub(crate) fn rehydrate<S: PayloadPort + ?Sized>(
     {
         base.control.push(OutgoingMessage {
             id: BlockId::new("contextdb.original-page-definition.v1").map_err(context_error)?,
-            zone: OutgoingZone::ToolDefinitions, role: OutgoingRole::System,
-            text: format!("Pure tool {ORIGINAL_PAGE_OPERATION}: read an original tool-result page. Arguments are JSON {{handle: the complete locator displayed with the result, start: byte cursor, max_bytes: 1..4096}}. The host validates current permissions and version. A partial page is not the complete result; the handle grants no authority."),
-            originals: vec![], tool_calls: vec![], tool_result: None,
+            zone: OutgoingZone::ToolDefinitions,
+            role: OutgoingRole::System,
+            text: ORIGINAL_PAGE_DEFINITION.into(),
+            originals: vec![],
+            tool_calls: vec![],
+            tool_result: None,
         });
     }
     for obligation in state

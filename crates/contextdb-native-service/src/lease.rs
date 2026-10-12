@@ -45,6 +45,14 @@ pub(super) struct PreparationSeal {
     /// Only v2 adds this field; existing Off/v1 seal encodings remain unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     trace_version: Option<u16>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    original_page_recall: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disclosed_source_set_digest: Option<ContentDigest>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +100,8 @@ impl NativeService {
         wire_bytes: u64,
         capability_digest: String,
         trace: Option<&contextdb_service::PreparedRouterTrace>,
+        original_page_recall: bool,
+        disclosed_source_set_digest: Option<ContentDigest>,
     ) -> ServiceResult<String> {
         self.seal_private_cursor(
             SEAL_DOMAIN,
@@ -113,6 +123,8 @@ impl NativeService {
                     (trace.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION)
                         .then_some(trace.version)
                 }),
+                original_page_recall,
+                disclosed_source_set_digest,
             },
         )
     }
@@ -151,6 +163,7 @@ impl NativeService {
             || ContentDigest::from_bytes(*blake3::hash(&prepared.outgoing.wire).as_bytes())
                 != seal.wire_digest
             || prepared.assembly.read_set.scopes != context.request.scopes
+            || prepared.original_page_recall != seal.original_page_recall
             || fence
                 .scopes
                 .keys()
@@ -160,6 +173,25 @@ impl NativeService {
         {
             return Err(invalid(
                 "prepared assembly differs from its native admission seal",
+            ));
+        }
+        if prepared.original_page_recall {
+            let actual = disclosed_source_set_digest(
+                prepared
+                    .messages
+                    .iter()
+                    .flat_map(|message| &message.originals)
+                    .map(|original| &original.span),
+                budget,
+            )?;
+            if seal.disclosed_source_set_digest != Some(actual) {
+                return Err(invalid(
+                    "prepared visible source identities differ from their native seal",
+                ));
+            }
+        } else if seal.disclosed_source_set_digest.is_some() {
+            return Err(invalid(
+                "legacy preparation has unsupported disclosure metadata",
             ));
         }
         let mut trace_bytes = 0;
@@ -218,24 +250,45 @@ impl NativeService {
         checkpoint: Option<&CaptureReceipt>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
-        let trace = prepared
-            .router_trace
-            .as_ref()
-            .ok_or_else(|| invalid("prepared capture requires a protected trace"))?;
+        if prepared.router_trace.is_none() && !prepared.original_page_recall {
+            return Err(invalid(
+                "prepared capture requires an owner-supported protected profile",
+            ));
+        }
         let record = self.lease_record_from_prepared(&request.context, prepared, budget)?;
+        if prepared.original_page_recall {
+            let EventPayload::Assembly { manifest } = &request.event.payload else {
+                return Err(invalid(
+                    "original-page recall requires a captured model request manifest",
+                ));
+            };
+            if manifest.parts.len() > CAPTURE_MAX_REQUEST_PARTS {
+                return Err(exhausted(
+                    "captured disclosure exceeds the source part bound",
+                ));
+            }
+            let actual = disclosed_source_set_digest(
+                manifest.parts.iter().filter_map(|part| match part {
+                    contextdb_core::RequestPart::Source { span }
+                    | contextdb_core::RequestPart::JsonStringSource { span, .. } => Some(span),
+                    _ => None,
+                }),
+                budget,
+            )?;
+            if record.seal.disclosed_source_set_digest != Some(actual) {
+                return Err(invalid(
+                    "captured source identities differ from the owner-sealed visible sources",
+                ));
+            }
+        }
         self.check_lease_clock(&record)?;
         self.check_lease_policy(snapshot, &request.context, &record, budget)?;
         if !self.lease_scopes_current(snapshot, &request.context, &record, budget)? {
             return Err(changed("scope changed before prepared capture"));
         }
-        self.verify_router_trace_controls(
-            snapshot,
-            record
-                .trace_controls
-                .as_ref()
-                .ok_or_else(|| invalid("prepared controls absent"))?,
-            budget,
-        )?;
+        if let Some(controls) = &record.trace_controls {
+            self.verify_router_trace_controls(snapshot, controls, budget)?;
+        }
         let state = self.current_owned_checkpoint(
             snapshot,
             &request.context,
@@ -278,7 +331,14 @@ impl NativeService {
                 .parts
                 .iter()
                 .any(|part| matches!(part, contextdb_core::RequestPart::StoredNovel { .. }))
-            || manifest.router_trace.as_deref() != Some(&trace.attach(pending.call_id, budget)?)
+            || manifest.original_page_recall != record.seal.original_page_recall
+            || manifest.router_trace.as_deref()
+                != prepared
+                    .router_trace
+                    .as_ref()
+                    .map(|trace| trace.attach(pending.call_id, budget))
+                    .transpose()?
+                    .as_ref()
         {
             return Err(invalid(
                 "prepared capture differs from the owned intent and native seal",
@@ -386,6 +446,35 @@ impl NativeService {
             .lock()
             .map_err(|_| integrity("context lease registry poisoned"))
     }
+}
+
+pub(super) fn disclosed_source_set_digest<'a>(
+    sources: impl Iterator<Item = &'a OriginalSourceSpan>,
+    budget: &mut QueryBudget,
+) -> ServiceResult<ContentDigest> {
+    let mut spans = Vec::new();
+    for span in sources {
+        if spans.len() == 2048 {
+            return Err(exhausted(
+                "visible disclosure exceeds 2048 bounded source spans",
+            ));
+        }
+        budget
+            .charge(1, size_of::<OriginalSourceSpan>() as u64)
+            .map_err(budget_error)?;
+        spans.push(span.clone());
+    }
+    spans.sort_by_key(|span| {
+        (
+            span.event_id,
+            span.payload_digest,
+            span.start,
+            span.end,
+            span.span_digest,
+        )
+    });
+    spans.dedup();
+    contextdb_context::router::canonical_digest(&spans, budget).map_err(router_trace::trace_error)
 }
 
 impl ContextLeasePort for NativeService {

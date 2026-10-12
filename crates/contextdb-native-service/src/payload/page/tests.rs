@@ -1,5 +1,7 @@
 //! Native archive, actual reader wire, local page tool and cold continuation.
 
+mod recall;
+
 use super::*;
 use contextdb_agent_runtime::*;
 use contextdb_capture::{

@@ -80,6 +80,7 @@ fn request_manifest_replays_exact_wire_and_rejects_echo_roots_and_reordering() {
     let wire = [b"\x00<user>".as_slice(), source, b"</user>\r\n".as_slice()].concat();
     let manifest = ModelRequestManifest {
         router_trace: None,
+        original_page_recall: false,
         model_call_id: ModelCallId::new(),
         renderer: "test-wire/v1".into(),
         wire_digest: raw_digest(&wire),
@@ -255,6 +256,7 @@ fn capture_host_stages_large_novel_request_parts_without_losing_source_identity(
     let wire = [prefix.as_slice(), source, suffix.as_slice()].concat();
     let manifest = ModelRequestManifest {
         router_trace: None,
+        original_page_recall: false,
         model_call_id: ModelCallId::new(),
         renderer: "test-large-wire/v1".into(),
         wire_digest: raw_digest(&wire),
@@ -322,6 +324,7 @@ fn request_source_permission_is_checked_before_request_body_materialization() {
         manifest: ModelRequestManifest {
             model_call_id: ModelCallId::new(),
             router_trace: None,
+            original_page_recall: false,
             renderer: "raw/v1".into(),
             wire_digest: raw_digest(bytes),
             byte_length: u64::try_from(bytes.len()).expect("length"),

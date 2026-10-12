@@ -76,7 +76,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             }
             EventPayload::Assembly { manifest } => {
                 if let PendingCapture::ModelRequest { prepared, .. } = &pending
-                    && prepared.router_trace.is_some()
+                    && (prepared.router_trace.is_some() || prepared.original_page_recall)
                 {
                     host.capture_prepared_model_request(
                         request,

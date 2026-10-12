@@ -183,7 +183,14 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                         .is_some_and(|page| page.handle == args.handle)
                 })
             {
-                return Err(invalid("page handle is absent from the owned tool views"));
+                self.owner.validate_original_page_disclosure(
+                    &self.context,
+                    &self.checkpoint_receipt,
+                    &queued.proposal,
+                    queued.requested.call_id,
+                    &args,
+                    budget,
+                )?;
             }
             Some(args)
         } else {

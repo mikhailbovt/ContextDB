@@ -79,7 +79,8 @@ impl NativeService {
             || original.event.producer_id != state.producer_id
             || !matches!(&original.event.payload, EventPayload::Assembly { manifest }
                 if manifest.model_call_id == call && manifest.wire_digest == record.seal.wire_digest
-                    && manifest.byte_length == record.seal.wire_bytes)
+                    && manifest.byte_length == record.seal.wire_bytes
+                    && manifest.original_page_recall == record.seal.original_page_recall)
         {
             return Err(invalid(
                 "model dispatch differs from the checkpoint and sealed request",
@@ -288,20 +289,31 @@ impl NativeService {
                     .event
                     .parent_event_ids
                     .contains(&selector.handle.event_id)
-                || !state
-                    .groups
-                    .iter()
-                    .flat_map(|group| &group.messages)
-                    .any(|message| {
-                        message
-                            .tool_page
-                            .as_ref()
-                            .is_some_and(|page| page.handle == selector.handle)
-                    })
             {
                 return Err(invalid(
                     "original page selector differs from the source proposal or owned locator",
                 ));
+            }
+            if !state
+                .groups
+                .iter()
+                .flat_map(|group| &group.messages)
+                .any(|message| {
+                    message
+                        .tool_page
+                        .as_ref()
+                        .is_some_and(|page| page.handle == selector.handle)
+                })
+            {
+                self.validate_original_page_disclosure_at(
+                    &snapshot,
+                    context,
+                    &state,
+                    &planned.proposal,
+                    planned.call_id,
+                    &selector,
+                    budget,
+                )?;
             }
             self.read_tool_original_page_at(
                 &snapshot,

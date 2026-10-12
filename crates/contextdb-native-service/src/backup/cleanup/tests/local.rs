@@ -187,6 +187,7 @@ fn local_removal_preserves_globally_shared_novel_bytes_before_the_independent_ow
     selected.event.payload = EventPayload::Assembly {
         manifest: ModelRequestManifest {
             router_trace: None,
+            original_page_recall: false,
             model_call_id,
             renderer: "fixture/v1".into(),
             wire_digest: payload.digest,

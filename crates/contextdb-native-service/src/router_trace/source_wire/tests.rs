@@ -485,6 +485,7 @@ fn encrypted_current_wire_replays_protocol_and_cross_chunk_utf8_after_cold_resto
             payload: staged.reference.clone(),
         }],
         router_trace: None,
+        original_page_recall: false,
     };
     let snapshot = g
         .service

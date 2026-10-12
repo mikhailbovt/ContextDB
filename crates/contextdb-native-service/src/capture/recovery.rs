@@ -67,6 +67,13 @@ pub(in super::super) struct CaptureRecovery {
     /// Preserves trace presence and immutable commitments after body pruning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(in super::super) router_trace: Option<contextdb_core::RouterTraceHeader>,
+    /// Supported request-source paging semantics survive explicit body pruning.
+    #[serde(default, skip_serializing_if = "is_false")]
+    original_page_recall: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl CaptureRecovery {
@@ -123,6 +130,11 @@ impl CaptureRecovery {
                 .as_ref()
                 .is_some_and(|checkpoint| checkpoint.requires_tool_pages())
                 && !manifest.features.contains(crate::owned::TOOL_PAGES_FEATURE))
+            || (self.original_page_recall
+                && (!matches!(self.payload.shape, PayloadShape::Assembly)
+                    || !manifest
+                        .features
+                        .contains(crate::owned::PAGE_RECALL_FEATURE)))
             || ((self.provenance.is_some()
                 || matches!(
                     self.payload.shape,
@@ -235,6 +247,7 @@ impl CaptureRecovery {
             inputs,
             checkpoint,
             router_trace,
+            original_page_recall: matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.original_page_recall),
         };
         if encode(&metadata)?.len() > MAX_RECOVERY_BYTES {
             return Err(exhausted("capture recovery metadata exceeds 1 MiB"));

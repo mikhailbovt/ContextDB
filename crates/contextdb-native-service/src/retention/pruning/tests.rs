@@ -45,6 +45,7 @@ fn primary_pruning_preserves_replay_across_partial_restart_and_both_archive_gene
     call.event.payload = EventPayload::Assembly {
         manifest: ModelRequestManifest {
             router_trace: None,
+            original_page_recall: false,
             model_call_id: call_id,
             renderer: "renderer-secret-pruned".into(),
             wire_digest: source_digest,

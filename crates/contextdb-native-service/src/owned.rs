@@ -25,6 +25,7 @@ use super::{
 
 pub(super) const OWNED_FEATURE: &str = "continuous-owned-runtime-v1";
 pub(super) const TOOL_PAGES_FEATURE: &str = "continuous-owned-tool-pages-v1";
+pub(super) const PAGE_RECALL_FEATURE: &str = "continuous-owned-original-page-recall-v1";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -511,13 +512,12 @@ impl NativeService {
                 .map_err(|_| invalid("invalid checkpointed tool page"))?;
             let original =
                 self.validate_tool_page_original(snapshot, context, &page.handle, budget)?;
-            if original.event.run_id != Some(checkpoint.identity.run_id)
-                || original.event.session_id != Some(checkpoint.identity.session_id)
-                || !matches!(
-                    original.event.provenance,
-                    Some(EventProvenance::Tool { .. })
-                )
-            {
+            let original_in_run = original.event.run_id == Some(checkpoint.identity.run_id)
+                && original.event.session_id == Some(checkpoint.identity.session_id);
+            if !matches!(
+                original.event.provenance,
+                Some(EventProvenance::Tool { .. })
+            ) {
                 return Err(invalid(
                     "tool page original belongs to another run or protocol",
                 ));
@@ -575,7 +575,8 @@ impl NativeService {
                 return Err(invalid("tool page anchor differs from the owned protocol"));
             }
             if message.source == page.preview {
-                if page.preview.start != 0
+                if !original_in_run
+                    || page.preview.start != 0
                     || page.handle.byte_length <= u64::from(TOOL_RESULT_PAGE_BYTES)
                 {
                     return Err(invalid(
@@ -678,6 +679,40 @@ impl NativeService {
                 return Err(invalid(
                     "page result range differs from its captured selector",
                 ));
+            }
+            if !original_in_run {
+                // A recalled original from another run remains a separate source.
+                // Its current-run metadata anchor must descend from this actual
+                // page proposal and its captured source-disclosing model request.
+                let proposal = checkpoint
+                    .groups
+                    .iter()
+                    .flat_map(|group| &group.messages)
+                    .find(|message| {
+                        message.role == OutgoingRole::Assistant
+                            && message.tool_calls.contains(&call_id.to_string())
+                    })
+                    .ok_or_else(|| {
+                        invalid("recalled tool page lacks its current captured proposal")
+                    })?;
+                if !request
+                    .event
+                    .parent_event_ids
+                    .contains(&proposal.source.event_id)
+                {
+                    return Err(invalid(
+                        "recalled tool page request lacks its actual proposal parent",
+                    ));
+                }
+                self.validate_original_page_disclosure_origin_at(
+                    snapshot,
+                    context,
+                    checkpoint,
+                    &proposal.source,
+                    call_id,
+                    &selector,
+                    budget,
+                )?;
             }
         }
         Ok(())

@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use contextdb_core::{
-    ContentDigest, EventEnvelope, EventPayload, EventProvenance, ObservationId, OriginalPayloadRef,
-    RequestPart, ResponseStream, StreamId, Validate,
+    ContentDigest, EventEnvelope, EventKind, EventPayload, EventProvenance, ObservationId,
+    OriginalPayloadRef, RequestPart, ResponseStream, StreamId, Validate,
 };
 use contextdb_service::{
     AuthenticatedRequestContext, Capability, CaptureAcceptance, CaptureDurability, CaptureGapRange,
@@ -300,9 +300,9 @@ impl NativeService {
         mut checkpoint: Option<CheckpointCapture<'_>>,
         mut prepared: Option<PreparedCapture<'_>>,
     ) -> ServiceResult<CaptureAcceptance> {
-        let traced = matches!(&request.event.payload, EventPayload::Assembly { manifest }
-            if manifest.router_trace.is_some());
-        if traced != prepared.is_some() {
+        let protected = matches!(&request.event.payload, EventPayload::Assembly { manifest }
+            if manifest.router_trace.is_some() || manifest.original_page_recall);
+        if protected != prepared.is_some() {
             return Err(invalid(
                 "trace-bearing model requests require prepared owner capture",
             ));
@@ -359,7 +359,7 @@ impl NativeService {
             return Err(permission_denied());
         }
         validate_payload(&request.event)?;
-        if traced {
+        if protected {
             bounded_event_size(&request.event)?;
             let row_bytes = bounded_capture_row(&request)?;
             if let Some(admission) = prepared.as_mut() {
@@ -460,7 +460,7 @@ impl NativeService {
         idempotency: &str,
         request_digest: &str,
         mut checkpoint: Option<&mut CheckpointCapture<'_>>,
-        prepared: Option<&mut PreparedCapture<'_>>,
+        mut prepared: Option<&mut PreparedCapture<'_>>,
     ) -> ServiceResult<Option<CaptureAcceptance>> {
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(receipt) = self.replay::<CaptureReceipt, _>(
@@ -483,8 +483,8 @@ impl NativeService {
                 checkpoint.budget,
             )?;
         }
-        if let Some(admission) = prepared {
-            if self.engine.keys.is_none() {
+        if let Some(admission) = prepared.as_deref_mut() {
+            if admission.prepared.router_trace.is_some() && self.engine.keys.is_none() {
                 return Err(ServiceError::new(
                     ErrorCode::Unsupported,
                     "protected router capture requires encrypted native custody",
@@ -539,7 +539,27 @@ impl NativeService {
             read_optional(&transaction, self, producer_head_key.as_bytes())?.unwrap_or_default();
         let coverage = advance_coverage(old, event.producer_sequence)?;
         self.stage_response_stream(&mut transaction, request, producer)?;
-        self.validate_capture_sources(&transaction, &request.context, event)?;
+        if let EventPayload::Assembly { manifest } = &event.payload
+            && manifest.original_page_recall
+        {
+            if event.kind != EventKind::ModelRequested || event.upstream_truncated {
+                return Err(invalid(
+                    "request manifest requires a complete observed model request",
+                ));
+            }
+            let admission = prepared
+                .ok_or_else(|| invalid("original-page recall requires prepared owner capture"))?;
+            // Replaying this request authenticates actual storage chunks against
+            // the same remaining allowance; no legacy unbudgeted read precedes it.
+            self.assemble_request_with_budget(
+                &transaction,
+                &request.context,
+                manifest,
+                admission.budget,
+            )?;
+        } else {
+            self.validate_capture_sources(&transaction, &request.context, event)?;
+        }
         if event.provenance.is_some()
             || matches!(
                 event.payload,
@@ -549,6 +569,11 @@ impl NativeService {
             self.enable_source_format(&mut transaction)?;
         }
         self.enable_capture_format(&mut transaction)?;
+        if matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.original_page_recall)
+        {
+            self.enable_capture_extension(&mut transaction, super::owned::TOOL_PAGES_FEATURE)?;
+            self.enable_capture_extension(&mut transaction, super::owned::PAGE_RECALL_FEATURE)?;
+        }
         if let EventPayload::Assembly { manifest } = &event.payload
             && let Some(trace) = &manifest.router_trace
         {
@@ -618,7 +643,7 @@ impl NativeService {
             content,
             digest: content_digest,
         };
-        if matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.router_trace.is_some())
+        if matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.router_trace.is_some() || manifest.original_page_recall)
         {
             bounded_event_size(&stored_content)?;
         }
@@ -1408,7 +1433,7 @@ impl std::io::Write for CaptureSize {
 }
 
 fn host_request_echo(event: &EventEnvelope) -> bool {
-    event.kind == contextdb_core::EventKind::ModelRequested
+    event.kind == EventKind::ModelRequested
         && event.role == contextdb_core::EventRole::Host
         && matches!(event.payload, EventPayload::Assembly { .. })
         && matches!(event.provenance, Some(EventProvenance::ModelRequest { .. }))

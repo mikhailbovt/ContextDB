@@ -3475,6 +3475,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != router_trace::TRACE_REPLAY_FEATURE
                 && feature != owned::OWNED_FEATURE
                 && feature != owned::TOOL_PAGES_FEATURE
+                && feature != owned::PAGE_RECALL_FEATURE
                 && feature != payload::SOURCE_FEATURE
                 && feature != payload::MODEL_PROTOCOL_FEATURE
                 && feature != payload::REQUEST_TRANSFORM_FEATURE
@@ -3513,6 +3514,10 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
             && !manifest.features.contains(router_trace::TRACE_FEATURE))
         || (manifest.features.contains(owned::TOOL_PAGES_FEATURE)
             && !manifest.features.contains(owned::OWNED_FEATURE))
+        || (manifest.features.contains(owned::PAGE_RECALL_FEATURE)
+            && (!manifest.features.contains(owned::TOOL_PAGES_FEATURE)
+                || !manifest.features.contains(payload::SOURCE_FEATURE)
+                || !manifest.features.contains(capture::RECOVERY_FEATURE)))
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
         || ((manifest.features.contains(record_journal::CONTROL_FEATURE)
             || manifest

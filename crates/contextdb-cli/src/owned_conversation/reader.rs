@@ -318,6 +318,7 @@ impl ReaderAdapter for LocalReader {
             byte_length: expected.len() as u64,
             parts,
             router_trace: None,
+            original_page_recall: false,
         })
     }
     fn complete(

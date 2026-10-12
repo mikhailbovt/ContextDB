@@ -234,4 +234,23 @@ pub trait PayloadPort: CapturePort {
             false,
         ))
     }
+
+    /// Validate a selector against this current captured proposal's actual request
+    /// sources. An available original, locator text or format marker is insufficient.
+    /// Unsupported hosts refuse rather than remove the owned selector guard.
+    fn validate_original_page_disclosure(
+        &self,
+        _context: &AuthenticatedRequestContext,
+        _checkpoint: &CaptureReceipt,
+        _proposal: &contextdb_core::OriginalSourceSpan,
+        _call_id: contextdb_core::ToolCallId,
+        _selector: &contextdb_continuity::OriginalPageArguments,
+        _budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::new(
+            crate::ErrorCode::Unsupported,
+            "captured original-page disclosure is not supported by this host",
+            false,
+        ))
+    }
 }

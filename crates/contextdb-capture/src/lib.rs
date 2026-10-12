@@ -82,7 +82,7 @@ impl<S: PayloadPort + ?Sized> CaptureHost<S> {
         request: CaptureRequest,
         manifest: ModelRequestManifest,
     ) -> ServiceResult<CaptureAcceptance> {
-        if manifest.router_trace.is_some() {
+        if manifest.router_trace.is_some() || manifest.original_page_recall {
             return Err(invalid("router trace requires prepared owner capture"));
         }
         self.stage_model_request(request, manifest, |request| {
@@ -169,12 +169,18 @@ impl<S: PayloadPort + PrepareContextPort + ?Sized> CaptureHost<S> {
                 false,
             ));
         }
-        let trace = prepared
+        if prepared.router_trace.is_none() && !prepared.original_page_recall {
+            return Err(invalid(
+                "protected request has no owner-supported prepared profile",
+            ));
+        }
+        let expected = prepared
             .router_trace
             .as_ref()
-            .ok_or_else(|| invalid("protected request has no prepared trace"))?;
-        let expected = trace.attach(manifest.model_call_id, budget)?;
-        if manifest.router_trace.as_deref() != Some(&expected)
+            .map(|trace| trace.attach(manifest.model_call_id, budget))
+            .transpose()?;
+        if manifest.router_trace.as_deref() != expected.as_ref()
+            || manifest.original_page_recall != prepared.original_page_recall
             || manifest.wire_digest != prepared.assembly.wire_digest
             || manifest.byte_length != prepared.outgoing.wire.len() as u64
         {

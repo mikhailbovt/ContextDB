@@ -1040,11 +1040,21 @@ rehydration charge authenticated storage IO to the parent budget. Ports without
 this adapter return `Unsupported`; binary and opaque media require separate
 profiles.
 
-This paging profile accepts locators retained in owned tool views. Discovery of
-evicted locators and binary/media adapters remain separate work. Persisted page
-views and their retained recovery markers require the monotonic native feature
-`continuous-owned-tool-pages-v1`; checkpoints without pages keep their previous
-serialized shape.
+Automatic raw discovery can also disclose an evicted tool original as bounded
+UTF-8 pages, with its full locator and the page-operation definition included in
+the request budget. Paging that original requires the actual current captured
+model request to contain its authenticated source range. The native preparation
+seal binds the identities of the sources actually rendered; equal bytes from a
+different original cannot substitute for them. A guessed locator or an omitted
+retrieval hit grants no access. The captured proposal and current policy/custody
+checks survive owner restart; a current result anchor can reference an original
+from an earlier owned run.
+
+Persisted page views require `continuous-owned-tool-pages-v1`; captured recalled
+page requests additionally require `continuous-owned-original-page-recall-v1`,
+including retained recovery metadata and deep verification. Older profiles omit
+the new fields. Binary/media adapters and measured retrieval/reader quality
+remain separate work.
 
 A planned model call reserves its request identity before preparation. Its exact
 request is captured before handoff. After a crash, a captured request with no
@@ -1098,7 +1108,7 @@ host-selected built-in memory expansion can read originals while interpretation
 is still explicitly incomplete. Operation text cannot choose the effect class.
 
 A restarted `contextdb.original.page` read authenticates the captured
-model/request/action chain and current owned locator directly, under the parent
+model/request/action chain and its retained or actually disclosed locator, under the parent
 budget and current source, custody and processing grants. It does not depend on
 the historical process lease. External effects retain the live decision checks.
 

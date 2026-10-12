@@ -185,6 +185,26 @@ impl PayloadPort for NativeService {
     ) -> ServiceResult<OriginalPage> {
         self.read_tool_original_page(request, budget)
     }
+
+    fn validate_original_page_disclosure(
+        &self,
+        context: &AuthenticatedRequestContext,
+        checkpoint: &contextdb_service::CaptureReceipt,
+        proposal: &OriginalSourceSpan,
+        call_id: contextdb_core::ToolCallId,
+        selector: &contextdb_continuity::OriginalPageArguments,
+        budget: &mut PayloadBudget,
+    ) -> ServiceResult<()> {
+        require_capability(context, Capability::Runtime)?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        let state = self.current_owned_checkpoint(&snapshot, context, checkpoint, budget)?;
+        self.validate_original_page_disclosure_at(
+            &snapshot, context, &state, proposal, call_id, selector, budget,
+        )
+    }
 }
 
 impl NativeService {
@@ -849,6 +869,12 @@ impl NativeService {
                 self.payload_bytes(snapshot, &header)?;
             }
             EventPayload::Assembly { manifest } => {
+                if manifest.original_page_recall {
+                    self.require_original_page_recall_feature(
+                        snapshot,
+                        &mut super::retention::audit_budget(),
+                    )?;
+                }
                 if manifest
                     .parts
                     .iter()

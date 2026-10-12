@@ -181,3 +181,5 @@ fn require_text(media: &str) -> ServiceResult<()> {
 
 #[cfg(test)]
 mod tests;
+
+mod disclosure;

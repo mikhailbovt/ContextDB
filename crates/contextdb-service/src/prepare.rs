@@ -144,6 +144,14 @@ pub struct PreparedContext {
     /// Bounded sealed native routing envelope, without a final model-call ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub router_trace: Option<PreparedRouterTrace>,
+    /// The owner rendered a selected historical tool page and its complete locator.
+    /// This encoding marker never authorizes the original or a proposed page call.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub original_page_recall: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// Owner-prepared routing material. Public fields and hashes alone grant no

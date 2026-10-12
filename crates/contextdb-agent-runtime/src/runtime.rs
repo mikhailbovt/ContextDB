@@ -678,6 +678,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 budget,
             )?;
             if manifest.router_trace.is_some()
+                || manifest.original_page_recall
                 || manifest.model_call_id != pending.call_id
                 || manifest.wire_digest != prepared.assembly.wire_digest
                 || manifest.byte_length != prepared.outgoing.wire.len() as u64
@@ -696,6 +697,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
             if let Some(trace) = &prepared.router_trace {
                 manifest.router_trace = Some(Box::new(trace.attach(pending.call_id, budget)?));
             }
+            manifest.original_page_recall = prepared.original_page_recall;
             telemetry::manifest_counts(&manifest, measurement);
             let mut request = self.event(
                 EventKind::ModelRequested,

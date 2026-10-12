@@ -29,6 +29,7 @@ fn manifest(trace: Option<RouterTraceAttachment>) -> ModelRequestManifest {
             bytes: b"exact-model-wire".to_vec(),
         }],
         router_trace: trace.map(Box::new),
+        original_page_recall: false,
     }
 }
 

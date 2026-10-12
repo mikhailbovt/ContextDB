@@ -99,6 +99,14 @@ pub struct ModelRequestManifest {
     /// Protected routing metadata, outside the ordered model wire.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub router_trace: Option<Box<RouterTraceAttachment>>,
+    /// Supports source-bound paging of tool originals disclosed by this request.
+    /// This format marker grants no source access or execution authority.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub original_page_recall: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// Representation of the adapter-observed model response, excluding hidden thought.

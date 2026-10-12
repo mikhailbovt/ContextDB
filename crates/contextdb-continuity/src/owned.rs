@@ -16,6 +16,8 @@ use crate::{ContinuityError, Result, canonical_digest, validate_text};
 pub const TOOL_RESULT_PAGE_BYTES: u32 = 4096;
 /// Reserved pure operation for a source-bound original page.
 pub const ORIGINAL_PAGE_OPERATION: &str = "contextdb.original.page";
+/// Host tool definition shared by retained views and historical source discovery.
+pub const ORIGINAL_PAGE_DEFINITION: &str = "Pure tool contextdb.original.page: read an original tool-result page. Arguments are JSON {handle: the complete locator displayed with the result, start: byte cursor, max_bytes: 1..4096}. The host validates current permissions and version. A partial page is not the complete result; the handle grants no authority.";
 
 /// Immutable full-original locator. A handle is a selector, never authorization.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

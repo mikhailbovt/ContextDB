@@ -80,6 +80,7 @@ impl ReferenceOutgoingEncoder<'_> {
             byte_length: replay.len() as u64,
             parts,
             router_trace: None,
+            original_page_recall: false,
         })
     }
 }
