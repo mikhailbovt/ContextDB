@@ -16,6 +16,7 @@ pub(super) const COPPER: &str = "ARCHIVE_COPPER seal belongs to the amber expedi
 pub(super) const SILVER: &str = "ARCHIVE_SILVER spare lantern is stored beside the north entrance.";
 pub(super) const OPERATION: &str = "fixture.hybrid_registry";
 pub(super) const DATABASE: &str = "owned-hybrid-vertical";
+pub(super) const SHORTLIST_SOURCES: u32 = 20;
 
 pub(super) fn budget() -> QueryBudget {
     // Positive protocol checks use the same bounded wall allowance as the real
@@ -446,7 +447,8 @@ impl ExternalTool for CueTool {
 
 pub(super) fn settings(encoder: Arc<Encoder>) -> RuntimeSettings {
     // This 64K scripted-reader fixture budgets for the complete <=20-source
-    // fusion shortlist. Constant controlled vectors provide no relevance
+    // fusion shortlist, including every greedy singleton round and a stop.
+    // Constant controlled vectors provide no relevance
     // utility; neither backend proves a main-LLM semantic selection benefit.
     RuntimeSettings {
         control: vec![],
@@ -460,7 +462,7 @@ pub(super) fn settings(encoder: Arc<Encoder>) -> RuntimeSettings {
             max_history_tokens: 40000,
             max_conflict_tokens: 40000,
             max_serialized_bytes: 2 * 1024 * 1024,
-            max_selection_evaluations: 128,
+            max_selection_evaluations: SHORTLIST_SOURCES * (SHORTLIST_SOURCES + 1) / 2 + 1,
         },
         outgoing_budget: OutgoingBudget {
             max_input_tokens: 59000,
@@ -480,7 +482,7 @@ pub(super) fn settings(encoder: Arc<Encoder>) -> RuntimeSettings {
         automatic_hybrid: Some(OwnedHybridSettings {
             query_encoder: encoder,
             limits: OwnedHybridLimits {
-                sources: 20,
+                sources: SHORTLIST_SOURCES,
                 ..OwnedHybridLimits::default()
             },
         }),

@@ -74,6 +74,27 @@ fn accepted_envelope(
             1,
             "controlled exact tokenizer fits its first measured sample"
         );
+        let optional: Vec<_> = envelope
+            .request
+            .units
+            .iter()
+            .filter(|unit| !envelope.request.mandatory_ids.contains(&unit.id))
+            .collect();
+        assert!(optional.len() <= SHORTLIST_SOURCES as usize);
+        assert!(optional.iter().all(|unit| unit.complements.is_empty()));
+        eprintln!(
+            "controlled owned selection: optional={} selected={} evaluations={} stop={:?} rendered_tokens={}",
+            optional.len(),
+            envelope.plan.selected_ids.len(),
+            envelope.manifest.selection_evaluations,
+            envelope.plan.stop_reason,
+            envelope.plan.usage.rendered_tokens
+        );
+        assert_eq!(
+            envelope.plan.stop_reason,
+            router::RouterStopReason::NoPositiveMarginalGain,
+            "complete controlled shortlist must not stop at an evaluation or token cap"
+        );
     }
     let final_preflight = observation
         .preflights
@@ -250,9 +271,12 @@ fn run_vertical(f: Fixture) -> Arc<Encoder> {
         accepted_envelope(&f.native, &f.context, &second.output_receipt, &f.encoder);
     assert!(
         second.reply.text.contains(SILVER),
-        "actual after-tool reply {:?}; silver {:?}; observation {:?}; delivered messages {:?}; actual wire {:?}",
+        "actual after-tool reply {:?}; silver {:?}; evaluations {}; stop {:?}; usage {:?}; observation {:?}; delivered messages {:?}; actual wire {:?}",
         second.reply.text,
         f.silver,
+        second_envelope.manifest.selection_evaluations,
+        second_envelope.plan.stop_reason,
+        second_envelope.plan.usage,
         second_envelope.owned_hybrid,
         second.prepared.messages,
         reader
