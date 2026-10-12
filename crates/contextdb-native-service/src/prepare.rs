@@ -372,7 +372,7 @@ impl NativeService {
             ));
         }
         let workspace = digest_bytes(request.context.request.workspace_id.as_bytes());
-        let now = wall_time()?;
+        let now = self.preparation_wall_time()?;
         let issued_tick = self.lease_tick()?;
         let valid_at = request.valid_at.unwrap_or(now);
         if let Some(query) = &request.memory_query {
@@ -1379,7 +1379,7 @@ impl NativeService {
         fence: &PrepareFence,
     ) -> ServiceResult<()> {
         if fence.principal != context.authorization_binding_digest()?
-            || wall_time()? >= fence.valid_until
+            || self.preparation_wall_time()? >= fence.valid_until
         {
             return Err(stale("prepared principal or temporal validity changed"));
         }
@@ -1751,6 +1751,15 @@ fn sealed_access(context: &AuthenticatedRequestContext) -> contextdb_recall::Acc
         super::provider::access_rule(&super::trusted_structured_policy(&context.request));
     access.scopes = context.request.scopes.clone();
     access
+}
+impl NativeService {
+    fn preparation_wall_time(&self) -> ServiceResult<TimestampMicros> {
+        #[cfg(test)]
+        if let Some((wall, _)) = self.lease_test_time()? {
+            return Ok(wall);
+        }
+        wall_time()
+    }
 }
 fn wall_time() -> ServiceResult<TimestampMicros> {
     let micros = std::time::SystemTime::now()

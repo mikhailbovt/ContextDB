@@ -570,6 +570,14 @@ pub(super) fn fixture_with_encoder(encoder: Arc<Encoder>) -> Fixture {
         .expect("actual native graph publication");
     assert_eq!(graph.manifest.nodes, 24);
     assert_eq!(encoder.source_forwards.load(Ordering::SeqCst), 24);
+    // This structural integration test does not measure wall-clock latency.
+    // Keep the real 30-second lease rules independent of parallel CI load.
+    native
+        .set_lease_test_clock(
+            native.preparation_wall_time().expect("fixture wall time"),
+            0,
+        )
+        .expect("instance-owned controlled lease time");
     Fixture {
         native,
         context,

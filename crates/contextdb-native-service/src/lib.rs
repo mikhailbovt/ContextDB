@@ -450,6 +450,8 @@ pub struct NativeService {
     index_views: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     leases: Mutex<lease::LeaseRegistry>,
     lease_started: std::time::Instant,
+    #[cfg(test)]
+    lease_test_clock: Mutex<Option<(contextdb_core::TimestampMicros, u64)>>,
     lease_instance: uuid::Uuid,
     suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
     record_write_recovery: Mutex<record_sources::writes::RecoveryCache>,
@@ -572,6 +574,8 @@ impl NativeService {
             index_views: std::sync::Arc::default(),
             leases: Mutex::new(lease::LeaseRegistry::default()),
             lease_started: std::time::Instant::now(),
+            #[cfg(test)]
+            lease_test_clock: Mutex::new(None),
             lease_instance: contextdb_core::ObservationId::new().as_uuid(),
             suppression,
             record_write_recovery: Mutex::default(),

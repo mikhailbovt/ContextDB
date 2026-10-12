@@ -79,7 +79,40 @@ pub(super) struct LeaseRegistry {
 }
 
 impl NativeService {
+    #[cfg(test)]
+    pub(crate) fn set_lease_test_clock(
+        &self,
+        wall: TimestampMicros,
+        tick: u64,
+    ) -> ServiceResult<()> {
+        *self
+            .lease_test_clock
+            .lock()
+            .map_err(|_| integrity("test lease clock poisoned"))? = Some((wall, tick));
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn lease_test_time(&self) -> ServiceResult<Option<(TimestampMicros, u64)>> {
+        Ok(*self
+            .lease_test_clock
+            .lock()
+            .map_err(|_| integrity("test lease clock poisoned"))?)
+    }
+
+    fn lease_wall_time(&self) -> ServiceResult<TimestampMicros> {
+        #[cfg(test)]
+        if let Some((wall, _)) = self.lease_test_time()? {
+            return Ok(wall);
+        }
+        wall_time()
+    }
+
     pub(super) fn lease_tick(&self) -> ServiceResult<u64> {
+        #[cfg(test)]
+        if let Some((_, tick)) = self.lease_test_time()? {
+            return Ok(tick);
+        }
         u64::try_from(self.lease_started.elapsed().as_micros())
             .map_err(|_| expired("owner monotonic clock overflow"))
     }
@@ -348,7 +381,7 @@ impl NativeService {
     }
 
     fn check_lease_clock(&self, record: &LeaseRecord) -> ServiceResult<()> {
-        let now = wall_time()?;
+        let now = self.lease_wall_time()?;
         let duration = record
             .fence
             .valid_until

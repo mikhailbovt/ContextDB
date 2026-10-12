@@ -371,7 +371,9 @@ impl NativeService {
         )?;
         // The context is immutable and owner-private. Its exact binding was
         // computed and charged before cloning it into this guard.
-        if guard.principal != guard.fence.principal || wall_time()? >= guard.fence.valid_until {
+        if guard.principal != guard.fence.principal
+            || self.preparation_wall_time()? >= guard.fence.valid_until
+        {
             return Err(stale("owned query principal or validity changed"));
         }
         let snapshot = self
