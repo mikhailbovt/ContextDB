@@ -4654,7 +4654,8 @@
         "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
         "pkg:cargo/contextdb-service@0.2.0-alpha.3",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
-        "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151"
+        "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
+        "registry+https://github.com/rust-lang/crates.io-index#sha2@0.11.0"
       ],
       "ref": "pkg:cargo/contextdb-agent-runtime@0.2.0-alpha.3"
     },
@@ -4831,6 +4832,7 @@
         "pkg:cargo/contextdb-context@0.2.0-alpha.3",
         "pkg:cargo/contextdb-continuity@0.2.0-alpha.3",
         "pkg:cargo/contextdb-core@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-model@0.2.0-alpha.3",
         "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
         "pkg:cargo/contextdb-reference@0.2.0-alpha.3",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
@@ -5563,7 +5565,7 @@
         },
         {
           "name": "contextdb:dependency-graph-sha256",
-          "value": "6ba1e4f45c6265b779e6fb3fdd3b7a27aded2c34e88bfcedc54f153ee3df6668"
+          "value": "e938a28e3cd7d00e39800db2b3cc9e7e86f165683dbd2c76855cd61563ce44b1"
         }
       ],
       "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.3",

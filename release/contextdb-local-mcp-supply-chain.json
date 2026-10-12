@@ -3,12 +3,12 @@
     {
       "bytes": 219879,
       "path": "release/THIRD_PARTY_NOTICES.txt",
-      "sha256": "764d0148f00282033bc836b24a64231cf352f7918dc42e57013d3a9909acef74"
+      "sha256": "71b2f38c06feb10f042fb89d4294e4dc559e9cc402ae0fa90fbb1aed62fefe2f"
     },
     {
-      "bytes": 180019,
+      "bytes": 180147,
       "path": "release/contextdb-local-mcp.cdx.json",
-      "sha256": "9ed459e70efff28f1410924b5e15e73f0cf4802951a56fb64fb091cd3c254d68"
+      "sha256": "04d0968405d4cc1b413e6f31fb42b59cc63a05d0e9b7fa128973f06a4a3a8fa5"
     },
     {
       "bytes": 279302,
@@ -28,7 +28,7 @@
   ],
   "canonical_repository": "https://github.com/mikhailbovt/ContextDB",
   "cargo": {
-    "cargo_lock_sha256": "d1ab54067d3246e081868e10fe64e02c62119c94f33812052f9bbb6e3d868ac4",
+    "cargo_lock_sha256": "0484c228958ad4624e4d072e5d342ebdf12e07bddaf648e71ec7417593250b02",
     "default_features": false,
     "dependency_kinds": [
       "normal",
@@ -1403,7 +1403,7 @@
   ],
   "graph": {
     "component_count": 152,
-    "sha256": "6ba1e4f45c6265b779e6fb3fdd3b7a27aded2c34e88bfcedc54f153ee3df6668",
+    "sha256": "e938a28e3cd7d00e39800db2b3cc9e7e86f165683dbd2c76855cd61563ce44b1",
     "third_party_component_count": 135
   },
   "profile_id": "contextdb-local-mcp-windows-x86_64",
