@@ -3,7 +3,7 @@
 This optional tool uses the pinned Kev-0.8B adapter and pointer head on
 Qwen3.5-0.8B-Base. Utility is an independent
 `sigmoid(useful_logit - not_useful_logit)` with masked multi-label BCE.
-It accepts two exact built-in public synthetic corpora. The initial-context
+The legacy trainer accepts two exact built-in public synthetic corpora. The initial-context
 profile has 32 examples: eight train, eight development, eight test and eight
 quarantined. The rendered-closure profile has 48 cases and 268 actual
 compiler callbacks. Only train and development reach the formatter, tokenizer
@@ -256,3 +256,61 @@ A pinned offline tokenizer census admitted all 30 native callbacks at unchanged
 2048-state/4096-total-row limits (maxima 2040/3290), preserving exact normalized
 semantics. This supports the codec prototype; useful v2 training and native
 learned eviction/cold resume remain open.
+
+## Matched lossless development profile
+
+`matched.py` admits a separate fixed public corpus through the same lossless
+codec used for its scoring inputs. Sixteen authored histories, eight per fold,
+produce 34 cases and 532 real compiler callbacks. Missing and resident context
+share their original history; exploration selects the first chronological
+candidate once, then stops. All four originals and every available pair are
+proposed before independent source-coverage annotation. Assistant and tool
+sources retain their attribution; current tool results retain the original
+call/result binding.
+
+```text
+cargo run -p contextdb-bench --example router_corpus -- build-matched ABS_NEW_CORPUS
+cargo run -p contextdb-bench --example router_corpus -- verify-matched ABS_CORPUS
+python -I learning/context-router/kev/matched_check.py --frozen-dir ABS_KEV_DIRECTORY
+```
+
+The fixed cold-verified manifest is
+`8116f4f7ec15be8eb897962b05922b1eff26009b358f83da66cba97129e4dd98`.
+Intake requires the exact five artifact files, hashes and source/time lineage;
+a newly regenerated instance is not automatically admitted. The shared schema
+does not establish independence of real conversations. This population has no
+test or quarantined examples and establishes no held-out quality.
+
+There are 32 supervised bases per fold and two fully unknown bases excluded
+from optimization. Of 532 labels, 126 are positive, 352 negative and 54 masked.
+Training has 17 all-zero and 15 mixed bases; development has 16 of each.
+Every development history contains matching proposals whose known utility
+changes from positive in missing context to negative in resident context.
+Saved ancestry metadata is bound to the measured fixed digest, including its
+population audit. Constant 0.5, select-all and select-none controls fail the
+declared development gates.
+
+The 532-callback cap applies only to this new population. Existing profiles and
+the 2048-state/4096-total-row/65536-packed token limits remain unchanged.
+A pinned CPU tokenizer admitted all 512 questions in supervised groups without
+truncation, with maxima 888 state tokens and 1783 total row tokens. These are
+admission and source-coverage results; useful training, native learned scoring
+and downstream reader benefit still require separate evidence.
+
+`matched_train.py` starts from the pinned upstream adapter/head and writes its
+own diagnostic bundle format. It checks all complete token records, then runs
+one finite backward pass on the largest known training row with zero updates
+and cleared gradients. Training is one epoch of 32 updates within 30 minutes.
+Development retains a fixed threshold, independent masks, family/history
+metrics, exact STOP and matching positive-to-negative context comparisons.
+Failed quality gates retain a diagnostic result without a useful-model claim.
+
+```text
+python learning/context-router/kev/matched_train.py preflight --corpus ABS --model-lock ABS --output-root ABS
+python learning/context-router/kev/matched_train.py train --corpus ABS --model-lock ABS --output-root ABS --run-name matched-v2 --lr 0.00001
+python learning/context-router/kev/matched_train.py verify-bundle --corpus ABS --model-lock ABS --output-root ABS --run-name matched-v2
+```
+
+Old bundles refuse. Source, corpus, ancestry, artifact byte caps and hashes are
+checked before cold tensor loading; completion requires exact cold logits from
+one existing development base. This trainer does not activate the native worker.

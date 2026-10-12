@@ -594,7 +594,7 @@ pub(super) fn build_case(group: u32, scenario: Scenario, budget: &mut QueryBudge
     })
 }
 
-fn interval(span: &OriginalSourceSpan) -> SourceInterval {
+pub(super) fn interval(span: &OriginalSourceSpan) -> SourceInterval {
     SourceInterval {
         event_id: span.event_id,
         payload_digest: span.payload_digest,
@@ -602,20 +602,20 @@ fn interval(span: &OriginalSourceSpan) -> SourceInterval {
         end: span.end,
     }
 }
-fn unit_key(domain: &str, source: &str) -> String {
+pub(super) fn unit_key(domain: &str, source: &str) -> String {
     format!(
         "unit:{}",
         &blake3::hash(format!("{domain}/{source}").as_bytes()).to_hex()[..16]
     )
 }
-fn stable_uuid(key: &str) -> uuid::Uuid {
+pub(super) fn stable_uuid(key: &str) -> uuid::Uuid {
     let mut bytes = [0_u8; 16];
     bytes.copy_from_slice(&blake3::hash(key.as_bytes()).as_bytes()[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     uuid::Uuid::from_bytes(bytes)
 }
-fn marker(
+pub(super) fn marker(
     scope: &str,
     id: &str,
     known_at: u64,
@@ -661,7 +661,7 @@ fn marker(
         mandatory: true,
     })
 }
-fn wrap(access: &AccessRule, candidate: PackCandidate) -> ProviderCandidate {
+pub(super) fn wrap(access: &AccessRule, candidate: PackCandidate) -> ProviderCandidate {
     ProviderCandidate {
         access: access.clone(),
         candidate,
@@ -673,7 +673,7 @@ fn wrap(access: &AccessRule, candidate: PackCandidate) -> ProviderCandidate {
         },
     }
 }
-fn source(
+pub(super) fn source(
     domain: &str,
     access: &AccessRule,
     id: &str,
@@ -717,7 +717,7 @@ fn source(
         },
     })
 }
-fn message(
+pub(super) fn message(
     id: &str,
     span: &OriginalSourceSpan,
     text: &str,
@@ -866,11 +866,11 @@ pub(super) fn lineage(case: &Case) -> Result<(Vec<RouterLineageRef>, Vec<RouterL
 }
 
 pub(super) struct Provider {
-    data: InMemoryContextProvider,
-    originals: BTreeMap<ObservationId, Vec<u8>>,
+    pub(super) data: InMemoryContextProvider,
+    pub(super) originals: BTreeMap<ObservationId, Vec<u8>>,
     pub(super) dependencies: BTreeMap<BlockId, EvidenceDependencies>,
-    scope: String,
-    binding: AssemblyBinding,
+    pub(super) scope: String,
+    pub(super) binding: AssemblyBinding,
 }
 impl std::fmt::Debug for Provider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

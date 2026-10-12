@@ -71,9 +71,19 @@ pub(super) fn label_row(
     provenance: &RouterLabelProvenance,
     budget: &mut QueryBudget,
 ) -> Result<Target> {
+    label_with_evaluator(row, oracle, provenance, EVALUATOR, budget)
+}
+
+pub(super) fn label_with_evaluator(
+    row: &Observation,
+    oracle: &Oracle,
+    provenance: &RouterLabelProvenance,
+    evaluator: &str,
+    budget: &mut QueryBudget,
+) -> Result<Target> {
     if oracle.sufficient_sets.len() > 16
         || oracle.sufficient_sets.iter().any(|set| set.len() > 16)
-        || provenance.evaluator_version != EVALUATOR
+        || provenance.evaluator_version != evaluator
         || provenance.logical_domain != row.logical_domain
         || provenance.available_at != row.known_at + 1
     {

@@ -4,10 +4,12 @@ use contextdb_context::router::RouterSelectionPlan;
 use contextdb_core::OriginalSourceSpan;
 use std::sync::Mutex;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum Exploration {
     ConstantPositive,
     AlwaysStop,
+    FirstInventorySingleThenStop(BlockId),
+    UnresolvedStopV2,
 }
 
 struct Pending {
@@ -32,7 +34,23 @@ impl std::fmt::Debug for Collector {
 
 impl ContextScorer for Collector {
     fn id(&self) -> &str {
-        "contextdb.synthetic-conditional-exploration.v1"
+        match &self.exploration {
+            Exploration::ConstantPositive | Exploration::AlwaysStop => {
+                "contextdb.synthetic-conditional-exploration.v1"
+            }
+            _ => "contextdb.synthetic-matched-exploration.v2",
+        }
+    }
+    fn revision(&self) -> &str {
+        self.id()
+    }
+    fn failure_policy(&self) -> ScorerFailurePolicy {
+        match &self.exploration {
+            Exploration::ConstantPositive | Exploration::AlwaysStop => {
+                ScorerFailurePolicy::R0Fallback
+            }
+            _ => ScorerFailurePolicy::Refuse,
+        }
     }
     fn latency_limit_micros(&self) -> u64 {
         5_000_000
@@ -85,9 +103,21 @@ impl ContextScorer for Collector {
             selected,
             trial,
         });
-        Ok(match self.exploration {
+        Ok(match &self.exploration {
             Exploration::ConstantPositive => Some(1_000_000),
-            Exploration::AlwaysStop => None,
+            Exploration::AlwaysStop | Exploration::UnresolvedStopV2 => None,
+            Exploration::FirstInventorySingleThenStop(id) => {
+                let selected = unit
+                    .selected
+                    .pack
+                    .sections
+                    .iter()
+                    .any(|block| &block.id == id);
+                (!selected
+                    && unit.identity.seed_ids.len() == 1
+                    && unit.identity.seed_ids.contains(id))
+                .then_some(1_000_000)
+            }
         })
     }
 }
@@ -173,15 +203,39 @@ pub(super) struct Collected {
 }
 
 pub(super) fn compile_case(case: &fixture::Case, budget: &mut QueryBudget) -> Result<Collected> {
+    compile(
+        &CompileCase {
+            id: &case.id,
+            domain: &case.domain,
+            known_at: case.known_at,
+            request: &case.request,
+            provider: &case.provider,
+            exploration: &case.exploration,
+        },
+        budget,
+    )
+}
+
+/// Query-time compiler inputs; evaluator annotations are deliberately absent.
+pub(super) struct CompileCase<'a> {
+    pub(super) id: &'a str,
+    pub(super) domain: &'a str,
+    pub(super) known_at: u64,
+    pub(super) request: &'a CompileAssemblyRequest,
+    pub(super) provider: &'a fixture::Provider,
+    pub(super) exploration: &'a Exploration,
+}
+
+pub(super) fn compile(case: &CompileCase<'_>, budget: &mut QueryBudget) -> Result<Collected> {
     let collector = Collector {
-        exploration: case.exploration,
+        exploration: case.exploration.clone(),
         rows: Mutex::new(Vec::new()),
     };
     let routed = ContextCompiler::new([7; 32])
         .map_err(|_| invalid())?
         .compile_assembly_with_router(
-            &case.request,
-            &case.provider,
+            case.request,
+            case.provider,
             &ReferenceTokenizer,
             &ReferenceOutgoingEncoder(&ReferenceTokenizer),
             &collector,
@@ -254,8 +308,8 @@ pub(super) fn compile_case(case: &fixture::Case, budget: &mut QueryBudget) -> Re
         let trial_origins = origins(&row.trial, budget)?;
         observations.push(Observation {
             row_id: row_id.clone(),
-            case_id: case.id.clone(),
-            logical_domain: case.domain.clone(),
+            case_id: case.id.into(),
+            logical_domain: case.domain.into(),
             known_at: case.known_at,
             evaluation: score.evaluation,
             feature_digest,

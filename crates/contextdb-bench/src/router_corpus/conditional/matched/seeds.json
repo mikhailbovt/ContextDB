@@ -1,0 +1,679 @@
+{
+  "authoring_source_sha256": "6c43cdf089013db501765a2283b00b8d1b9ec7e24744b46f76f67dc37cf1f1ca",
+  "histories": [
+    {
+      "events": [
+        [
+          "cloud-old",
+          "user",
+          "Кадры будем передавать через облачную папку."
+        ],
+        [
+          "offline-current",
+          "user",
+          "Отменяю облачную папку: кадры передавать только локально на SSD."
+        ],
+        [
+          "container-current",
+          "user",
+          "Для передачи кадров нужен контейнер MKV с исходными дорожками."
+        ],
+        [
+          "preview-format",
+          "assistant",
+          "Для предпросмотра я предлагал MP4, это не формат передачи исходников."
+        ]
+      ],
+      "family": "revoked-cloud-procedure",
+      "id": "offline-shot-transfer",
+      "partition": "train",
+      "proofs": [
+        [
+          "offline-current",
+          "container-current"
+        ]
+      ],
+      "query": "Куда сейчас передавать кадры и каким контейнером?",
+      "resident": [
+        "offline-current",
+        "container-current"
+      ],
+      "rule": "additive",
+      "seed_sha256": "6084b683d851f2b059a3865083590b74b763c1068c0ed4a9823e2da1ce3d2948",
+      "working": "Собрать передачу отснятого материала."
+    },
+    {
+      "events": [
+        [
+          "noodle",
+          "user",
+          "Для нашего ужина выбрали рисовую лапшу."
+        ],
+        [
+          "wrong-bowl",
+          "user",
+          "В соседней миске пшеничная лапша для другого человека."
+        ],
+        [
+          "water",
+          "user",
+          "К рисовой лапше для ужина записали 450 мл воды."
+        ],
+        [
+          "sauce",
+          "assistant",
+          "В соус я предлагал 40 мл воды; это отдельный объём."
+        ]
+      ],
+      "family": "ingredient-and-quantity",
+      "id": "midnight-recipe",
+      "partition": "train",
+      "proofs": [
+        [
+          "noodle",
+          "water"
+        ]
+      ],
+      "query": "Какую лапшу и сколько воды мы выбрали для ужина?",
+      "resident": [
+        "noodle",
+        "water"
+      ],
+      "rule": "additive",
+      "seed_sha256": "0c87d40b6ff1294c616b7c28bf9d30f79f0b64d052bb379e7dffa62ec523f706",
+      "working": "Вернуться к записанному рецепту ужина."
+    },
+    {
+      "events": [
+        [
+          "rope-locker",
+          "user",
+          "The climbing rope is in locker C7."
+        ],
+        [
+          "camera-locker",
+          "user",
+          "The spare camera is in locker C3."
+        ],
+        [
+          "locker-key",
+          "user",
+          "Locker C7 opens with the brass key on the orange cord."
+        ],
+        [
+          "camera-key",
+          "user",
+          "The silver key opens C3, not the rope locker."
+        ]
+      ],
+      "family": "cross-language-access-link",
+      "id": "climbing-locker",
+      "partition": "train",
+      "proofs": [
+        [
+          "rope-locker",
+          "locker-key"
+        ]
+      ],
+      "query": "Which locker contains the rope, and what opens that locker?",
+      "resident": [
+        "rope-locker",
+        "locker-key"
+      ],
+      "rule": "sufficient_union_only",
+      "seed_sha256": "ffc15a13ec42adb921fd1f8555bfdb86a1df308b7baa6dd942b33d86ec04b6ef",
+      "working": "Arrange access to the climbing equipment."
+    },
+    {
+      "base_tool_exchange": {
+        "call_text": "Проверяю отметку начала титра на таймлайне.",
+        "result_source_id": "tool-mark"
+      },
+      "events": [
+        [
+          "frame-rate",
+          "user",
+          "В этом экспорте таймлайн работает на 30 кадрах в секунду."
+        ],
+        [
+          "voice-rate",
+          "user",
+          "Звуковая дорожка записана с частотой 48000 Гц."
+        ],
+        [
+          "tool-mark",
+          "tool",
+          "Проверка таймлайна: титр начинается в 12 секунде."
+        ],
+        [
+          "old-guess",
+          "assistant",
+          "До проверки я предполагал, что титр начнётся в 10 секунде."
+        ]
+      ],
+      "family": "tool-result-unit-conversion",
+      "id": "render-clock",
+      "partition": "train",
+      "proofs": [
+        [
+          "frame-rate",
+          "tool-mark"
+        ]
+      ],
+      "query": "На каком кадре начинать титр по отметке из проверки?",
+      "resident": [
+        "frame-rate",
+        "tool-mark"
+      ],
+      "rule": "sufficient_union_only",
+      "seed_sha256": "e2948caca0a473bc0beb69e3fe0835a52a400538386e04686f013a802b015a06",
+      "working": "Продолжить экспорт после проверки таймлайна."
+    },
+    {
+      "events": [
+        [
+          "first-line",
+          "user",
+          "Наша фраза была: «Экспонат временно изображает человека»."
+        ],
+        [
+          "other-joke",
+          "assistant",
+          "В другой шутке я говорил: «Манекен ушёл в отпуск»."
+        ],
+        [
+          "reply-line",
+          "user",
+          "Ответная реплика к экспонату: «Просим не кормить дедлайнами»."
+        ],
+        [
+          "caption",
+          "user",
+          "Подпись к фото музея: «Субботняя очередь»; это не часть шутки."
+        ]
+      ],
+      "family": "literal-joke-continuation",
+      "id": "museum-quotation",
+      "partition": "train",
+      "proofs": [
+        [
+          "first-line",
+          "reply-line"
+        ]
+      ],
+      "query": "Повтори нашу фразу про экспонат и её ответную реплику.",
+      "resident": [
+        "first-line",
+        "reply-line"
+      ],
+      "rule": "additive",
+      "seed_sha256": "edac44d52f329eb89508caa362a52e9af1a83708d1da29ef2adb9ae83095245e",
+      "working": "Вернуться к шутке из разговора о музее."
+    },
+    {
+      "events": [
+        [
+          "active-section",
+          "user",
+          "The envelope's active section is Annex B, not the cover page."
+        ],
+        [
+          "cover-rule",
+          "user",
+          "The cover page uses a simple byte count."
+        ],
+        [
+          "annex-rule",
+          "user",
+          "Annex B requires a SHA-256 digest of the original UTF-8 bytes."
+        ],
+        [
+          "proposal",
+          "assistant",
+          "I previously suggested hashing rendered HTML; that proposal was rejected."
+        ]
+      ],
+      "family": "document-selector-and-algorithm",
+      "id": "checksum-envelope",
+      "partition": "train",
+      "proofs": [
+        [
+          "active-section",
+          "annex-rule"
+        ]
+      ],
+      "query": "Which checksum rule applies to the envelope's active document section?",
+      "resident": [
+        "active-section",
+        "annex-rule"
+      ],
+      "rule": "sufficient_union_only",
+      "seed_sha256": "3e147011a06c9f84895d426252794a96e3bb7cfd23613ca0d9043c5372c8f816",
+      "working": "Check the archived envelope against its specification."
+    },
+    {
+      "conflict_sources": [
+        "region-a",
+        "region-b"
+      ],
+      "events": [
+        [
+          "limit",
+          "user",
+          "Подтверждённый лимит пакета: 24 МБ."
+        ],
+        [
+          "region-a",
+          "assistant",
+          "Я предложил северный регион; владелец его не подтверждал."
+        ],
+        [
+          "verification",
+          "user",
+          "Пакет проверять сравнением SHA-256 перед передачей."
+        ],
+        [
+          "region-b",
+          "assistant",
+          "Другой вариант — южный регион; подтверждения владельца тоже нет."
+        ]
+      ],
+      "family": "confirmation-conflict-with-resolved-subtask",
+      "id": "package-handoff",
+      "partition": "train",
+      "proofs": [
+        [
+          "limit",
+          "verification"
+        ]
+      ],
+      "query": "Каковы подтверждённые лимит пакета и способ проверки?",
+      "resident": [
+        "limit",
+        "verification"
+      ],
+      "rule": "additive",
+      "seed_sha256": "9e5360cf7918540eee89a227ef96924b0ae52cdb3efc9166443df166bfdafa87",
+      "unresolved_query": "Какой из предложенных регионов подтвердил владелец?",
+      "working": "Готовить пакет; выбор региона владельцем пока открыт."
+    },
+    {
+      "events": [
+        [
+          "old-size",
+          "user",
+          "Первоначальный вариант буклета был квадратным, 180 на 180 мм."
+        ],
+        [
+          "new-size",
+          "user",
+          "Меняю формат буклета на A5; квадратный вариант отменён."
+        ],
+        [
+          "font",
+          "user",
+          "Для буклета утвердили Literata, включая подписи."
+        ],
+        [
+          "poster-font",
+          "user",
+          "На плакате остаётся Inter; к буклету это не относится."
+        ]
+      ],
+      "family": "superseded-design-attributes",
+      "id": "booklet-layout",
+      "partition": "train",
+      "proofs": [
+        [
+          "new-size",
+          "font"
+        ]
+      ],
+      "query": "Какой сейчас размер буклета и какой шрифт утвердили?",
+      "resident": [
+        "new-size",
+        "font"
+      ],
+      "rule": "additive",
+      "seed_sha256": "a1d124044129aed29743961bcb304f0586cdee406a9133d25bd58448a0ae2f7a",
+      "working": "Сверстать буклет по последнему решению."
+    },
+    {
+      "events": [
+        [
+          "island-ferry",
+          "user",
+          "In our fictional plan, the island transfer uses ferry Lumen."
+        ],
+        [
+          "cargo-ferry",
+          "user",
+          "Ferry Cargo carries equipment to a different island."
+        ],
+        [
+          "departure-pier",
+          "user",
+          "Lumen departs from pier East-2."
+        ],
+        [
+          "arrival-pier",
+          "user",
+          "Lumen arrives at West-5; that is its arrival pier."
+        ]
+      ],
+      "family": "transport-leg-connection",
+      "id": "ferry-connection",
+      "partition": "validation",
+      "proofs": [
+        [
+          "island-ferry",
+          "departure-pier"
+        ]
+      ],
+      "query": "Which ferry reaches the island, and which pier does it depart from?",
+      "resident": [
+        "island-ferry",
+        "departure-pier"
+      ],
+      "rule": "sufficient_union_only",
+      "seed_sha256": "a6ae13d4c973cf74233d2049ad42e00547db64137ea71a7d01a0460ff4b26537",
+      "working": "Reconstruct the fictional island transfer plan."
+    },
+    {
+      "events": [
+        [
+          "cart-place",
+          "user",
+          "Тележку с керамикой поставим у колонны N4."
+        ],
+        [
+          "painting-place",
+          "user",
+          "Коробки с картинами будут у колонны N1."
+        ],
+        [
+          "pickup-time",
+          "user",
+          "Тележку с керамикой заберут после закрытия в 19:40."
+        ],
+        [
+          "opening-time",
+          "user",
+          "Выставка открывается в 10:00; это не время вывоза."
+        ]
+      ],
+      "family": "spatial-reference-and-time",
+      "id": "exhibition-cart",
+      "partition": "validation",
+      "proofs": [
+        [
+          "cart-place",
+          "pickup-time"
+        ]
+      ],
+      "query": "Где поставить тележку с керамикой и когда её заберут?",
+      "resident": [
+        "cart-place",
+        "pickup-time"
+      ],
+      "rule": "additive",
+      "seed_sha256": "32d46ffc5ec016bd267696fecc2293d35cbacba012b266983463f3fa02e4067a",
+      "working": "Восстановить расстановку для вымышленной выставки."
+    },
+    {
+      "base_tool_exchange": {
+        "call_text": "Inspecting the earlier input-1 test before restoring the wiring.",
+        "result_source_id": "old-test"
+      },
+      "events": [
+        [
+          "channel",
+          "user",
+          "The boundary microphone goes to input 2."
+        ],
+        [
+          "lav-channel",
+          "user",
+          "The lavalier goes to input 1, with its own gain setting."
+        ],
+        [
+          "polarity",
+          "user",
+          "Input 2 must use inverted polarity for this wiring."
+        ],
+        [
+          "old-test",
+          "tool",
+          "The earlier test on input 1 used normal polarity; input 2 was not tested."
+        ]
+      ],
+      "family": "channel-routing-and-polarity",
+      "id": "field-recording",
+      "partition": "validation",
+      "proofs": [
+        [
+          "channel",
+          "polarity"
+        ]
+      ],
+      "query": "Which input receives the boundary microphone, and what polarity is required there?",
+      "resident": [
+        "channel",
+        "polarity"
+      ],
+      "rule": "sufficient_union_only",
+      "seed_sha256": "7b9482237401070df61f2cb7eaa60c5aa731783dc03f33448888eaed29d4c97f",
+      "working": "Restore the field recorder's channel wiring."
+    },
+    {
+      "events": [
+        [
+          "owner",
+          "user",
+          "Контейнер с горохом подписываем именем Лида."
+        ],
+        [
+          "bean-owner",
+          "user",
+          "Имя Олег относится к контейнеру с фасолью."
+        ],
+        [
+          "label-date",
+          "user",
+          "На бирке гороха должна быть дата 18 апреля."
+        ],
+        [
+          "inventory-date",
+          "user",
+          "Инвентаризацию сделали 16 апреля; это другая дата."
+        ]
+      ],
+      "family": "owner-attribution-and-storage-duration",
+      "id": "pantry-labels",
+      "partition": "validation",
+      "proofs": [
+        [
+          "owner",
+          "label-date"
+        ]
+      ],
+      "query": "Чьим именем подписать контейнер с горохом и какая дата на его бирке?",
+      "resident": [
+        "owner",
+        "label-date"
+      ],
+      "rule": "additive",
+      "seed_sha256": "341efd6138a4b3ef8c75da5ca0c0445d586373085b33e75fbb16a2c83516b75b",
+      "working": "Наклеить согласованные бирки на учебные контейнеры."
+    },
+    {
+      "events": [
+        [
+          "old-revision",
+          "user",
+          "Revision 1 contained a tentative argument that was withdrawn."
+        ],
+        [
+          "revision",
+          "user",
+          "The accepted argument is in revision 3."
+        ],
+        [
+          "page",
+          "user",
+          "Revision 3 places its proof on page 11."
+        ],
+        [
+          "old-page",
+          "assistant",
+          "I cited page 7 from revision 1; that citation does not support revision 3."
+        ]
+      ],
+      "family": "revision-and-page-reference",
+      "id": "paper-archive",
+      "partition": "validation",
+      "proofs": [
+        [
+          "revision",
+          "page"
+        ]
+      ],
+      "query": "Which revision contains the accepted argument, and on which page is that revision's proof?",
+      "resident": [
+        "revision",
+        "page"
+      ],
+      "rule": "sufficient_union_only",
+      "seed_sha256": "c7fbd3385db5338b553e7456cd12055f1322bb98b0a90cb4d9d83aad8ab3414c",
+      "working": "Find the current argument in the fictional paper archive."
+    },
+    {
+      "conflict_sources": [
+        "place-a",
+        "place-b"
+      ],
+      "events": [
+        [
+          "series",
+          "user",
+          "Для учебного журнала согласована серия G12."
+        ],
+        [
+          "place-a",
+          "assistant",
+          "Предложил восточную грядку; владелец выбора не подтверждал."
+        ],
+        [
+          "photo-step",
+          "user",
+          "Серию G12 фотографировать через каждые 6 часов."
+        ],
+        [
+          "place-b",
+          "assistant",
+          "Западная грядка тоже лишь предложение, подтверждения нет."
+        ]
+      ],
+      "family": "experiment-treatment-and-unconfirmed-location",
+      "id": "garden-experiment",
+      "partition": "validation",
+      "proofs": [
+        [
+          "series",
+          "photo-step"
+        ]
+      ],
+      "query": "Каковы согласованные номер серии и шаг фотографирования?",
+      "resident": [
+        "series",
+        "photo-step"
+      ],
+      "rule": "additive",
+      "seed_sha256": "290389480798e100f6fd8d15cd380d514f7b0faf37568a281c26cbec39197224",
+      "unresolved_query": "Какое из предложенных мест грядки подтвердил владелец?",
+      "working": "Сверить учебный журнал; место грядки пока не выбрано."
+    },
+    {
+      "events": [
+        [
+          "filter",
+          "user",
+          "For the fictional Oris session, the approved filter is crimson C2."
+        ],
+        [
+          "other-session",
+          "user",
+          "The nebula session uses azure A4; it is separate from Oris."
+        ],
+        [
+          "exposure",
+          "user",
+          "The approved exposure for Oris is 18 seconds."
+        ],
+        [
+          "logger-delay",
+          "tool",
+          "The logger takes 45 seconds to flush frames; this is not the exposure duration."
+        ]
+      ],
+      "family": "sensor-exposure-versus-log-flush",
+      "id": "oris-camera-session",
+      "partition": "validation",
+      "proofs": [
+        [
+          "filter",
+          "exposure"
+        ]
+      ],
+      "query": "Which filter and exposure duration were agreed for the fictional Oris session?",
+      "resident": [
+        "filter",
+        "exposure"
+      ],
+      "rule": "additive",
+      "seed_sha256": "585b0ca246855cbb449628e5e5f0441f7dbae1d176a9e52f0c956459a0872acd",
+      "working": "Restore the agreed fictional Oris camera session."
+    },
+    {
+      "events": [
+        [
+          "readiness",
+          "user",
+          "Перед запуском учебной репетиции готовность подтверждает осветитель Ирина."
+        ],
+        [
+          "assistant-duty",
+          "user",
+          "Помощник Тимур переносит чехлы; разрешение старта он не подписывает."
+        ],
+        [
+          "signal-log",
+          "user",
+          "После подтверждения звукооператор Марк записывает стартовый сигнал в журнал."
+        ],
+        [
+          "revoked-order",
+          "assistant",
+          "Предыдущий совет: записывать сигнал в журнал до подтверждения; этот порядок отменён."
+        ]
+      ],
+      "family": "confirmation-before-rehearsal-log",
+      "id": "rehearsal-start-protocol",
+      "partition": "validation",
+      "proofs": [
+        [
+          "readiness",
+          "signal-log"
+        ]
+      ],
+      "query": "Кто подтверждает готовность перед стартом и кто записывает стартовый сигнал после подтверждения?",
+      "resident": [
+        "readiness",
+        "signal-log"
+      ],
+      "rule": "additive",
+      "seed_sha256": "22d4d7f831e6f200ce798b1dcf9bed1c59feb8de84a1438d72aa34d6fe93d484",
+      "working": "Восстановить согласованный порядок учебной репетиции."
+    }
+  ]
+}

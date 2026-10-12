@@ -4,7 +4,13 @@
 mod collector;
 mod files;
 mod fixture;
+mod matched;
 mod targets;
+
+pub use matched::{
+    MATCHED_BUILDER, MATCHED_CORPUS_FORMAT, MATCHED_GENERATOR, MATCHED_MODEL_PROFILE,
+    MAX_MATCHED_ROWS, verify_builtin_router_matched_corpus, write_builtin_router_matched_corpus,
+};
 
 use super::*;
 use crate::Result;
@@ -126,6 +132,8 @@ struct Manifest {
     generator: String,
     cases: usize,
     rows: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    generator_metadata: Option<Value>,
     artifacts: BTreeMap<String, Artifact>,
 }
 
@@ -331,8 +339,16 @@ pub(super) fn build_artifacts(budget: &mut QueryBudget) -> Result<Artifacts> {
 }
 
 pub(super) fn validate_counts(artifacts: &Artifacts, budget: &mut QueryBudget) -> Result<()> {
+    validate_counts_with_limit(artifacts, MAX_CONDITIONAL_ROWS, budget)
+}
+
+pub(super) fn validate_counts_with_limit(
+    artifacts: &Artifacts,
+    max_rows: usize,
+    budget: &mut QueryBudget,
+) -> Result<()> {
     if artifacts.lineage.cases.len() > MAX_CONDITIONAL_CASES
-        || artifacts.inputs.len() > MAX_CONDITIONAL_ROWS
+        || artifacts.inputs.len() > max_rows
         || artifacts.inputs.len() != artifacts.observations.len()
         || artifacts.inputs.len() != artifacts.targets.len()
     {

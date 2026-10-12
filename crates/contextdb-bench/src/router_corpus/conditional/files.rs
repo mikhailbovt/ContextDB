@@ -4,6 +4,34 @@ use std::{collections::BTreeSet, fs};
 pub(super) use super::super::builtin::files::validate_root;
 use super::super::builtin::files::{read_bounded, regular, write_new};
 
+pub(super) struct Profile {
+    pub(super) format: &'static str,
+    pub(super) model: &'static str,
+    pub(super) builder: &'static str,
+    pub(super) generator: &'static str,
+    pub(super) evaluator: &'static str,
+    pub(super) revision: &'static str,
+    pub(super) cases: usize,
+    pub(super) max_rows: usize,
+    pub(super) build: fn(&mut QueryBudget) -> Result<Artifacts>,
+    pub(super) validate: fn(&Artifacts, &mut QueryBudget) -> Result<()>,
+    pub(super) metadata: fn(&mut QueryBudget) -> Result<Option<Value>>,
+}
+
+const V1: Profile = Profile {
+    format: CONDITIONAL_CORPUS_FORMAT,
+    model: CONDITIONAL_MODEL_PROFILE,
+    builder: CONDITIONAL_BUILDER,
+    generator: CONDITIONAL_GENERATOR,
+    evaluator: targets::EVALUATOR,
+    revision: "v1",
+    cases: fixture::SCENARIOS.len() * 4,
+    max_rows: MAX_CONDITIONAL_ROWS,
+    build: build_artifacts,
+    validate: validate_counts,
+    metadata: |_| Ok(None),
+};
+
 fn decode<T: Serialize + DeserializeOwned>(
     data: &[u8],
     limit: usize,
@@ -29,8 +57,17 @@ fn artifact(data: &[u8], budget: &mut QueryBudget) -> Result<Artifact> {
 }
 
 pub(super) fn write(root: &Path, corpus: &Artifacts, budget: &mut QueryBudget) -> Result<()> {
+    write_profile(root, corpus, &V1, budget)
+}
+
+pub(super) fn write_profile(
+    root: &Path,
+    corpus: &Artifacts,
+    profile: &Profile,
+    budget: &mut QueryBudget,
+) -> Result<()> {
     validate_root(root, false)?;
-    validate_counts(corpus, budget)?;
+    (profile.validate)(corpus, budget)?;
     let mut output = BTreeMap::new();
     output.insert(
         FILES[0],
@@ -57,12 +94,13 @@ pub(super) fn write(root: &Path, corpus: &Artifacts, budget: &mut QueryBudget) -
         artifacts.insert((*name).into(), artifact(data, budget)?);
     }
     let manifest = Manifest {
-        format: CONDITIONAL_CORPUS_FORMAT.into(),
-        profile: CONDITIONAL_MODEL_PROFILE.into(),
-        builder: CONDITIONAL_BUILDER.into(),
-        generator: CONDITIONAL_GENERATOR.into(),
+        format: profile.format.into(),
+        profile: profile.model.into(),
+        builder: profile.builder.into(),
+        generator: profile.generator.into(),
         cases: corpus.lineage.cases.len(),
         rows: corpus.inputs.len(),
+        generator_metadata: (profile.metadata)(budget)?,
         artifacts,
     };
     let manifest = bytes(&manifest, 64 * 1024, budget)?;
@@ -82,17 +120,26 @@ pub(super) fn verify(
     root: &Path,
     budget: &mut QueryBudget,
 ) -> Result<ConditionalRouterCorpusReport> {
+    verify_profile(root, &V1, budget)
+}
+
+pub(super) fn verify_profile(
+    root: &Path,
+    profile: &Profile,
+    budget: &mut QueryBudget,
+) -> Result<ConditionalRouterCorpusReport> {
     validate_root(root, true)?;
     let manifest_bytes = read_bounded(&root.join("manifest.json"), 64 * 1024, budget)?;
     let manifest: Manifest = decode(&manifest_bytes, 64 * 1024, budget)?;
-    if manifest.format != CONDITIONAL_CORPUS_FORMAT
-        || manifest.profile != CONDITIONAL_MODEL_PROFILE
-        || manifest.builder != CONDITIONAL_BUILDER
-        || manifest.generator != CONDITIONAL_GENERATOR
-        || manifest.cases != fixture::SCENARIOS.len() * 4
+    if manifest.format != profile.format
+        || manifest.profile != profile.model
+        || manifest.builder != profile.builder
+        || manifest.generator != profile.generator
+        || manifest.generator_metadata != (profile.metadata)(budget)?
+        || manifest.cases != profile.cases
         || manifest.cases > MAX_CONDITIONAL_CASES
         || manifest.rows == 0
-        || manifest.rows > MAX_CONDITIONAL_ROWS
+        || manifest.rows > profile.max_rows
         || manifest
             .artifacts
             .keys()
@@ -157,9 +204,9 @@ pub(super) fn verify(
     if corpus.inputs.len() != manifest.rows || corpus.lineage.cases.len() != manifest.cases {
         return Err(invalid());
     }
-    validate_counts(&corpus, budget)?;
-    validate_rows(&corpus, budget)?;
-    let expected = build_artifacts(budget)?;
+    (profile.validate)(&corpus, budget)?;
+    validate_rows_profile(&corpus, profile, budget)?;
+    let expected = (profile.build)(budget)?;
     if expected.lineage != corpus.lineage
         || expected.observations.len() != corpus.observations.len()
     {
@@ -189,43 +236,27 @@ pub(super) fn verify(
             return Err(invalid());
         }
     }
-    // Re-evaluate only after input-only callback regeneration. Required proof
-    // sets come from the fixed public generator, never the loaded target file.
-    let oracle_by_case = fixture::SCENARIOS
-        .into_iter()
-        .flat_map(|scenario| (0..4_u32).map(move |group| (group, scenario)));
-    for (group, scenario) in oracle_by_case {
-        let case = fixture::build_case(group, scenario, budget)?;
-        let roots = corpus
-            .lineage
-            .cases
-            .iter()
-            .find(|item| item.example_id == case.id)
-            .ok_or_else(invalid)?
-            .roots
-            .clone();
-        let provenance = RouterLabelProvenance {
-            kind: RouterLabelKind::SyntheticSourceSet,
-            evaluator_version: targets::EVALUATOR.into(),
-            available_at: case.known_at + 1,
-            logical_domain: case.domain.clone(),
-            source_nodes: roots,
-        };
-        for (row, target) in corpus
-            .observations
-            .iter()
-            .zip(&corpus.targets)
-            .filter(|(row, _)| row.case_id == case.id)
-        {
-            if targets::label_row(row, &case.oracle, &provenance, budget)? != *target {
-                return Err(invalid());
-            }
+    // Re-evaluated from the fixed source intervals after the regenerated live
+    // callbacks; loaded annotations never influence proposal or exploration.
+    for (mut fresh, observed) in expected.targets.into_iter().zip(&corpus.targets) {
+        fresh.feature_digest = observed.feature_digest;
+        if fresh != *observed {
+            return Err(invalid());
         }
     }
     report(&manifest, &manifest_bytes, &corpus, budget)
 }
 
+#[cfg(test)]
 pub(super) fn validate_rows(corpus: &Artifacts, budget: &mut QueryBudget) -> Result<()> {
+    validate_rows_profile(corpus, &V1, budget)
+}
+
+fn validate_rows_profile(
+    corpus: &Artifacts,
+    profile: &Profile,
+    budget: &mut QueryBudget,
+) -> Result<()> {
     let mut ids = BTreeSet::new();
     let cases: BTreeMap<_, _> = corpus
         .lineage
@@ -350,12 +381,12 @@ pub(super) fn validate_rows(corpus: &Artifacts, budget: &mut QueryBudget) -> Res
                             kind: RouterLineageKind::Evaluation,
                             domain: observed.logical_domain.clone(),
                             id: format!("source-label:{}", observed.case_id),
-                            version: Some("v1".into()),
+                            version: Some(profile.revision.into()),
                         })
                 })
                 .ok_or_else(invalid)?;
             if provenance.kind != RouterLabelKind::SyntheticSourceSet
-                || provenance.evaluator_version != targets::EVALUATOR
+                || provenance.evaluator_version != profile.evaluator
                 || provenance.available_at != observed.known_at + 1
                 || provenance.available_at != node.available_at
                 || provenance.logical_domain != observed.logical_domain
