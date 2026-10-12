@@ -486,10 +486,11 @@ def population_audit(examples, metadata):
             "shared_schema_limits_generalization": True, "real_conversation_claim": False}
 
 
-def validate_saved_profile(profile, steps):
+def validate_data_profile(profile):
+    """Fixed corpus/projection admission, independent of optimizer step counts."""
     _pins_installed()
     require(type(profile) is dict and {"profile", "projection", "corpus_manifest_blake3", "corpus_files_sha256",
-            "limits", "shared_sources_sha256", "quality_gates", "partitions", "epochs", "group_metadata",
+            "limits", "shared_sources_sha256", "quality_gates", "partitions", "group_metadata",
             "group_metadata_sha256"} <= set(profile), "complete saved matched profile required")
     require(profile["profile"] == PROFILE and profile["projection"] == PROJECTION
             and profile["corpus_manifest_blake3"] == CORPUS_BLAKE3 and profile["corpus_files_sha256"] == PINS
@@ -500,12 +501,18 @@ def validate_saved_profile(profile, steps):
             "saved matched correspondence commitment differs")
     counts = profile["partitions"]
     v1.shape(counts, {"train", "validation"})
-    require(all(type(value) is int and 0 < value <= LIMITS["groups_per_fold"] for value in counts.values())
-            and type(profile["epochs"]) is int and profile["epochs"] == 1
-            and type(steps) is int and 0 < steps == counts["train"] <= 64,
-            "exact one-epoch bounded matched optimization required")
+    require(all(type(value) is int and 0 < value <= LIMITS["groups_per_fold"] for value in counts.values()),
+            "bounded matched data population required")
     require(set(EXPECTED) <= set(profile) and all(profile[key] == value for key, value in EXPECTED.items()),
             "saved matched population differs")
+
+
+def validate_saved_profile(profile, steps):
+    """V2 optimization remains one actual update per supervised training base."""
+    validate_data_profile(profile)
+    require(type(profile.get("epochs")) is int and profile["epochs"] == 1
+            and type(steps) is int and 0 < steps == profile["partitions"]["train"] <= 64,
+            "exact one-epoch bounded matched optimization required")
 
 
 def _metrics(rows):

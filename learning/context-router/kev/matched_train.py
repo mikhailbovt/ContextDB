@@ -1,4 +1,4 @@
-"""One finite matched-v2 public development run from the pinned upstream Kev."""
+"""Finite per-base or paired-balanced public runs from the pinned upstream Kev."""
 from __future__ import annotations
 
 import argparse
@@ -14,18 +14,19 @@ from pathlib import Path
 import conditional
 import matched
 import matched_bundle as bundles
+import paired
 import trainer as frozen
-from corpus import canonical, checked_root, require, sha_file
+from corpus import checked_root, require, sha_file
 
 MAX_STEPS = 64
 MAX_SECONDS = 1800
-TOOL_FILES = {"corpus.py", "trainer.py", "check.py", "conditional.py", "lossless.py",
-              "matched.py", "matched_bundle.py", "matched_train.py"}
+TOOL_FILES = bundles.TOOL_FILES
 
 
 def installed_directory():
     directory = Path(__file__).resolve().parent
     require(directory == Path(matched.__file__).resolve().parent == Path(bundles.__file__).resolve().parent
+            == Path(paired.__file__).resolve().parent
             == Path(frozen.__file__).resolve().parent, "one installed matched tool directory required")
     return directory
 
@@ -69,14 +70,17 @@ def gradient_gate(torch, model):
     return len(gradients)
 
 
-def backward_row(torch, model, encoded, label, divisor, started):
+def backward_row(torch, model, encoded, label, divisor, started, weight=1.0):
     frozen.clock_check(started)
     scores = model(encoded)
     require(len(scores) == 1 and scores[0].shape == (2,), "single binary utility shape differs")
     logit = scores[0][0] - scores[0][1]
     require(bool(torch.isfinite(logit)), "nonfinite matched utility logit")
-    loss = torch.nn.functional.binary_cross_entropy_with_logits(
-        logit, torch.tensor(label, dtype=torch.float32, device=logit.device)) / divisor
+    require(type(divisor) is int and divisor > 0 and math.isfinite(weight) and weight > 0,
+            "fixed finite original-base loss scaling required")
+    raw = torch.nn.functional.binary_cross_entropy_with_logits(
+        logit, torch.tensor(label, dtype=torch.float32, device=logit.device))
+    loss = raw / divisor if weight == 1.0 else raw * weight / divisor
     require(bool(torch.isfinite(loss)), "nonfinite independent masked BCE")
     loss.backward()
     frozen.clock_check(started)
@@ -153,13 +157,30 @@ def controls(examples, intake):
     return result
 
 
+def selected_contract(args, saved_profile=None):
+    """No flag keeps per-base training; verification infers the saved identity."""
+    declared = saved_profile if saved_profile is not None else (
+        paired.PROFILE if args.optimization == "paired-balanced" else matched.PROFILE)
+    bundle_format, steps = bundles.model_contract(declared)
+    mode = "paired-balanced" if declared == paired.PROFILE else "per-base"
+    require(args.optimization is None or args.optimization == mode,
+            "requested optimization differs from the declared training profile")
+    require(args.profile is None or args.profile == declared,
+            "requested training profile differs from the optimization contract")
+    return declared, bundle_format, steps, mode
+
+
 def run(args):
     installed_directory()
+    model_profile, bundle_format, expected_steps, mode = selected_contract(args)
     require(math.isfinite(args.lr) and 0 < args.lr <= 1e-4 and 0 <= args.seed < 2**32,
             "finite matched learning rate and bounded seed required")
     examples, intake = matched.load_examples(args.corpus, args.seed)
     require(intake["partitions"] == {"train": 32, "validation": 32}, "actual 32/32 matched population required")
     baseline_controls = controls(examples, intake)  # Pure, before model/optimizer construction.
+    plan = paired.planning(examples, intake) if mode == "paired-balanced" else None
+    pairs = paired.training_pairs(examples, intake) if plan is not None else None
+    prior_controls = paired.pure_prior_controls(examples, intake, plan) if plan is not None else None
     paths, pin = provenance(args.model_lock)
     output_root = checked_root(args.output_root)
     output = frozen.run_path(output_root, args.run_name)
@@ -170,6 +191,9 @@ def run(args):
                "weight_decay": 0.01, "max_grad_norm": 1.0, "max_seconds": MAX_SECONDS,
                "max_optimizer_steps": MAX_STEPS, "objective": "independent yes-minus-no masked BCE",
                "warm_start": "pinned-upstream-adapter-and-head", "no_training_permission_from_hashes": True}
+    if plan is not None:
+        profile.update(training_profile=model_profile, optimization=plan, objective=paired.OBJECTIVE)
+    bundles.validate_profile(profile, expected_steps, model_profile=model_profile)
     frozen.save_file(staging / "run-intent.json", profile)
     started = time.monotonic()
     torch, tok, model, _, warm_tensors = frozen.load_model(args.seed, paths)
@@ -177,6 +201,16 @@ def run(args):
     # are admitted strictly before creating an optimizer or applying any update.
     encoded = frozen.encode_all(model, tok, examples, matched.LIMITS)
     train, dev = groups(examples, encoded)
+    if pairs is None:
+        updates = [[item] for item in train]
+        weights = {0.0: 1.0, 1.0: 1.0}
+    else:
+        updates = [[(examples[index], encoded[index]) for index in pair] for pair in pairs]
+        weights = {label: plan["class_weights"][name]["numerator"] / plan["class_weights"][name]["denominator"]
+                   for label, name in ((1.0, "positive"), (0.0, "negative"))}
+        require(len(updates) == 16 and all(len(unit) == 2 and all(example.partition == "train"
+                for example, _ in unit) for unit in updates), "sixteen whole TRAIN pairs required")
+    require(len(updates) == expected_steps <= MAX_STEPS, "predeclared update population differs")
     frozen.clock_check(started)
     initial = frozen.trainable_snapshot(model)
     initial_digest = frozen.tensor_digest(torch, initial)
@@ -187,7 +221,7 @@ def run(args):
     require(parameters and any("lora_" in name and parameter.requires_grad for name, parameter in model.named_parameters()),
             "actual LoRA trainability required")
     optimizer = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=0.01)
-    order = list(range(len(train)))
+    order = list(range(len(updates)))
     random.Random(args.seed).shuffle(order)
     steps, losses = 0, []
     torch.cuda.reset_peak_memory_stats()
@@ -197,13 +231,16 @@ def run(args):
         model.train()
         model.head.temperature = 1.0
         optimizer.zero_grad(set_to_none=True)
-        example, enc = train[index]
-        known_count = sum(example.known)
-        require(known_count > 0, "whole supervised base must contain known labels")
+        unit = updates[index]
+        known_counts = [sum(example.known) for example, _ in unit]
+        require(all(known_counts), "whole supervised bases must contain known labels")
         loss = 0.0
-        for row, label, known in zip(enc, example.labels, example.known):
-            if known:
-                loss += backward_row(torch, model, row, label, known_count, started)
+        for (example, enc), known_count in zip(unit, known_counts):
+            for row, label, known in zip(enc, example.labels, example.known):
+                if known:
+                    # Each original base keeps its own known-count denominator.
+                    # Paired updates average both bases before one optimizer step.
+                    loss += backward_row(torch, model, row, label, known_count * len(unit), started, weights[label])
         gradient_gate(torch, model)
         norm = torch.nn.utils.clip_grad_norm_(parameters, 1.0, error_if_nonfinite=True)
         optimizer.step()
@@ -211,15 +248,19 @@ def run(args):
         require(all(bool(torch.isfinite(parameter).all()) for parameter in parameters), "nonfinite matched optimizer update")
         steps += 1
         losses.append(loss)
-        print(json.dumps({"optimizer_steps": steps, "known_labels": known_count, "bce": loss,
-                          "gradient_norm": float(norm)}), flush=True)
+        progress = {"optimizer_steps": steps, "known_labels": sum(known_counts), "gradient_norm": float(norm)}
+        progress.update({"bce": loss} if plan is None else
+                        {"bases_in_update": len(unit), "optimization_loss": loss})
+        print(json.dumps(progress), flush=True)
     after = frozen.trainable_snapshot(model)
     changed = [name for name in initial if not torch.equal(initial[name], after[name])]
-    require(steps == len(train) == 32 and changed and any("lora_" in name for name in changed)
+    require(steps == len(updates) == expected_steps and changed and any("lora_" in name for name in changed)
             and any(name.startswith("head.") for name in changed), "actual finite LoRA and head update required")
     after_digest = frozen.tensor_digest(torch, after)
     after_development = evaluate(torch, model, dev, examples, intake, started)
-    report = {"format": matched.BUNDLE_FORMAT, "profile": matched.PROFILE,
+    raw_gate = after_development["metrics"]["coverage_surrogate_gates_passed"]
+    prior_gate = None if prior_controls is None else paired.beats_prior_controls(after_development["metrics"], prior_controls)
+    report = {"format": bundle_format, "profile": model_profile, "data_profile": matched.PROFILE,
               "time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
               "status": "matched-public-coverage-surrogate-development", "optimizer_steps": steps,
               "before_trainable_digest": initial_digest, "after_trainable_digest": after_digest,
@@ -231,33 +272,42 @@ def run(args):
               "elapsed_seconds": time.monotonic() - started, "latency_benchmark": False,
               "test_examples_evaluated": 0, "quarantined_examples_used": 0,
               "useful_model_claim": False, "calibration_fit": False, "threshold_fitted": False,
-              "coverage_surrogate_gates_passed": after_development["metrics"]["coverage_surrogate_gates_passed"]}
+              "coverage_surrogate_gates_passed": raw_gate and prior_gate is not False}
+    if plan is not None:
+        report.update(optimization=plan, train_prior_controls=prior_controls,
+                      unweighted_coverage_surrogate_gates_passed=raw_gate,
+                      train_prior_controls_beaten=prior_gate,
+                      utility_score="uncalibrated-discrimination-score",
+                      utility_is_calibrated_probability=False)
     reference_example, reference_encoded = dev[0]
     model.eval()
     with torch.no_grad():
         reference = frozen.utility_logits(torch, model, reference_encoded, started).cpu()
     (staging / "run-intent.json").rename(staging / "intent.json")
-    bundles.write_bundle(torch, model, optimizer, staging, profile, report, paths["adapter"])
+    bundles.write_bundle(torch, model, optimizer, staging, profile, report, paths["adapter"], model_profile=model_profile)
     del optimizer, parameters, initial, after, model
     gc.collect()
     torch.cuda.empty_cache()
     _, cold_tok, cold, _, _ = frozen.load_model(args.seed, paths)
-    bundles.reload_bundle(torch, cold, staging, output_root)
+    bundles.reload_bundle(torch, cold, staging, output_root, model_profile=model_profile)
     cold.eval()
     with torch.no_grad():
         cold_encoded = frozen.encode_all(cold, cold_tok, [reference_example], matched.LIMITS)[0]
         actual = frozen.utility_logits(torch, cold, cold_encoded, started).cpu()
     require(torch.equal(reference, actual), "same-runtime matched cold logits differ")
-    frozen.save_file(staging / "cold-reload.json", {"format": matched.BUNDLE_FORMAT, "profile": matched.PROFILE,
+    frozen.save_file(staging / "cold-reload.json", {"format": bundle_format, "profile": model_profile,
+        "data_profile": matched.PROFILE,
         "status": "strict-tensor-and-logit-match", "examples": 1, "from_partition": "validation",
         "association": reference_example.association, "utility_logits": reference.tolist(), "test_evaluated": 0})
-    frozen.save_file(staging / "complete.json", {"format": matched.BUNDLE_FORMAT, "profile": matched.PROFILE,
+    frozen.save_file(staging / "complete.json", {"format": bundle_format, "profile": model_profile,
+        "data_profile": matched.PROFILE,
         "bundle_sha256": sha_file(staging / "bundle.json", 64 << 10),
         "cold_reload_sha256": sha_file(staging / "cold-reload.json", 64 << 10), "optimizer_steps": steps})
-    bundles.inspect_bundle(staging, output_root, completed=True)
+    bundles.inspect_bundle(staging, output_root, completed=True, model_profile=model_profile)
     frozen.clock_check(started)
     frozen.publish_bundle(staging, output)
     print(json.dumps({"status": "complete-matched-development-bundle", "path": str(output), "optimizer_steps": steps,
+                      "profile": model_profile, "data_profile": matched.PROFILE,
                       "coverage_surrogate_gates_passed": report["coverage_surrogate_gates_passed"],
                       "useful_model_claim": False, "test_evaluated": 0}), flush=True)
 
@@ -266,19 +316,22 @@ def verify(args):
     installed_directory()
     root = checked_root(args.output_root)
     path = frozen.run_path(root, args.run_name)
-    _, profile = bundles.inspect_bundle(path, root, completed=True)
+    bundle, profile = bundles.inspect_bundle(path, root, completed=True)
+    model_profile, _, _, _ = selected_contract(args, bundle["profile"])
     paths, pin = provenance(args.model_lock)
     verify_provenance(profile, pin)
     examples, intake = matched.load_examples(args.corpus, profile["seed"])
     require(profile["group_metadata"] == intake["group_metadata"], "exact current matched correspondence required")
-    reference = bundles.cold_reference(path)
+    if model_profile == paired.PROFILE:
+        require(profile["optimization"] == paired.planning(examples, intake), "current TRAIN optimization plan differs")
+    reference = bundles.cold_reference(path, model_profile=model_profile)
     example = next((item for item in examples if item.association == reference["association"]
                     and item.partition == "validation"), None)
     require(example is not None and len(reference["utility_logits"]) == len(example.known),
             "cold reference must name one existing matched development base")
     started = time.monotonic()
     torch, tok, model, _, _ = frozen.load_model(profile["seed"], paths)
-    bundles.reload_bundle(torch, model, path, root)
+    bundles.reload_bundle(torch, model, path, root, model_profile=model_profile)
     model.eval()
     with torch.no_grad():
         encoded = frozen.encode_all(model, tok, [example], matched.LIMITS)[0]
@@ -286,6 +339,7 @@ def verify(args):
     expected = torch.tensor(reference["utility_logits"], dtype=actual.dtype)
     require(torch.equal(actual, expected), "fresh-process matched cold logits differ")
     print(json.dumps({"status": "fresh-process-strict-matched-bundle-and-logit-match",
+                      "profile": model_profile, "data_profile": matched.PROFILE,
                       "development_examples": 1, "test_evaluated": 0, "useful_model_claim": False}), flush=True)
 
 
@@ -294,7 +348,9 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("preflight", "train", "verify-bundle"):
         command = sub.add_parser(name)
-        command.add_argument("--profile", choices=(matched.PROFILE,), default=matched.PROFILE)
+        command.add_argument("--profile", choices=(matched.PROFILE, paired.PROFILE), default=None)
+        command.add_argument("--optimization", choices=("per-base", "paired-balanced"), default=None,
+                             help="default per-base; verify-bundle infers the saved training profile")
         command.add_argument("--corpus", type=Path, required=True)
         command.add_argument("--model-lock", type=Path, required=True)
         command.add_argument("--output-root", type=Path, required=True)
@@ -311,9 +367,15 @@ def main():
     elif args.command == "verify-bundle":
         verify(args)
     else:
+        model_profile, bundle_format, steps, mode = selected_contract(args)
         examples, intake = matched.load_examples(args.corpus)
+        plan = paired.planning(examples, intake) if mode == "paired-balanced" else None
+        prior_controls = paired.pure_prior_controls(examples, intake, plan) if plan is not None else None
         _, pin = provenance(args.model_lock)
         print(json.dumps({"status": "matched-preflight-no-model", "examples": len(examples), "intake": intake,
+                          "training_profile": model_profile, "bundle_format": bundle_format,
+                          "planned_optimizer_steps": steps, "optimization": plan,
+                          "train_prior_controls": prior_controls,
                           "source_revision": pin["source_revision"], "tool_sources_sha256": pin["tool_sources_sha256"]}))
 
 

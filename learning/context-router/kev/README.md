@@ -300,7 +300,8 @@ and downstream reader benefit still require separate evidence.
 `matched_train.py` starts from the pinned upstream adapter/head and writes its
 own diagnostic bundle format. It checks all complete token records, then runs
 one finite backward pass on the largest known training row with zero updates
-and cleared gradients. Training is one epoch of 32 updates within 30 minutes.
+and cleared gradients. The default per-base method takes one epoch of 32
+updates within 30 minutes.
 Development retains a fixed threshold, independent masks, family/history
 metrics, exact STOP and matching positive-to-negative context comparisons.
 Failed quality gates retain a diagnostic result without a useful-model claim.
@@ -311,7 +312,7 @@ python learning/context-router/kev/matched_train.py train --corpus ABS --model-l
 python learning/context-router/kev/matched_train.py verify-bundle --corpus ABS --model-lock ABS --output-root ABS --run-name matched-v2
 ```
 
-Old bundles refuse. Source, corpus, ancestry, artifact byte caps and hashes are
+Other feature profiles refuse. Source, corpus, ancestry, artifact byte caps and hashes are
 checked before cold tensor loading; completion requires exact cold logits from
 one existing development base. This trainer does not activate the native worker.
 
@@ -320,3 +321,34 @@ and fresh-process cold checks. Development BCE/Brier improved to 0.603/0.200,
 but all 60 known positives were rejected (recall 0, specificity 1). All-zero
 STOP passed; matched utility-change comparisons failed. This diagnostic bundle
 does not meet the scoring gates and is not activated for native retrieval.
+
+The separate **paired-balanced v3** method places each missing/resident TRAIN
+pair in one optimizer update. Both original per-base known-label means retain
+their independent masks and share the gradient before that update. Input-only
+correspondence covers all 32 TRAIN bases exactly once in 16 updates. Class
+weights derive from TRAIN per-base prevalence: `480/257` for positives and
+`480/703` for negatives. Development labels cannot change pairing or weights.
+The fixed 0.5 gates are unchanged; unweighted development BCE and Brier must
+also beat both predeclared TRAIN prevalence controls. Scores remain uncalibrated.
+
+```text
+python -I learning/context-router/kev/paired_check.py --corpus ABS
+python learning/context-router/kev/matched_train.py preflight --optimization paired-balanced --corpus ABS --model-lock ABS --output-root ABS
+python learning/context-router/kev/matched_train.py train --optimization paired-balanced --corpus ABS --model-lock ABS --output-root ABS --run-name paired-v3 --lr 0.00001
+python learning/context-router/kev/matched_train.py verify-bundle --corpus ABS --model-lock ABS --output-root ABS --run-name paired-v3
+```
+
+Verification infers the saved training profile; an explicit conflicting selector
+refuses. The v3 bundle binds the exact optimization plan, report, nine source
+hashes and existing data profile. Earlier matched-v2 bundles require their
+original eight-source revision (`e6d42d5`); retain that checkout to reproduce
+their checks. The four original trainer sources remain unchanged.
+
+One v3 epoch completed 16 updates with changes in all 376 trainable tensors.
+Strict same-runtime and fresh-process cold checks passed. Development produced
+43 TP, 37 FP, 137 TN and 17 FN: recall 71.7%, specificity 78.7%, BCE 0.593 and
+Brier 0.201. Exact STOP passed 10/16 bases; matched utility-change decisions
+passed 35/60 comparisons. The prior-control and family gates failed, including
+zero recall for audio routing and zero specificity for transport. This remains
+a diagnostic result. Native useful scoring and downstream reader benefit are
+still open; the default R0 path remains unchanged.
