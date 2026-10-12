@@ -13,7 +13,7 @@ import sys
 
 sys.dont_write_bytecode = True
 FORBIDDEN = {"torch", "transformers", "peft", "safetensors", "kev", "tokenizers", "sentencepiece"}
-SOURCE_SHA256 = "1b56bd6857408adce3900415697507215328491ebae1de5d75269a5fa0cd3a4d"
+SOURCE_LF_SHA256 = "ab301efaf18101f7a16cd9e2d83fe261c74cceb93526a0a8425e0c0d3d839a31"
 
 
 def require(condition, message):
@@ -42,7 +42,10 @@ def load(directory):
     require(not any(name.split(".")[0] in FORBIDDEN for name in sys.modules), "pure process required")
     source = directory / "controlled.py"
     require(source.is_file() and not source.is_symlink() and source.stat().st_size <= 1 << 20
-            and hashlib.sha256(source.read_bytes()).hexdigest() == SOURCE_SHA256, "fixed controlled data source required")
+            # Git stores LF; local Windows source can retain CRLF. Only this
+            # Python-code checksum normalizes endings; corpus/bundle bytes do not.
+            and hashlib.sha256(source.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == SOURCE_LF_SHA256,
+            "fixed controlled data source required")
     sys.meta_path.insert(0, NoModelImports())
     sys.path.insert(0, str(directory))
     module = importlib.import_module("controlled")

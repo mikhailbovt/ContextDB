@@ -1,4 +1,4 @@
-"""Strict owned matched diagnostic bundles; no optimizer resumption."""
+"""Strict owned diagnostic bundles with explicit data/training identities."""
 from __future__ import annotations
 
 import os
@@ -17,6 +17,8 @@ FILES = dict(frozen.BUNDLE_LIMITS)
 MAX_BYTES = frozen.BUNDLE_MAX_BYTES
 TOOL_FILES = {"corpus.py", "trainer.py", "check.py", "conditional.py", "lossless.py",
               "matched.py", "paired.py", "matched_bundle.py", "matched_train.py"}
+CONTROLLED_PROFILE = "contextdb.kev-public-controlled-history-balanced-bce.v4"
+CONTROLLED_TOOL_FILES = TOOL_FILES | {"controlled.py", "controlled_training.py"}
 ARCHITECTURE = {"base": "Qwen/Qwen3.5-0.8B-Base", "base_revision": frozen.BASE_REVISION,
                 "lora": 16, "head_dim": 256, "option_isolation": False, "special_embeddings": False,
                 "backbone_dtype": "bfloat16", "head_dtype": "float32", "temperature": 1.0,
@@ -29,34 +31,65 @@ def bounded_json(path, maximum):
     return read_json(path, maximum)
 
 
-def model_contract(profile_name):
-    """Training identity determines its format and actual update count."""
+def optimization_contract(profile_name):
+    """Legacy profiles never import the separate controlled-v4 dependencies."""
     require(type(profile_name) is str, "declared matched training profile required")
     if profile_name == matched.PROFILE:
+        return None
+    if profile_name == paired.PROFILE:
+        return paired
+    require(profile_name == CONTROLLED_PROFILE, "unsupported matched training profile")
+    import controlled_training
+    require(controlled_training.PROFILE == CONTROLLED_PROFILE,
+            "controlled training module identity differs")
+    return controlled_training
+
+
+def _data_module(model_profile):
+    optimization_contract(model_profile)
+    if model_profile == CONTROLLED_PROFILE:
+        import controlled
+        return controlled
+    return matched
+
+
+def data_profile(model_profile):
+    return _data_module(model_profile)
+
+
+def tool_files(model_profile):
+    optimization_contract(model_profile)
+    return set(CONTROLLED_TOOL_FILES if model_profile == CONTROLLED_PROFILE else TOOL_FILES)
+
+
+def model_contract(profile_name):
+    """Training identity determines its format and actual update count."""
+    contract = optimization_contract(profile_name)
+    if contract is None:
         return matched.BUNDLE_FORMAT, 32
-    require(profile_name == paired.PROFILE, "unsupported matched training profile")
-    return paired.BUNDLE_FORMAT, 16
+    return contract.BUNDLE_FORMAT, 16 if profile_name == paired.PROFILE else 8
 
 
 def validate_profile(profile, steps, model_profile=None):
-    require(type(profile) is dict and profile.get("profile") == matched.PROFILE,
-            "fixed matched-v2 data profile required")
+    require(type(profile) is dict and type(profile.get("profile")) is str,
+            "declared fixed data profile required")
     declared = profile.get("training_profile", profile["profile"])
     bundle_format, actual_steps = model_contract(declared)
+    require(profile["profile"] == data_profile(declared).PROFILE, "training/data profile association differs")
     require(model_profile is None or model_profile == declared, "matched training profile association differs")
     require(type(steps) is int and steps == actual_steps, "actual matched optimizer updates differ")
     if declared == matched.PROFILE:
         require("optimization" not in profile, "paired optimization cannot use the per-base profile")
         matched.validate_saved_profile(profile, steps)
     else:
-        paired.validate_saved_profile(profile, steps)
+        optimization_contract(declared).validate_saved_profile(profile, steps)
     return declared, bundle_format
 
 
 def data_contract(value, model_profile):
     # The old per-base envelope did not repeat its same-named data contract.
     require((model_profile == matched.PROFILE and "data_profile" not in value)
-            or value.get("data_profile") == matched.PROFILE,
+            or value.get("data_profile") == data_profile(model_profile).PROFILE,
             "matched envelope data profile differs")
 
 
@@ -74,22 +107,27 @@ def cold_reference(path, model_profile=None):
             and value["from_partition"] == "validation" and value["test_evaluated"] == 0,
             "existing matched development reference required")
     matched.digest(value["association"])
-    require(type(value["utility_logits"]) is list and 0 < len(value["utility_logits"]) <= matched.LIMITS["questions"]
+    require(type(value["utility_logits"]) is list and 0 < len(value["utility_logits"]) <= _data_module(model_profile).LIMITS["questions"]
             and all(type(item) in {int, float} and math.isfinite(item) for item in value["utility_logits"]),
             "bounded finite cold matched logits required")
     return value
 
 
 def verify_tool_sources(profile):
+    declared = profile.get("training_profile", profile["profile"])
+    contract = optimization_contract(declared)
+    data = _data_module(declared)
     pin = profile["provenance"]
     matched.v1.shape(pin, {"source_revision", "adapter_revision", "base_revision", "model_profile_sha256",
                            "initial_files", "packages", "python", "tool_sources_sha256"})
-    require(type(pin["tool_sources_sha256"]) is dict and set(pin["tool_sources_sha256"]) == TOOL_FILES,
+    require(type(pin["tool_sources_sha256"]) is dict and set(pin["tool_sources_sha256"]) == tool_files(declared),
             "exact matched dependency source inventory required")
     matched.digest(pin["model_profile_sha256"])
     directory = Path(__file__).resolve().parent
-    require(directory == Path(matched.__file__).resolve().parent == Path(paired.__file__).resolve().parent
-            == Path(frozen.__file__).resolve().parent,
+    modules = [matched, paired, frozen]
+    if declared == CONTROLLED_PROFILE:
+        modules.extend((data, contract))
+    require(all(directory == Path(module.__file__).resolve().parent for module in modules),
             "one installed matched bundle source directory required")
     for name, expected in pin["tool_sources_sha256"].items():
         matched.digest(expected)
@@ -97,7 +135,7 @@ def verify_tool_sources(profile):
         require(source.is_file() and not source.is_symlink() and source.resolve() == source
                 and source.stat().st_size <= 1 << 20 and sha_file(source, 1 << 20) == expected,
                 "matched bundle's actual tool source commitment differs")
-    require(all(pin["tool_sources_sha256"][name] == expected for name, expected in matched.SHARED_SOURCES.items()),
+    require(all(pin["tool_sources_sha256"][name] == expected for name, expected in data.SHARED_SOURCES.items()),
             "matched bundle frozen dependencies differ")
     template = bounded_json(directory / "model-lock.example.json", 64 << 10)
     public_lock = {key: value for key, value in template.items() if key != "paths"}
@@ -123,6 +161,9 @@ def validate_development(report, profile, steps, declared):
             and report["resource_preflight"]["optimizer_updates"] == 0,
             "matched development observation differs")
     if declared == matched.PROFILE:
+        return
+    if declared == CONTROLLED_PROFILE:
+        optimization_contract(declared).validate_development(report, profile, steps)
         return
     require(type(report["optimization"]) is dict
             and canonical(report["optimization"]) == canonical(profile["optimization"])
@@ -270,7 +311,8 @@ def inspect_bundle(path, output_root, completed=False, model_profile=None):
     profile = bounded_json(path / "profile.json", FILES["profile.json"])
     validate_profile(profile, bundle["optimizer_steps"], declared)
     verify_tool_sources(profile)
-    expected_objective = ("independent yes-minus-no masked BCE" if declared == matched.PROFILE else paired.OBJECTIVE)
+    contract = optimization_contract(declared)
+    expected_objective = "independent yes-minus-no masked BCE" if contract is None else contract.OBJECTIVE
     require(profile["objective"] == expected_objective
             and profile["no_training_permission_from_hashes"] is True
             and profile["warm_start"] == "pinned-upstream-adapter-and-head"
@@ -354,7 +396,7 @@ def write_bundle(torch, model, optimizer, staging, profile, report, adapter_path
             os.fsync(stream.fileno())
         files[name] = {"bytes": size, "sha256": sha_file(staging / name, size)}
     frozen.save_file(staging / "bundle.json", {"format": bundle_format, "profile": declared,
-        "data_profile": matched.PROFILE,
+        "data_profile": data_profile(declared).PROFILE,
         "optimizer_steps": report["optimizer_steps"], "files": files,
         "trainable_tensors_sha256": report["after_trainable_digest"],
         "useful_model_claim": False, "current_training_grant": False})

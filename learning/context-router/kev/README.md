@@ -378,8 +378,35 @@ at equal nonzero original-content and actual reference-protocol costs, for both
 singletons and pairs. The new collector scores singletons first; existing
 scorer revisions keep their previous traversal and corpus bytes.
 
-Native reconstruction and model-free intake pass. This profile shares the
-lossless codec and unchanged byte/token ceilings; Kev token/resource admission,
-training, useful native scoring and reader benefit remain unverified. Shared
-synthetic structure does not establish real-conversation independence or replace
-the final paired-reader benchmarks.
+Native reconstruction and model-free intake pass. The actual pinned tokenizer
+admits all 480 questions without truncation: maxima 702 state, 1457 complete-row
+and 7221 packed-base tokens. The lossless codec and byte/token ceilings are
+unchanged. Shared synthetic structure does not establish real-conversation
+independence or replace the final paired-reader benchmarks.
+
+`controlled_training.py` defines a distinct history-balanced v4 model contract.
+One canonical TRAIN history triple is one update; each known row retains its
+base denominator, contributing `class_weight * BCE / (3*K)`. All 24 TRAIN bases
+enter eight updates, including all-zero bases and independently masked entries.
+TRAIN-only weights are `120/67` and `120/173`; both macro and micro prevalence
+controls remain separate. A whole sequential TRAIN base must pass finite
+backward with zero updates and cleared gradients before optimization.
+
+```text
+python -I learning/context-router/kev/controlled_training_check.py --corpus ABS_CORPUS
+python learning/context-router/kev/matched_train.py preflight --optimization controlled-history --corpus ABS --model-lock ABS --output-root ABS
+python learning/context-router/kev/matched_train.py train --optimization controlled-history --corpus ABS --model-lock ABS --output-root ABS --run-name controlled-v4 --seed 20261012 --lr 0.00001
+python learning/context-router/kev/matched_train.py verify-bundle --corpus ABS --model-lock ABS --output-root ABS --run-name controlled-v4
+```
+
+The bounded run completed eight updates and changed all 376 trainable tensors.
+Strict same-runtime and separate-process cold checks passed on one existing
+development base. BCE/Brier improved from 0.749/0.275 to 0.573/0.193 and beat both
+TRAIN-prior controls, but quality failed: recall 40.6%, specificity 84.1%, STOP
+4/8, corresponding resident decisions 21/64 and nonzero-cost contrasts 22.5%.
+Family and per-history cost gates also failed. This remains a diagnostic bundle;
+useful native scoring and reader benefit are open, with default R0 unchanged.
+
+Cold reproduction requires the exact recorded tool and authoring-asset tree.
+Bundle source hashes retain raw bytes; only the model-free data checker accepts
+Git LF and equivalent Windows CRLF endings for its Python-source checksum.
