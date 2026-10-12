@@ -79,6 +79,7 @@ impl NativeIndexedRecallProvider<'_> {
                         projected_sources: 0,
                         removal_through: None,
                         bm25: None,
+                        dense: None,
                     }
                 };
                 let current = state.watermarks.journal == latest.watermarks.journal;

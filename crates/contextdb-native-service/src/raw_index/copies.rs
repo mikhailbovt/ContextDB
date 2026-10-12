@@ -34,7 +34,7 @@ pub struct NativeRawCopyReceipt {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeRawCopyKind {
-    /// Lexical content or statistics derived from one captured original.
+    /// Content, statistics or an exact source-span vector from one original.
     Document,
     /// A route whose stored value identifies one captured original.
     Route,

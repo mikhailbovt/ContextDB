@@ -5,6 +5,7 @@
 #![warn(missing_docs)]
 
 mod economy;
+mod embedding;
 mod fence;
 mod model;
 mod rolling;
@@ -15,6 +16,7 @@ mod telemetry;
 mod tests;
 
 pub use economy::*;
+pub use embedding::*;
 pub use fence::*;
 pub use model::*;
 pub use rolling::*;

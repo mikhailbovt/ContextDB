@@ -848,20 +848,34 @@ impl NativeService {
         snapshot: &S,
         context: &AuthenticatedRequestContext,
         id: ObservationId,
-        budget: Option<&mut contextdb_recall::QueryBudget>,
+        mut budget: Option<&mut contextdb_recall::QueryBudget>,
     ) -> ServiceResult<StoredObservationPolicy> {
         if let Some(shared) = &budget {
             shared.check().map_err(super::raw_index::budget_error)?;
         }
-        self.require_suppression_current(
-            snapshot,
-            &digest_bytes(context.request.workspace_id.as_bytes()),
-        )?;
+        let workspace = digest_bytes(context.request.workspace_id.as_bytes());
+        if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.require_suppression_current(reader, &workspace)
+            })?;
+        } else {
+            self.require_suppression_current(snapshot, &workspace)?;
+        }
         let digest = digest_bytes(id.to_string().as_bytes());
-        let bytes = snapshot
-            .get(&self.keyspaces.observations_policy, digest.as_bytes())
-            .map_err(storage_error)?
-            .ok_or_else(not_found)?;
+        let bytes = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::read_value(
+                snapshot,
+                &self.keyspaces.observations_policy,
+                digest.as_bytes(),
+                1024 * 1024,
+                shared,
+            )?
+        } else {
+            snapshot
+                .get(&self.keyspaces.observations_policy, digest.as_bytes())
+                .map_err(storage_error)?
+        }
+        .ok_or_else(not_found)?;
         if let Some(shared) = budget {
             if bytes.len() > 1024 * 1024 {
                 return Err(integrity("capture policy exceeds its metadata byte bound"));
@@ -909,10 +923,20 @@ impl NativeService {
             read_required(snapshot, self, &record_key(id))?
         };
         let digest = digest_bytes(id.to_string().as_bytes());
-        let policy_bytes = snapshot
-            .get(&self.keyspaces.observations_policy, digest.as_bytes())
-            .map_err(storage_error)?
-            .ok_or_else(|| integrity("capture policy is absent"))?;
+        let policy_bytes = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::read_value(
+                snapshot,
+                &self.keyspaces.observations_policy,
+                digest.as_bytes(),
+                1024 * 1024,
+                shared,
+            )?
+        } else {
+            snapshot
+                .get(&self.keyspaces.observations_policy, digest.as_bytes())
+                .map_err(storage_error)?
+        }
+        .ok_or_else(|| integrity("capture policy is absent"))?;
         if let Some(shared) = budget.as_deref_mut() {
             if policy_bytes.len() > 1024 * 1024 {
                 return Err(integrity("capture policy exceeds its metadata byte bound"));
@@ -925,10 +949,20 @@ impl NativeService {
         if let Some(shared) = budget.as_deref_mut() {
             shared.check().map_err(super::raw_index::budget_error)?;
         }
-        let content_bytes = snapshot
-            .get(&self.keyspaces.observations_content, digest.as_bytes())
-            .map_err(storage_error)?
-            .ok_or_else(|| integrity("capture original is absent"))?;
+        let content_bytes = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::read_value(
+                snapshot,
+                &self.keyspaces.observations_content,
+                digest.as_bytes(),
+                8 * 1024 * 1024,
+                shared,
+            )?
+        } else {
+            snapshot
+                .get(&self.keyspaces.observations_content, digest.as_bytes())
+                .map_err(storage_error)?
+        }
+        .ok_or_else(|| integrity("capture original is absent"))?;
         if let Some(shared) = budget.as_deref_mut() {
             if content_bytes.len() > 8 * 1024 * 1024 {
                 return Err(integrity("captured original exceeds its native row bound"));
@@ -972,11 +1006,21 @@ impl NativeService {
             ));
         }
         let receipt = &record.receipt;
-        let (global, _) = self.select_snapshot(
-            snapshot,
-            &event.workspace_id.to_string(),
-            Some(receipt.workspace_commit),
-        )?;
+        let (global, _) = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.select_snapshot(
+                    reader,
+                    &event.workspace_id.to_string(),
+                    Some(receipt.workspace_commit),
+                )
+            })?
+        } else {
+            self.select_snapshot(
+                snapshot,
+                &event.workspace_id.to_string(),
+                Some(receipt.workspace_commit),
+            )?
+        };
         if event.event_id != id
             || receipt.event_id != id
             || receipt.database_id != self.database_id
@@ -989,15 +1033,17 @@ impl NativeService {
         {
             return Err(integrity("capture receipt and original disagree"));
         }
-        if budget.is_some() {
+        if let Some(shared) = budget {
             let inputs = super::custody::inputs_with_trace_controls(&event, controls)?;
-            self.validate_capture_recovery_with_inputs(
-                snapshot,
-                &record,
-                &event,
-                global,
-                Some(inputs),
-            )?;
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.validate_capture_recovery_with_inputs(
+                    reader,
+                    &record,
+                    &event,
+                    global,
+                    Some(inputs),
+                )
+            })?;
         } else {
             self.validate_capture_recovery(snapshot, &record, &event, global)?;
         }

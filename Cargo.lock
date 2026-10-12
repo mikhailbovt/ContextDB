@@ -437,6 +437,7 @@ dependencies = [
  "contextdb-service",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
@@ -901,6 +902,7 @@ dependencies = [
  "contextdb-context",
  "contextdb-continuity",
  "contextdb-core",
+ "contextdb-model",
  "contextdb-recall",
  "contextdb-reference",
  "proptest",

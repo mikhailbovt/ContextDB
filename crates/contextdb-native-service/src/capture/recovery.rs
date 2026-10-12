@@ -268,10 +268,14 @@ impl NativeService {
         budget: &mut contextdb_recall::QueryBudget,
     ) -> ServiceResult<CaptureRecord> {
         budget.check().map_err(crate::raw_index::budget_error)?;
-        let bytes = snapshot
-            .get(&self.keyspaces.continuous, &record_key(id))
-            .map_err(storage_error)?
-            .ok_or_else(|| integrity("capture control metadata is absent"))?;
+        let bytes = crate::budgeted::read_value(
+            snapshot,
+            &self.keyspaces.continuous,
+            &record_key(id),
+            MAX_CAPTURE_CONTROL_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("capture control metadata is absent"))?;
         if bytes.len() > MAX_CAPTURE_CONTROL_BYTES {
             return Err(integrity(
                 "capture control metadata exceeds its stored bound",
@@ -291,7 +295,9 @@ impl NativeService {
     ) -> ServiceResult<(CaptureReceipt, Option<CaptureRecovery>)> {
         let record = self.capture_record_with_budget(snapshot, id, budget)?;
         if let Some(recovery) = &record.recovery {
-            self.verify_recovery_features(snapshot, recovery)?;
+            crate::budgeted::metadata(snapshot, budget, |reader| {
+                self.verify_recovery_features(reader, recovery)
+            })?;
         }
         Ok((record.receipt, record.recovery))
     }
@@ -306,7 +312,9 @@ impl NativeService {
     ) -> ServiceResult<VerifiedCaptureControl> {
         let record = self.capture_record_with_budget(snapshot, id, budget)?;
         if let Some(recovery) = &record.recovery {
-            self.verify_recovery_features(snapshot, recovery)?;
+            crate::budgeted::metadata(snapshot, budget, |reader| {
+                self.verify_recovery_features(reader, recovery)
+            })?;
         }
         if let Some(control_digest) = self.verify_pruned_source(snapshot, id, budget)? {
             return Ok(VerifiedCaptureControl {
@@ -331,7 +339,9 @@ impl NativeService {
             CaptureRecovery::from_event_with_inputs(&original.event, inputs)?
         };
         Ok(VerifiedCaptureControl {
-            control_digest: self.capture_control_digest(snapshot, &original)?,
+            control_digest: crate::budgeted::metadata(snapshot, budget, |reader| {
+                self.capture_control_digest(reader, &original)
+            })?,
             recovery,
             receipt: original.receipt,
             original: Some(original.event),
@@ -346,19 +356,22 @@ impl NativeService {
         source: &crate::NativeDeletionSource,
         budget: &mut contextdb_recall::QueryBudget,
     ) -> ServiceResult<()> {
-        let bytes = snapshot
-            .get(
-                &self.keyspaces.continuous,
-                &record_key(source.receipt.event_id),
-            )
-            .map_err(storage_error)?
-            .ok_or_else(|| integrity("retained capture control is missing"))?;
+        let bytes = crate::budgeted::read_value(
+            snapshot,
+            &self.keyspaces.continuous,
+            &record_key(source.receipt.event_id),
+            MAX_CAPTURE_CONTROL_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("retained capture control is missing"))?;
         budget
             .charge(1, bytes.len() as u64)
             .map_err(crate::raw_index::budget_error)?;
         let record: CaptureRecord = decode(&bytes, "retained capture control")?;
         if let Some(recovery) = &record.recovery {
-            self.verify_recovery_features(snapshot, recovery)?;
+            crate::budgeted::metadata(snapshot, budget, |reader| {
+                self.verify_recovery_features(reader, recovery)
+            })?;
         }
         if record.receipt != source.receipt
             || control_digest(&bytes) != source.control_digest
@@ -368,15 +381,21 @@ impl NativeService {
                 "capture control differs from the retained removal source",
             ));
         }
-        let (global, _) = self.select_snapshot(
+        let (global, _) = crate::budgeted::metadata(snapshot, budget, |reader| {
+            self.select_snapshot(
+                reader,
+                &source.receipt.workspace_id.to_string(),
+                Some(source.receipt.workspace_commit),
+            )
+        })?;
+        let bytes = crate::budgeted::read_value(
             snapshot,
-            &source.receipt.workspace_id.to_string(),
-            Some(source.receipt.workspace_commit),
-        )?;
-        let bytes = snapshot
-            .get(&self.keyspaces.events, &global.to_be_bytes())
-            .map_err(storage_error)?
-            .ok_or_else(|| integrity("retained capture journal is missing"))?;
+            &self.keyspaces.events,
+            &global.to_be_bytes(),
+            crate::MAX_JSON_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("retained capture journal is missing"))?;
         budget
             .charge(1, bytes.len() as u64)
             .map_err(crate::raw_index::budget_error)?;

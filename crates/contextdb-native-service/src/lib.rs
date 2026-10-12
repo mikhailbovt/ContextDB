@@ -14,6 +14,7 @@
 #[cfg(test)]
 mod adapter_tests;
 mod assertions;
+mod budgeted;
 pub use assertions::{
     NativeAssertionBackupInventory, NativeAssertionBatchKind, NativeAssertionCopyKind,
     NativeAssertionKeyInventory, NativeAssertionPruningReceipt,
@@ -87,8 +88,8 @@ pub use payload::{
     NativePayloadPruningProgress,
 };
 pub use raw_index::{
-    NativeRawCopyKind, NativeRawCopyObservation, NativeRawCopyReceipt, NativeRawCopyWitness,
-    NativeRawSourceControl, NativeRawValueVersion, OriginalRevocationReceipt,
+    DenseProjectionReceipt, NativeRawCopyKind, NativeRawCopyObservation, NativeRawCopyReceipt,
+    NativeRawCopyWitness, NativeRawSourceControl, NativeRawValueVersion, OriginalRevocationReceipt,
     RawProjectionProgress, RawReclaimProgress,
 };
 pub use raw_index::{
@@ -725,7 +726,7 @@ impl NativeService {
         Ok((mapping.global_commit, mapping.state))
     }
 
-    fn begin_frame<T: WriteTransaction>(
+    fn begin_frame<T: ReadSnapshot>(
         &self,
         transaction: &T,
         workspace_id: &str,
@@ -3481,6 +3482,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != payload::REQUEST_TRANSFORM_FEATURE
                 && feature != raw_index::INDEX_FEATURE
                 && feature != raw_index::bm25::FEATURE
+                && feature != raw_index::dense::FEATURE
                 && feature != raw_index::GC_FEATURE
                 && feature != raw_index::COPY_FEATURE
                 && feature != raw_index::REMOVAL_FEATURE
@@ -3554,6 +3556,10 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || (manifest.features.contains(raw_index::bm25::FEATURE)
             && !manifest.features.contains(raw_index::INDEX_FEATURE))
+        || (manifest.features.contains(raw_index::dense::FEATURE)
+            && (!manifest.features.contains(raw_index::bm25::FEATURE)
+                || !manifest.features.contains(capture::RECOVERY_FEATURE)
+                || !manifest.features.contains(custody::CUSTODY_FEATURE)))
         || (manifest.features.contains(retention::PRUNING_FEATURE)
             && !manifest.features.contains(retention::RETENTION_FEATURE))
         || (manifest.features.contains(assertions::PRUNING_FEATURE)

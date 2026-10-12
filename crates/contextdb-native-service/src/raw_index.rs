@@ -2,6 +2,7 @@
 
 pub(crate) mod bm25;
 pub(crate) mod copies;
+pub(crate) mod dense;
 mod gc;
 pub(crate) mod inventory;
 #[cfg(test)]
@@ -15,6 +16,7 @@ pub use copies::{
     NativeRawKeyFamily, NativeRawKeyInventory, NativeRawObservationFrontier, NativeRawRemovalCopy,
     NativeRawRemovalCopyPage,
 };
+pub use dense::DenseProjectionReceipt;
 pub use gc::RawReclaimProgress;
 pub(super) use gc::retained_generations;
 pub use inventory::{
@@ -82,6 +84,9 @@ pub(super) struct Generation {
     /// Explicit scoring method; old generation bytes keep their legacy encoding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bm25: Option<bm25::Bm25Profile>,
+    /// Independently bounded source-span encoding of this same raw prefix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dense: Option<dense::DenseManifest>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -169,6 +174,14 @@ impl NativeService {
                     )
                     .map_err(storage_error)?
                     .is_some()
+                || (generation.dense.is_some()
+                    && self.has_dense_source_rows(
+                        snapshot,
+                        workspace,
+                        number,
+                        receipt.event_id,
+                        budget,
+                    )?)
             {
                 return Err(ServiceError::new(
                     ErrorCode::IndexTooStale,
@@ -265,6 +278,7 @@ impl NativeService {
                     .filter(|ledger| ledger.supports_removal())
                     .map(|_| world.watermarks.journal),
                 bm25: request_bm25.then(bm25::Bm25Profile::fixed),
+                dense: None,
             }
         } else {
             let number = state
@@ -284,6 +298,9 @@ impl NativeService {
             }
         }
         let profiled = generation.bm25.is_some();
+        if generation.dense.is_some() {
+            self.validate_dense_generation(&snapshot, &workspace, &generation, budget)?;
+        }
         if generation.authorization_epoch != auth
             || generation.analyzer != RAW_ANALYZER
             || generation.custody_version != super::custody::CUSTODY_VERSION

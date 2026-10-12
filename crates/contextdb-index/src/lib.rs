@@ -8,6 +8,8 @@
 
 mod ann_v2;
 #[cfg(feature = "ann-hnsw")]
+mod ann_v2_query;
+#[cfg(feature = "ann-hnsw")]
 mod ann_v2_runtime;
 #[cfg(feature = "ann-hnsw")]
 mod ann_v2_source;
@@ -18,6 +20,8 @@ mod raw;
 mod vector;
 
 pub use ann_v2::*;
+#[cfg(feature = "ann-hnsw")]
+pub use ann_v2_query::*;
 #[cfg(feature = "ann-hnsw")]
 pub use ann_v2_runtime::*;
 #[cfg(feature = "ann-hnsw")]

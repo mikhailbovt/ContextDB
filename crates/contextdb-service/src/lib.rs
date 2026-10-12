@@ -15,6 +15,7 @@ mod capture;
 mod context_pack;
 mod continuation;
 mod domain;
+mod embedding;
 mod error;
 mod high_level;
 mod lease;
@@ -36,6 +37,7 @@ pub use capability_manifest::*;
 pub use capture::*;
 pub use context_pack::*;
 pub use domain::*;
+pub use embedding::*;
 pub use error::{ErrorCode, ServiceError, ServiceResult};
 pub use high_level::{
     HighLevelControlRequest, HighLevelMutationResponse, HighLevelPolicyResult,

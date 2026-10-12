@@ -494,14 +494,24 @@ impl NativeService {
         mut budget: Option<&mut PayloadBudget>,
     ) -> ServiceResult<PayloadHeader> {
         payload_charge(&mut budget, 1, 0)?;
-        self.require_suppression_current(
-            snapshot,
-            &super::digest_bytes(context.request.workspace_id.as_bytes()),
-        )?;
+        let workspace = super::digest_bytes(context.request.workspace_id.as_bytes());
+        if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.require_suppression_current(reader, &workspace)
+            })?;
+        } else {
+            self.require_suppression_current(snapshot, &workspace)?;
+        }
         let header =
             self.payload_header_inner(snapshot, reference.block_id, budget.as_deref_mut())?;
         payload_charge(&mut budget, 1, 0)?;
-        self.require_payload_unpruned(snapshot, reference.block_id)?;
+        if let Some(shared) = budget {
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.require_payload_unpruned(reader, reference.block_id)
+            })?;
+        } else {
+            self.require_payload_unpruned(snapshot, reference.block_id)?;
+        }
         if !policy_allows(&context.request, &header.access) {
             return Err(permission_denied());
         }
@@ -528,10 +538,20 @@ impl NativeService {
         mut budget: Option<&mut PayloadBudget>,
     ) -> ServiceResult<PayloadHeader> {
         payload_charge(&mut budget, 1, 0)?;
-        let bytes = snapshot
-            .get(&self.keyspaces.continuous, &header_key(id))
-            .map_err(storage_error)?
-            .ok_or_else(not_found)?;
+        let bytes = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::read_value(
+                snapshot,
+                &self.keyspaces.continuous,
+                &header_key(id),
+                1024 * 1024,
+                shared,
+            )?
+        } else {
+            snapshot
+                .get(&self.keyspaces.continuous, &header_key(id))
+                .map_err(storage_error)?
+        }
+        .ok_or_else(not_found)?;
         if budget.is_some() && bytes.len() > 1024 * 1024 {
             return Err(integrity("payload header exceeds its metadata bound"));
         }
@@ -570,20 +590,36 @@ impl NativeService {
         mut budget: Option<&mut PayloadBudget>,
     ) -> ServiceResult<Vec<u8>> {
         payload_charge(&mut budget, 1, 0)?;
-        self.require_payload_unpruned(snapshot, header.reference.block_id)?;
+        if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.require_payload_unpruned(reader, header.reference.block_id)
+            })?;
+        } else {
+            self.require_payload_unpruned(snapshot, header.reference.block_id)?;
+        }
         let length = usize::try_from(header.reference.byte_length)
             .map_err(|_| integrity("payload length overflow"))?;
         payload_charge(&mut budget, 1, length as u64)?;
         let mut bytes = Vec::with_capacity(length);
         for index in 0..header.chunks {
             payload_charge(&mut budget, 1, CHUNK_BYTES.min(length - bytes.len()) as u64)?;
-            let chunk = snapshot
-                .get(
+            let chunk = if let Some(shared) = budget.as_deref_mut() {
+                crate::budgeted::read_value(
+                    snapshot,
                     &self.keyspaces.continuous,
                     &chunk_key(header.reference.block_id, index),
-                )
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("durable payload chunk is absent"))?;
+                    CHUNK_BYTES.min(length - bytes.len()),
+                    shared,
+                )?
+            } else {
+                snapshot
+                    .get(
+                        &self.keyspaces.continuous,
+                        &chunk_key(header.reference.block_id, index),
+                    )
+                    .map_err(storage_error)?
+            }
+            .ok_or_else(|| integrity("durable payload chunk is absent"))?;
             if chunk.len() != CHUNK_BYTES.min(length - bytes.len())
                 || raw_digest(&chunk)
                     != header.chunk_digests
@@ -619,7 +655,13 @@ impl NativeService {
         mut budget: Option<&mut PayloadBudget>,
     ) -> ServiceResult<Vec<u8>> {
         payload_charge(&mut budget, 1, 0)?;
-        self.require_payload_unpruned(snapshot, header.reference.block_id)?;
+        if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.require_payload_unpruned(reader, header.reference.block_id)
+            })?;
+        } else {
+            self.require_payload_unpruned(snapshot, header.reference.block_id)?;
+        }
         let length = usize::try_from(header.reference.byte_length)
             .map_err(|_| integrity("payload length overflow"))?;
         let range = source_range(start, end, length)?;
@@ -631,16 +673,25 @@ impl NativeService {
         for index in (range.start / CHUNK_BYTES)..range.end.div_ceil(CHUNK_BYTES) {
             let offset = index * CHUNK_BYTES;
             payload_charge(&mut budget, 1, CHUNK_BYTES.min(length - offset) as u64)?;
-            let chunk = snapshot
-                .get(
+            let index_u32 =
+                u32::try_from(index).map_err(|_| integrity("chunk ordinal overflow"))?;
+            let chunk = if let Some(shared) = budget.as_deref_mut() {
+                crate::budgeted::read_value(
+                    snapshot,
                     &self.keyspaces.continuous,
-                    &chunk_key(
-                        header.reference.block_id,
-                        u32::try_from(index).map_err(|_| integrity("chunk ordinal overflow"))?,
-                    ),
-                )
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("source chunk is absent"))?;
+                    &chunk_key(header.reference.block_id, index_u32),
+                    CHUNK_BYTES.min(length - offset),
+                    shared,
+                )?
+            } else {
+                snapshot
+                    .get(
+                        &self.keyspaces.continuous,
+                        &chunk_key(header.reference.block_id, index_u32),
+                    )
+                    .map_err(storage_error)?
+            }
+            .ok_or_else(|| integrity("source chunk is absent"))?;
             if chunk.len() != CHUNK_BYTES.min(length - offset)
                 || raw_digest(&chunk) != header.chunk_digests[index]
             {
@@ -1103,7 +1154,7 @@ fn payload_charge(
     }
     Ok(())
 }
-fn chunk_key(id: ContentBlockId, index: u32) -> Vec<u8> {
+pub(super) fn chunk_key(id: ContentBlockId, index: u32) -> Vec<u8> {
     let mut key = format!("payload/chunk/{id}/").into_bytes();
     key.extend_from_slice(&index.to_be_bytes());
     key

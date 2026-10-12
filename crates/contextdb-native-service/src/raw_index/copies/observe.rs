@@ -90,6 +90,74 @@ impl NativeService {
             let relative = std::str::from_utf8(&entry.key)
                 .ok()
                 .and_then(|key| key.strip_prefix(&prefix));
+            if relative.is_some_and(|key| key.starts_with("dense/")) {
+                let dense = generation
+                    .dense
+                    .as_ref()
+                    .ok_or_else(|| integrity("observed dense row lost its generation profile"))?;
+                dense.validate(generation.through)?;
+                self.require_dense_feature(snapshot, budget)?;
+                if entry.key == dense::receipt_key(&workspace, generation.number) {
+                    self.verify_dense_receipt_copy(snapshot, generation, &entry.value, budget)?;
+                    rows.push(self.observe_raw_row(
+                        snapshot,
+                        entry,
+                        NativeRawCopyKind::SharedMetadata,
+                        None,
+                        budget,
+                    )?);
+                    continue;
+                }
+                let (id, domain) = if relative.is_some_and(|key| key.starts_with("dense/document/"))
+                {
+                    let document: dense::DenseDocument =
+                        decode(&entry.value, "observed dense document")?;
+                    (document.source.event_id, document.policy_domain)
+                } else if relative.is_some_and(|key| key.starts_with("dense/vector/")) {
+                    let vector: dense::DenseVector = decode(&entry.value, "observed dense vector")?;
+                    (vector.source.event_id, vector.policy_domain)
+                } else {
+                    return Err(integrity("unknown row under dense profile prefix"));
+                };
+                let control = self.verified_capture_control(snapshot, id, budget)?;
+                if control.receipt.workspace_id.to_string() != workspace_id
+                    || control.receipt.workspace_commit > dense.through
+                {
+                    return Err(integrity(
+                        "observed dense owner crosses workspace or prefix",
+                    ));
+                }
+                let original = control.original.ok_or_else(|| {
+                    integrity("dense original was pruned before its derived copies")
+                })?;
+                self.verify_dense_copy(
+                    snapshot,
+                    generation,
+                    &entry.key,
+                    &entry.value,
+                    &original,
+                    control.receipt.workspace_commit,
+                    control.receipt.event_digest,
+                    &domain,
+                    budget,
+                )?;
+                sources.insert(
+                    id,
+                    NativeRawSourceControl {
+                        capture_commit: control.receipt.workspace_commit,
+                        event_digest: control.receipt.event_digest,
+                        control_digest: control.control_digest,
+                    },
+                );
+                rows.push(self.observe_raw_row(
+                    snapshot,
+                    entry,
+                    NativeRawCopyKind::Document,
+                    Some(id),
+                    budget,
+                )?);
+                continue;
+            }
             if relative.is_some_and(|key| key.starts_with("bm25/")) && generation.bm25.is_none() {
                 return Err(integrity("observed BM25 row lost its generation profile"));
             }
@@ -217,13 +285,19 @@ impl NativeService {
         budget: &mut QueryBudget,
     ) -> ServiceResult<NativeRawCopyObservation> {
         let version = if let Some(keys) = &self.engine.keys {
-            let ciphertext = snapshot
-                .inner
-                .get(&self.keyspaces.continuous, &entry.key)
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("observed raw ciphertext absent"))?;
+            let ciphertext = crate::budgeted::read_value(
+                &snapshot.inner,
+                &self.keyspaces.continuous,
+                &entry.key,
+                entry
+                    .value
+                    .len()
+                    .saturating_add(crate::encryption::VALUE_ENVELOPE_BYTES),
+                budget,
+            )?
+            .ok_or_else(|| integrity("observed raw ciphertext absent"))?;
             budget
-                .charge(1, ciphertext.len() as u64)
+                .charge(1, entry.value.len() as u64)
                 .map_err(budget_error)?;
             Some(crate::encryption::observe_value_version(
                 keys,

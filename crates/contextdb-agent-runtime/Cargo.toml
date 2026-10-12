@@ -19,6 +19,7 @@ contextdb-recall.workspace = true
 contextdb-service.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 contextdb-native-service.workspace = true

@@ -359,7 +359,9 @@ impl NativeService {
     ) -> ServiceResult<Option<crate::router_trace::controls::RouterTraceControls>> {
         budget.check().map_err(budget_error)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
-        self.require_custody_ready(snapshot, &workspace)?;
+        crate::budgeted::metadata(snapshot, budget, |reader| {
+            self.require_custody_ready(reader, &workspace)
+        })?;
         let record = self.custody_record_inner(snapshot, id, Some(budget))?;
         if expected.is_some_and(|inputs| *inputs != record.inputs) {
             return Err(integrity(
@@ -596,10 +598,20 @@ impl NativeService {
         if let Some(shared) = budget.as_deref_mut() {
             shared.check().map_err(budget_error)?;
         }
-        let bytes = snapshot
-            .get(&self.keyspaces.continuous, &record_key(id))
-            .map_err(storage_error)?
-            .ok_or_else(pending)?;
+        let bytes = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::read_value(
+                snapshot,
+                &self.keyspaces.continuous,
+                &record_key(id),
+                MAX_RECORD_BYTES,
+                shared,
+            )?
+        } else {
+            snapshot
+                .get(&self.keyspaces.continuous, &record_key(id))
+                .map_err(storage_error)?
+        }
+        .ok_or_else(pending)?;
         if bytes.len() > MAX_RECORD_BYTES {
             return Err(integrity("custody record exceeds its stored byte bound"));
         }
@@ -607,7 +619,7 @@ impl NativeService {
             shared.charge(0, bytes.len() as u64).map_err(budget_error)?;
         }
         let record: CustodyRecord = decode(&bytes, "custody source record")?;
-        let receipt = if let Some(shared) = budget {
+        let receipt = if let Some(shared) = budget.as_deref_mut() {
             self.capture_recovery_metadata(snapshot, id, shared)?.0
         } else {
             self.captured_receipt_metadata(snapshot, id)?
@@ -632,13 +644,21 @@ impl NativeService {
         }
         if let Some(controls) = &record.trace_controls {
             controls.validate()?;
-            let manifest: super::Manifest = decode(
-                &snapshot
+            let bytes = if let Some(shared) = budget {
+                crate::budgeted::read_value(
+                    snapshot,
+                    &self.keyspaces.meta,
+                    super::META_MANIFEST_KEY,
+                    crate::MAX_JSON_BYTES,
+                    shared,
+                )?
+            } else {
+                snapshot
                     .get(&self.keyspaces.meta, super::META_MANIFEST_KEY)
                     .map_err(storage_error)?
-                    .ok_or_else(|| integrity("router custody native manifest is absent"))?,
-                "router custody native manifest",
-            )?;
+            }
+            .ok_or_else(|| integrity("router custody native manifest is absent"))?;
+            let manifest: super::Manifest = decode(&bytes, "router custody native manifest")?;
             if !manifest
                 .features
                 .contains(crate::router_trace::TRACE_FEATURE)

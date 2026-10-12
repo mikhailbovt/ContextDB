@@ -850,6 +850,38 @@ mandatory-state priority. This opt-in Rust path is BM25 retrieval infrastructure
 embedding/causal fusion, recall quality and default client integration remain
 separate gates. The CLI retains its previous profile.
 
+`project_original_spans` optionally maintains exact source-span embeddings on an
+accepted BM25 generation, with its own consumed prefix and explicit coverage.
+The native owner publishes whole source plans, f32 bit patterns and authenticated
+receipts atomically. Source documents/vectors are source-owned copies; the batch
+receipt is shared metadata. Retained accepted declarations protect the encoder
+profile after generation GC. Deep verification reconstructs original spans and
+checks accepted vector commitments.
+
+`OwnedLocalEmbedding` verifies the provisioned backend artifact manifest and
+pinned [Qwen3-Embedding-0.6B Q8_0 weights](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/blob/370f27d7550e0def9b39c1f16d3fbaa13aa67728/README.md),
+then owns a dedicated local llama.cpp process. Its fixed profile uses last
+pooling, L2 normalization, 1024 dimensions and exact tokenizer token-array input;
+inference usage must equal the admitted token count. Source text is preserved,
+while queries receive the fixed retrieval instruction. Oversized input is
+refused. Each native span callback checks fresh source/custody permissions and
+the frozen encoder profile; publication repeats the current owner fence.
+
+The initial projection supports independent UTF-8 originals up to 64 KiB and
+64 spans. Larger, nontext, derived request and operational control originals
+have explicit omissions. `caught_up` names the frozen raw prefix, rather than
+semantic retrieval coverage. The syntax-preserving `dense_step_query` helper
+samples up to 4 KiB of current user/tool/working/assistant source excerpts and
+retains observational span provenance.
+
+`search_ann_partition_v2` provides a separate point-only best-first kernel with
+node/vector/discovery caps and typed owner failures. Its facade must establish
+the accepted graph seal, exact space, current cohort and member admission before
+reads, then recheck the owner epoch. Native graph publication and that facade,
+automatic query embedding, BM25/dense/causal fusion and protected candidate
+frontier are still required before hybrid activation. Real-encoder source recall,
+Kev utility and paired main-reader benefit remain separate acceptance gates.
+
 Scope eligibility precedes domain labels and content search. Each domain includes
 the original's policy and every source dependency's policy. Ranking uses match
 spread, source length and stable ID, with no cross-domain document-frequency

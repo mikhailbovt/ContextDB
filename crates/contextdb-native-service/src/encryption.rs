@@ -46,6 +46,7 @@ pub(super) const MAX_PENDING_KEYS: usize = 32_768;
 const VALUE_MAGIC: &[u8] = b"CTXENC1\0";
 const NONCE_BYTES: usize = 24;
 const TAG_BYTES: usize = 16;
+pub(super) const VALUE_ENVELOPE_BYTES: usize = VALUE_MAGIC.len() + 16 + NONCE_BYTES + TAG_BYTES;
 pub(super) const ENCRYPTION_FEATURE: &str = "continuous-encrypted-custody-v1";
 
 impl crate::NativeService {

@@ -42,9 +42,13 @@ impl NativeService {
         let Some(through) = through else {
             return Ok(false);
         };
-        let Some(bytes) = snapshot
-            .get(&self.keyspaces.continuous, &prepared_key(id))
-            .map_err(storage_error)?
+        let Some(bytes) = budgeted::read_value(
+            snapshot,
+            &self.keyspaces.continuous,
+            &prepared_key(id),
+            MAX_JSON_BYTES,
+            budget,
+        )?
         else {
             return Ok(false);
         };
@@ -66,15 +70,21 @@ impl NativeService {
             ));
         }
         self.verify_retained_capture_control(snapshot, &source, budget)?;
-        let (global, _) = self.select_snapshot(
+        let (global, _) = budgeted::metadata(snapshot, budget, |reader| {
+            self.select_snapshot(
+                reader,
+                &source.receipt.workspace_id.to_string(),
+                Some(prepared.workspace_commit),
+            )
+        })?;
+        let bytes = budgeted::read_value(
             snapshot,
-            &source.receipt.workspace_id.to_string(),
-            Some(prepared.workspace_commit),
-        )?;
-        let bytes = snapshot
-            .get(&self.keyspaces.events, &global.to_be_bytes())
-            .map_err(storage_error)?
-            .ok_or_else(|| integrity("removal preparation journal is missing"))?;
+            &self.keyspaces.events,
+            &global.to_be_bytes(),
+            MAX_JSON_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("removal preparation journal is missing"))?;
         budget
             .charge(1, bytes.len() as u64)
             .map_err(raw_index::budget_error)?;

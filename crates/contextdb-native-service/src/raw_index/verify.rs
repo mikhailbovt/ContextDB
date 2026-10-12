@@ -186,6 +186,7 @@ impl NativeService {
     ) -> ServiceResult<()> {
         self.verify_raw_copy_publications(snapshot)?;
         let bm25_generations = self.accepted_raw_bm25_generations(snapshot)?;
+        let dense_generations = self.accepted_dense_generations(snapshot)?;
         let actual = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"raw/")
             .map_err(storage_error)?;
@@ -197,7 +198,10 @@ impl NativeService {
             {
                 let event: super::super::StoredEvent =
                     decode(&entry.value, "native index publication")?;
-                if event.operation == "raw_projection" || event.operation == bm25::OPERATION {
+                if event.operation == "raw_projection"
+                    || event.operation == bm25::OPERATION
+                    || event.operation == dense::OPERATION
+                {
                     return Err(integrity("published raw index state is absent"));
                 }
             }
@@ -280,6 +284,11 @@ impl NativeService {
                     &generation,
                     &mut super::super::retention::audit_budget(),
                 )?;
+                self.validate_dense_declaration(
+                    workspace,
+                    &generation,
+                    dense_generations.get(&(workspace.to_owned(), number)),
+                )?;
                 expected.insert(generation_key(workspace, number), encode(&generation)?);
                 if state
                     .reclaiming
@@ -306,12 +315,25 @@ impl NativeService {
                                 "reclaiming BM25 rows lost their generation profile",
                             ));
                         }
+                        if row.key[generation_prefix(workspace, number).len()..]
+                            .starts_with(b"dense/")
+                            && generation.dense.is_none()
+                        {
+                            return Err(integrity(
+                                "reclaiming dense rows lost their generation profile",
+                            ));
+                        }
                         expected.insert(row.key, row.value);
                     }
                     continue;
                 }
                 let mut domains = BTreeMap::<String, PolicyDomain>::new();
                 let mut bm25_documents = Vec::new();
+                let mut dense_reconstructed = generation
+                    .dense
+                    .as_ref()
+                    .map(|profile| dense::DenseManifest::empty(&profile.profile))
+                    .transpose()?;
                 let mut count = 0;
                 let outbox = format!("outbox/{workspace}/");
                 for entry in snapshot
@@ -394,6 +416,27 @@ impl NativeService {
                             first_commit: document.commit,
                         });
                     expected.extend(document_rows(workspace, number, &document)?);
+                    if generation
+                        .dense
+                        .as_ref()
+                        .is_some_and(|dense| work.workspace_commit <= dense.through)
+                    {
+                        let (source, rows) = self.reconstruct_dense_source(
+                            snapshot,
+                            workspace,
+                            &generation,
+                            &original.event,
+                            work.workspace_commit,
+                            work.event_digest,
+                            &document.policy_domain,
+                            &mut budget,
+                        )?;
+                        dense_reconstructed
+                            .as_mut()
+                            .ok_or_else(|| integrity("dense reconstruction profile absent"))?
+                            .accept(&source)?;
+                        expected.extend(rows);
+                    }
                     count += 1;
                 }
                 if count != generation.projected_sources {
@@ -401,6 +444,22 @@ impl NativeService {
                 }
                 if generation.bm25.is_some() {
                     expected.extend(bm25::reconstruct_rows(workspace, number, &bm25_documents)?);
+                }
+                if let Some(mut reconstructed) = dense_reconstructed {
+                    let dense = generation
+                        .dense
+                        .as_ref()
+                        .ok_or_else(|| integrity("dense generation profile absent"))?;
+                    reconstructed.through = dense.through;
+                    if reconstructed != *dense {
+                        return Err(integrity(
+                            "dense owner commitment differs from exact source rows",
+                        ));
+                    }
+                    let receipt = dense_generations
+                        .get(&(workspace.to_owned(), number))
+                        .ok_or_else(|| integrity("dense accepted receipt absent"))?;
+                    expected.insert(dense::receipt_key(workspace, number), encode(receipt)?);
                 }
                 for (id, labels) in domains {
                     for key in domain_eligibility_keys(workspace, number, &id, &labels)? {

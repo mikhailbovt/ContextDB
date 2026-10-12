@@ -244,6 +244,7 @@ impl IndexedRecallProvider for NativeIndexedRecallProvider<'_> {
                 projected_sources: 0,
                 removal_through: None,
                 bm25: None,
+                dense: None,
             }
         };
         if generation.authorization_epoch != auth
