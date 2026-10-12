@@ -45,7 +45,10 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         self.stopped.store(true, Ordering::Release);
         if let Some(server) = self.server.take() {
-            server.join().expect("bounded fixture server");
+            let result = server.join();
+            if !thread::panicking() {
+                result.expect("bounded fixture server");
+            }
         }
     }
 }
@@ -103,6 +106,11 @@ fn fixture(token_bodies: Vec<Vec<u8>>, cancel_after_token: Option<QueryCancellat
                 }
                 Err(error) => panic!("fixture accept: {error}"),
             };
+            // Accepted sockets may inherit the nonblocking listener mode.
+            // The request reader uses the declared blocking IO timeout.
+            stream
+                .set_nonblocking(false)
+                .expect("blocking fixture connection");
             let (path, body) = read_request(&mut stream);
             thread_calls
                 .lock()
