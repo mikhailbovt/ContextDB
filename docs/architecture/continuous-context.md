@@ -847,8 +847,8 @@ archived and retain legacy routes, but are excluded from the BM25 text populatio
 Actual scores supply a fixed uncalibrated R0 prior: 1,000,000 plus score times
 1,000,000 rounded and capped at 100,000,000. They grant neither confidence nor
 mandatory-state priority. This opt-in Rust path is BM25 retrieval infrastructure;
-embedding/causal fusion, recall quality and default client integration remain
-separate gates. The CLI retains its previous profile.
+recall quality and default client integration remain separate gates. The CLI
+retains its previous profile.
 
 `project_original_spans` optionally maintains exact source-span embeddings on an
 accepted BM25 generation, with its own consumed prefix and explicit coverage.
@@ -908,10 +908,22 @@ explicit. Queries perform no graph build, neural forward or original-body census
 Preparation unions matching ranges across routes before materializing one
 immutable source. Conflicting versions or equal-range digests refuse; the bounded
 rendering frontier cannot silently discard additional ranges. Protected routing
-retains inspected raw origins alongside generic discovery. Automatic owned query
-admission, BM25/dense/causal fusion and the full hybrid frontier remain activation
-gates. Real-encoder source recall, Kev utility and paired main-reader benefit
-remain separate acceptance gates.
+retains inspected raw origins alongside generic discovery.
+
+`RuntimeSettings::automatic_hybrid` optionally supplies a trusted query encoder
+before every model step, including after tools. The owner authenticates the
+current planned call, postrotation messages and exact sampled original bytes.
+Ordered token preflights admit one final forward; current checkpoint, workspace
+head, permissions and encoder profile are rechecked around callbacks. BM25,
+immutable ANN plus tail, and bounded one-hop causal search share the parent
+budget. Fixed source RRF combines ranks, preserves complementary spans and
+retains the complete inspected frontier before the 20..100-source selection.
+Its prior is not calibrated utility. The protected replay-v2 observation binds
+all preflights, vector receipts, route ranks and graph/tail commitments;
+`continuous-owned-hybrid-query-v1` also survives in capture recovery metadata.
+This initial profile excludes legacy extra routes and historical preparation.
+None remains the default. Whole-archive scaling, retrieval quality, useful Kev
+and paired main-reader benefit remain separate acceptance gates.
 
 Scope eligibility precedes domain labels and content search. Each domain includes
 the original's policy and every source dependency's policy. Ranking uses match

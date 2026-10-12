@@ -10,6 +10,8 @@ use contextdb_core::{
 
 use super::*;
 
+mod metadata;
+
 pub(in super::super) const RECOVERY_FEATURE: &str = "continuous-capture-recovery-v1";
 const ACTIVATED: &[u8] = b"recovery/activated";
 const MAX_RECOVERY_BYTES: usize = 1024 * 1024;
@@ -70,6 +72,10 @@ pub(in super::super) struct CaptureRecovery {
     /// Supported request-source paging semantics survive explicit body pruning.
     #[serde(default, skip_serializing_if = "is_false")]
     original_page_recall: bool,
+    /// Required protected query encoding survives body pruning as accepted
+    /// control metadata; it is not an execution or source-access grant.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(in super::super) owned_hybrid: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -118,6 +124,17 @@ impl CaptureRecovery {
             if digest(&encode(controls)?) != header.origin_closure_digest {
                 return Err(integrity("capture recovery router trace origins changed"));
             }
+        }
+        if self.owned_hybrid
+            && (!self.router_trace.as_ref().is_some_and(|header| {
+                header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+            }) || !manifest
+                .features
+                .contains(crate::router_trace::hybrid::HYBRID_FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery owned hybrid feature is absent or incompatible",
+            ));
         }
         if (matches!(self.provenance, Some(EventProvenance::ModelOutput { .. }))
             && !manifest
@@ -248,6 +265,7 @@ impl CaptureRecovery {
             checkpoint,
             router_trace,
             original_page_recall: matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.original_page_recall),
+            owned_hybrid: crate::router_trace::hybrid::event_has_hybrid(event)?,
         };
         if encode(&metadata)?.len() > MAX_RECOVERY_BYTES {
             return Err(exhausted("capture recovery metadata exceeds 1 MiB"));

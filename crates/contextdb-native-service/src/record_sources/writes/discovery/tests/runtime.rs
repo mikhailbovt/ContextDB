@@ -59,6 +59,7 @@ fn settings() -> RuntimeSettings {
         cache_residency: None,
         automatic_recall_filter: RawFilter::default(),
         automatic_bm25: None,
+        automatic_hybrid: None,
         router_trace_profile: contextdb_service::RouterTraceProfile::Off,
     }
 }

@@ -4,6 +4,8 @@
 mod tests;
 
 mod bm25;
+mod causal;
+pub(crate) use causal::CausalCompletion;
 
 use std::{
     collections::{BTreeMap, BTreeSet},

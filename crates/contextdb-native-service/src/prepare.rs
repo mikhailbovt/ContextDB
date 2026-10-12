@@ -28,6 +28,8 @@ use super::{
 pub(super) const PREPARE_DOMAIN: &[u8] = b"contextdb/prepared-context/v1";
 
 mod frontier;
+mod fusion;
+mod hybrid;
 mod natural;
 mod raw;
 pub(super) mod scorer;
@@ -53,6 +55,7 @@ struct NativeAssemblyProvider<'a> {
     trace_controls: Option<RouterTraceControls>,
     external_processing: bool,
     budgeted_raw: bool,
+    hybrid_guard: Option<&'a hybrid::OwnedHybridGuard>,
 }
 
 impl ContextProvider for NativeAssemblyProvider<'_> {
@@ -99,6 +102,11 @@ impl AssemblyProvider for NativeAssemblyProvider<'_> {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(context_error)?;
+        if let Some(guard) = self.hybrid_guard {
+            self.service
+                .check_owned_hybrid_guard(guard, budget)
+                .map_err(context_error)?;
+        }
         self.service
             .authorized_capture_policy_with_budget(&snapshot, self.context, span.event_id, budget)
             .map_err(context_error)?;
@@ -170,9 +178,15 @@ impl AssemblyProvider for NativeAssemblyProvider<'_> {
                 "outgoing read-set changed its principal/scope binding".into(),
             ));
         }
-        self.service
-            .check_prepare_fence(self.context, &self.fence, budget)
-            .map_err(context_error)?;
+        if let Some(guard) = self.hybrid_guard {
+            self.service
+                .check_owned_hybrid_guard(guard, budget)
+                .map_err(context_error)?;
+        } else {
+            self.service
+                .check_prepare_fence(self.context, &self.fence, budget)
+                .map_err(context_error)?;
+        }
         if let Some(controls) = &self.trace_controls {
             let snapshot = self
                 .service
@@ -205,6 +219,67 @@ impl PrepareContextPort for NativeService {
         encoder: &dyn OutgoingEncoder,
         budget: &mut QueryBudget,
     ) -> ServiceResult<PreparedContext> {
+        self.prepare_context_inner(request, tokenizer, encoder, None, budget)
+    }
+
+    fn prepare_context_with_query_encoder(
+        &self,
+        request: PrepareContextRequest,
+        intent: contextdb_service::OwnedHybridIntent,
+        tokenizer: &dyn TokenCounter,
+        encoder: &dyn OutgoingEncoder,
+        query_encoder: &dyn contextdb_service::TextEmbeddingAdapter,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<PreparedContext> {
+        self.prepare_context_inner(
+            request,
+            tokenizer,
+            encoder,
+            Some((intent, query_encoder)),
+            budget,
+        )
+    }
+}
+
+impl NativeService {
+    fn prepare_context_inner(
+        &self,
+        request: PrepareContextRequest,
+        tokenizer: &dyn TokenCounter,
+        encoder: &dyn OutgoingEncoder,
+        hybrid: Option<(
+            contextdb_service::OwnedHybridIntent,
+            &dyn contextdb_service::TextEmbeddingAdapter,
+        )>,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<PreparedContext> {
+        let hybrid_context_cost = hybrid
+            .as_ref()
+            .map(|_| crate::budgeted::auth::ContextCost::for_context(&request.context, budget))
+            .transpose()?;
+        let mut admit_capability = |capability| {
+            if let Some(cost) = hybrid_context_cost {
+                cost.require_capability(&request.context, capability, budget)
+            } else {
+                require_capability(&request.context, capability)
+            }
+        };
+        if let Some((intent, _)) = &hybrid {
+            intent.validate()?;
+            admit_capability(Capability::ModelProcessing)?;
+            if request.router_trace_profile != RouterTraceProfile::RequiredReplayV2
+                || request.known_at.is_some()
+                || request.valid_at.is_some()
+                || request.after_receipt.is_none()
+                || request.bm25_query.is_some()
+                || !request.raw_queries.is_empty()
+                || request.memory_query.is_some()
+            {
+                return Err(invalid(
+                    "owned hybrid query requires a current replay-v2 checkpoint and its three bounded routes only",
+                ));
+            }
+        }
         let trace_profile = request.router_trace_profile;
         let traced = !trace_profile.is_off();
         if let Some(scorer) = &self.preparation_scorer {
@@ -214,7 +289,7 @@ impl PrepareContextPort for NativeService {
                     "learned preparation requires a protected trace profile",
                 ));
             }
-            require_capability(&request.context, Capability::ModelProcessing)?;
+            admit_capability(Capability::ModelProcessing)?;
         }
         if request.memory_query.is_some() && !traced {
             return Err(invalid(
@@ -228,10 +303,10 @@ impl PrepareContextPort for NativeService {
             Capability::ReadEvidence,
             Capability::RawEvidence,
         ] {
-            require_capability(&request.context, capability)?;
+            admit_capability(capability)?;
         }
         if request.model_profile.external_processing {
-            require_capability(&request.context, Capability::ModelProcessing)?;
+            admit_capability(Capability::ModelProcessing)?;
         }
         if request.raw_queries.len() > 8
             || request.required_facets.len() > 32
@@ -261,7 +336,9 @@ impl PrepareContextPort for NativeService {
         {
             return Err(invalid("prepare purpose differs from authenticated use"));
         }
-        if let Some(receipt) = &request.after_receipt {
+        if hybrid.is_none()
+            && let Some(receipt) = &request.after_receipt
+        {
             self.resolve_capture_receipt(&request.context, receipt)?;
         }
         budget.check().map_err(budget_error)?;
@@ -269,11 +346,21 @@ impl PrepareContextPort for NativeService {
             .engine
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
-        let (_, world) = self.select_snapshot(
-            &snapshot,
-            &request.context.request.workspace_id,
-            request.known_at,
-        )?;
+        let (_, world) = if hybrid.is_some() {
+            crate::budgeted::metadata(&snapshot, budget, |reader| {
+                self.select_snapshot(
+                    reader,
+                    &request.context.request.workspace_id,
+                    request.known_at,
+                )
+            })?
+        } else {
+            self.select_snapshot(
+                &snapshot,
+                &request.context.request.workspace_id,
+                request.known_at,
+            )?
+        };
         let known = world.watermarks.journal;
         if request
             .after_receipt
@@ -299,10 +386,20 @@ impl PrepareContextPort for NativeService {
         };
         let generic_query = request.memory_query.clone();
         let mut fence = PrepareFence {
-            principal: request.context.authorization_binding_digest()?,
+            principal: if let Some(cost) = hybrid_context_cost {
+                cost.binding_digest(&request.context, budget)?
+            } else {
+                request.context.authorization_binding_digest()?
+            },
             known_at: known,
             scopes: BTreeMap::new(),
-            authorization_epoch: self.raw_authorization_epoch(&snapshot, &workspace)?,
+            authorization_epoch: if hybrid.is_some() {
+                crate::budgeted::metadata(&snapshot, budget, |reader| {
+                    self.raw_authorization_epoch(reader, &workspace)
+                })?
+            } else {
+                self.raw_authorization_epoch(&snapshot, &workspace)?
+            },
             valid_until: TimestampMicros(
                 now.0
                     .checked_add(30_000_000)
@@ -339,7 +436,13 @@ impl PrepareContextPort for NativeService {
         }
         let mut pending_interpretation = false;
         for scope in scopes {
-            let epoch = self.scope_epoch(&snapshot, &workspace, scope)?;
+            let epoch = if hybrid.is_some() {
+                crate::budgeted::metadata(&snapshot, budget, |reader| {
+                    self.scope_epoch(reader, &workspace, scope)
+                })?
+            } else {
+                self.scope_epoch(&snapshot, &workspace, scope)?
+            };
             fence.scopes.insert(scope, epoch);
             let (gaps, _) = self.assembly_scope_coverage(
                 &snapshot,
@@ -438,6 +541,13 @@ impl PrepareContextPort for NativeService {
                 )?;
             }
         }
+        let mut hybrid_query = hybrid
+            .map(|(intent, encoder)| {
+                self.encode_owned_hybrid_query(&request, &fence, intent, encoder, budget)
+            })
+            .transpose()?;
+        let mut hybrid_observation = None;
+        let mut hybrid_incomplete = false;
         let mut discovery = Vec::new();
         let mut bm25_discovery = None;
         let mut bm25_priors = BTreeMap::new();
@@ -445,6 +555,18 @@ impl PrepareContextPort for NativeService {
         {
             let provider = self.indexed_recall_provider(&request.context);
             let mut batches = Vec::new();
+            if let Some(query) = &mut hybrid_query {
+                let discovered = self.discover_owned_hybrid_query(&request, query, budget)?;
+                for source in discovered.frontier {
+                    budget.charge(1, 1024).map_err(budget_error)?;
+                    retrieval_origins.originals.insert(source);
+                }
+                bm25_priors.extend(discovered.priors);
+                bm25_discovery = discovered.bm25;
+                batches.push(discovered.hits);
+                hybrid_incomplete = discovered.incomplete;
+                hybrid_observation = Some(discovered.observation);
+            }
             if let Some(query) = &request.bm25_query {
                 let view = provider.open_bm25_view(Some(known), budget)?;
                 let page = provider.bm25_candidates(&view, query, budget)?;
@@ -503,7 +625,7 @@ impl PrepareContextPort for NativeService {
                     &request.context,
                     &hit,
                     request.model_profile.external_processing,
-                    request.bm25_query.is_some(),
+                    request.bm25_query.is_some() || hybrid_query.is_some(),
                     budget,
                 )? {
                     Ok(spans) => spans,
@@ -735,7 +857,11 @@ impl PrepareContextPort for NativeService {
         } else {
             None
         };
-        self.check_prepare_fence(&request.context, &fence, budget)?;
+        if let Some(query) = &hybrid_query {
+            self.check_owned_hybrid_guard(&query.guard, budget)?;
+        } else {
+            self.check_prepare_fence(&request.context, &fence, budget)?;
+        }
         let token = self.seal_private_cursor(PREPARE_DOMAIN, &fence)?;
         let binding = AssemblyBinding {
             snapshot: token.clone(),
@@ -771,7 +897,8 @@ impl PrepareContextPort for NativeService {
             fence,
             trace_controls,
             external_processing: request.model_profile.external_processing,
-            budgeted_raw: request.bm25_query.is_some(),
+            budgeted_raw: request.bm25_query.is_some() || hybrid_query.is_some(),
+            hybrid_guard: hybrid_query.as_ref().map(|query| &query.guard),
         };
         let principal = RecallPrincipal {
             subject: request.context.request.subject_id.clone(),
@@ -820,6 +947,23 @@ impl PrepareContextPort for NativeService {
             base: request.base,
             budget: request.outgoing_budget,
         };
+        if hybrid_incomplete {
+            let text = "[ContextDB memory-search unknown] Hybrid discovery sampled a bounded part of the archive or encountered incomplete projection/source coverage. Missing context does not establish that the archive contains no relevant information.";
+            budget
+                .charge(1, text.len() as u64 + 1024)
+                .map_err(budget_error)?;
+            compile_request.base.control.push(OutgoingMessage {
+                id: BlockId::new("contextdb.hybrid-discovery-status.v1").map_err(service_error)?,
+                zone: OutgoingZone::Control,
+                role: OutgoingRole::System,
+                text: text.into(),
+                originals: vec![],
+                tool_calls: vec![],
+                tool_result: None,
+            });
+            router::canonical_bytes(&compile_request.base, budget).map_err(service_error)?;
+            trace_base = Some(compile_request.base.clone());
+        }
         if bm25_discovery.as_ref().is_some_and(|page| {
             page.profile_status != contextdb_service::RawBm25ProfileStatus::Supported
                 || matches!(
@@ -1007,7 +1151,7 @@ impl PrepareContextPort for NativeService {
                 .collect();
             evidence_origins.retain(|id, _| handles.contains(id));
             let base = trace_base.ok_or_else(|| invalid("prepared trace base absent"))?;
-            let envelope = match trace_profile {
+            let mut envelope = match trace_profile {
                 RouterTraceProfile::Required => RouterEnvelope::new(
                     routed.request,
                     routed.plan,
@@ -1060,6 +1204,11 @@ impl PrepareContextPort for NativeService {
                     unreachable!("traced preparation has an explicit profile")
                 }
             }?;
+            if let Some(mut observation) = hybrid_observation.take() {
+                observation.base_digest =
+                    router::canonical_digest(&envelope.base, budget).map_err(service_error)?;
+                envelope.attach_hybrid_query(observation, budget)?;
+            }
             let trace = self.prepare_router_envelope(&envelope, &routed.assembly, budget)?;
             (routed.assembly, Some(trace))
         } else {
@@ -1132,6 +1281,9 @@ impl PrepareContextPort for NativeService {
         } else {
             None
         };
+        if let Some(query) = &hybrid_query {
+            self.check_owned_hybrid_guard(&query.guard, budget)?;
+        }
         let admission_token = self.seal_preparation(
             &compiled.manifest,
             &provider.fence,
@@ -1217,11 +1369,29 @@ impl NativeService {
         fence: &PrepareFence,
         _budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
+        self.validate_prepare_fence_in(snapshot, context, fence)
+    }
+
+    fn validate_prepare_fence_in<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        fence: &PrepareFence,
+    ) -> ServiceResult<()> {
         if fence.principal != context.authorization_binding_digest()?
             || wall_time()? >= fence.valid_until
         {
             return Err(stale("prepared principal or temporal validity changed"));
         }
+        self.validate_prepare_epochs_in(snapshot, context, fence)
+    }
+
+    fn validate_prepare_epochs_in<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        fence: &PrepareFence,
+    ) -> ServiceResult<()> {
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());
         if fence.authorization_epoch != self.raw_authorization_epoch(snapshot, &workspace)? {
             return Err(stale("source authorization changed during preparation"));

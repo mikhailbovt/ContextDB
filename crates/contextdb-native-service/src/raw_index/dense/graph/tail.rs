@@ -12,6 +12,55 @@ struct Witness {
 }
 
 impl NativeService {
+    /// Admit the existing immutable base and its exact encoder profile before
+    /// query text is supplied to any trusted processing callback.
+    pub(crate) fn admit_owned_query_embedding_profile(
+        &self,
+        context: &AuthenticatedRequestContext,
+        profile: &TextEmbeddingProfile,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<ContentDigest> {
+        crate::budgeted::auth::require_capability(context, Capability::ModelProcessing, budget)?;
+        let workspace = digest_bytes(context.request.workspace_id.as_bytes());
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
+        crate::budgeted::metadata(&snapshot, budget, |r| {
+            self.require_custody_ready(r, &workspace)
+        })?;
+        let state: IndexState = self
+            .graph_read(
+                &snapshot,
+                &self.keyspaces.continuous,
+                &state_key(&workspace),
+                budget,
+            )?
+            .ok_or_else(stale_index)?;
+        let number = state.active.ok_or_else(stale_index)?;
+        let generation: Generation = self
+            .graph_read(
+                &snapshot,
+                &self.keyspaces.continuous,
+                &generation_key(&workspace, number),
+                budget,
+            )?
+            .ok_or_else(stale_index)?;
+        let receipt = self.accepted_graph_receipt(&snapshot, &workspace, &generation, budget)?;
+        self.admit_tail_generation(&generation, &receipt.manifest, budget)?;
+        self.tail_dense_receipt(&snapshot, &workspace, &generation, budget)?;
+        self.graph_tail_fence(context, &workspace, &generation, &receipt, budget)?;
+        let dense = generation.dense.as_ref().ok_or_else(stale_index)?;
+        profile.validate()?;
+        budget.charge(1, 16384).map_err(budget_error)?;
+        if profile != &dense.profile || profile.digest()? != dense.profile_digest {
+            return Err(crate::invalid(
+                "owned query encoder differs from the accepted source space",
+            ));
+        }
+        Ok(receipt.manifest.content_digest)
+    }
+
     /// Query the immutable owner ANN base plus a proved finite extension of its
     /// dense prefix. Work limits return only base observations; dense lag and
     /// projected-source omissions remain explicit, never invented vectors.
@@ -23,13 +72,14 @@ impl NativeService {
         limits: DenseGraphTailQueryLimits,
         budget: &mut QueryBudget,
     ) -> ServiceResult<DenseGraphTailQueryResult> {
+        let context_cost = crate::budgeted::auth::ContextCost::for_context(context, budget)?;
         for c in [
             Capability::Recall,
             Capability::ReadEvidence,
             Capability::RawEvidence,
             Capability::ModelProcessing,
         ] {
-            require_capability(context, c)?;
+            context_cost.require_capability(context, c, budget)?;
         }
         query::validate_limits(limits.graph)?;
         if !(1..=MAX_TAIL_WORK).contains(&limits.max_tail_work)
@@ -486,13 +536,14 @@ impl NativeService {
         }
         self.admit_tail_generation(generation, &receipt.manifest, budget)?;
         self.tail_dense_receipt(&current, workspace, generation, budget)?;
+        let context_cost = crate::budgeted::auth::ContextCost::for_context(context, budget)?;
         for c in [
             Capability::Recall,
             Capability::ReadEvidence,
             Capability::RawEvidence,
             Capability::ModelProcessing,
         ] {
-            require_capability(context, c)?;
+            context_cost.require_capability(context, c, budget)?;
         }
         self.tail_raw_lag(&current, workspace, generation.through, budget)
     }

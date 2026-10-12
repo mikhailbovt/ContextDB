@@ -584,6 +584,12 @@ impl NativeService {
                     super::router_trace::TRACE_REPLAY_FEATURE,
                 )?;
             }
+            if super::router_trace::hybrid::event_has_hybrid(event)? {
+                self.enable_capture_extension(
+                    &mut transaction,
+                    super::router_trace::hybrid::HYBRID_FEATURE,
+                )?;
+            }
         }
         if matches!(event.provenance, Some(EventProvenance::ModelOutput { .. })) {
             self.enable_capture_extension(
@@ -1093,6 +1099,9 @@ impl NativeService {
                 || manifest
                     .features
                     .contains(super::router_trace::TRACE_REPLAY_FEATURE)
+                || manifest
+                    .features
+                    .contains(super::router_trace::hybrid::HYBRID_FEATURE)
             {
                 return Err(integrity(
                     "router trace format lacks an accepted protected capture",
@@ -1239,6 +1248,15 @@ impl NativeService {
         }
         // Deep verification reconstructs every derived capture row from accepted
         // originals. It is deliberately separate from the bounded append/read path.
+        if manifest
+            .features
+            .contains(super::router_trace::hybrid::HYBRID_FEATURE)
+            && !accepted.iter().any(|(_, recovery)| recovery.owned_hybrid)
+        {
+            return Err(integrity(
+                "owned hybrid format lacks an accepted protected query capture",
+            ));
+        }
         accepted.sort_by_key(|(record, _)| record.receipt.workspace_commit);
         let mut expected = BTreeMap::new();
         let mut producers = BTreeMap::<String, ProducerCoverage>::new();

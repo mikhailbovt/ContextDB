@@ -21,6 +21,7 @@ mod high_level;
 mod lease;
 mod owned;
 mod prepare;
+mod query_cues;
 mod raw;
 mod reference;
 mod router_trace;
@@ -47,6 +48,7 @@ pub use high_level::{
 pub use lease::*;
 pub use owned::*;
 pub use prepare::*;
+pub use query_cues::*;
 pub use raw::*;
 pub use reference::{HostArchiveAuthority, ReferenceService};
 pub use router_trace::*;

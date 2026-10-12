@@ -63,13 +63,14 @@ impl NativeService {
         {
             return Err(stale_index());
         }
+        let context_cost = crate::budgeted::auth::ContextCost::for_context(context, budget)?;
         for c in [
             Capability::Recall,
             Capability::ReadEvidence,
             Capability::RawEvidence,
             Capability::ModelProcessing,
         ] {
-            require_capability(context, c)?;
+            context_cost.require_capability(context, c, budget)?;
         }
         Ok(())
     }
@@ -84,13 +85,14 @@ impl NativeService {
         limits: DenseGraphQueryLimits,
         budget: &mut QueryBudget,
     ) -> ServiceResult<DenseGraphQueryResult> {
+        let context_cost = crate::budgeted::auth::ContextCost::for_context(context, budget)?;
         for c in [
             Capability::Recall,
             Capability::ReadEvidence,
             Capability::RawEvidence,
             Capability::ModelProcessing,
         ] {
-            require_capability(context, c)?;
+            context_cost.require_capability(context, c, budget)?;
         }
         validate_limits(limits)?;
         let workspace = digest_bytes(context.request.workspace_id.as_bytes());

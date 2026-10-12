@@ -278,6 +278,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         },
         cache_residency: None,
         automatic_bm25: None,
+        automatic_hybrid: None,
         router_trace_profile: RouterTraceProfile::Off,
         // Original query-time history only: prior replay answers are retained for
         // audit but must never leak into another independent evaluation question.

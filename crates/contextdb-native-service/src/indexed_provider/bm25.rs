@@ -9,6 +9,8 @@ use contextdb_service::{
 
 mod budget;
 #[cfg(test)]
+mod frontier_tests;
+#[cfg(test)]
 mod tests;
 
 const MAX_POSTINGS: usize = 4096;
@@ -18,6 +20,66 @@ struct Ranked {
     document: Bm25Document,
     raw: IndexedOriginal,
     score: f64,
+}
+
+/// Internal owner frontier, independent of BM25 top-k and lexical omissions.
+/// The existing public page remains unchanged and is not an authorization seal.
+#[derive(Debug)]
+pub(crate) struct Bm25Discovery {
+    pub page: RawBm25Page,
+    pub admitted_sources: BTreeMap<ObservationId, RawSource>,
+}
+
+#[derive(Default)]
+struct Bm25Frontier {
+    sources: BTreeMap<ObservationId, RawSource>,
+    scratch_admitted: bool,
+}
+
+impl Bm25Frontier {
+    fn guard(&mut self, id: ObservationId, budget: &mut QueryBudget) -> ServiceResult<()> {
+        budget.charge(8, 0).map_err(budget_error)?;
+        if self.sources.len() == 256 && !self.sources.contains_key(&id) {
+            return Err(super::super::exhausted(
+                "hybrid BM25 admitted source frontier exceeds 256",
+            ));
+        }
+        if !self.scratch_admitted {
+            // A BTree node reserves multiple pairs and may split. Pre-admit the
+            // bounded whole tree before any doc/body read or source insertion.
+            budget
+                .charge(
+                    1,
+                    (256 * 2 * (12 * size_of::<(ObservationId, RawSource)>() + 512)) as u64,
+                )
+                .map_err(budget_error)?;
+            self.scratch_admitted = true;
+        }
+        Ok(())
+    }
+
+    fn admit(&mut self, source: &RawSource, budget: &mut QueryBudget) -> ServiceResult<()> {
+        self.guard(source.event_id, budget)?;
+        let bytes = source.source_version.as_ref().map_or(0, String::len);
+        if bytes > 2048 {
+            return Err(integrity(
+                "hybrid BM25 source version exceeds captured metadata bound",
+            ));
+        }
+        budget.charge(bytes as u64 + 8, 0).map_err(budget_error)?;
+        if let Some(existing) = self.sources.get(&source.event_id) {
+            return if existing == source {
+                Ok(())
+            } else {
+                Err(integrity("hybrid BM25 frontier source version collision"))
+            };
+        }
+        budget
+            .charge(1, bytes as u64 * 2 + size_of::<RawSource>() as u64)
+            .map_err(budget_error)?;
+        self.sources.insert(source.event_id, source.clone());
+        Ok(())
+    }
 }
 
 impl NativeIndexedRecallProvider<'_> {
@@ -180,6 +242,32 @@ impl NativeIndexedRecallProvider<'_> {
         query: &RawBm25Query,
         allowance: &mut QueryBudget,
     ) -> ServiceResult<RawBm25Page> {
+        self.bm25_candidates_inner(view, query, allowance, None)
+    }
+
+    /// The owned hybrid path retains every permitted inspected source before
+    /// ranking/omission disposal. Legacy callers pay none of the collector fees.
+    pub(crate) fn bm25_candidates_with_frontier(
+        &self,
+        view: &NativeIndexedView,
+        query: &RawBm25Query,
+        allowance: &mut QueryBudget,
+    ) -> ServiceResult<Bm25Discovery> {
+        let mut frontier = Bm25Frontier::default();
+        let page = self.bm25_candidates_inner(view, query, allowance, Some(&mut frontier))?;
+        Ok(Bm25Discovery {
+            page,
+            admitted_sources: frontier.sources,
+        })
+    }
+
+    fn bm25_candidates_inner(
+        &self,
+        view: &NativeIndexedView,
+        query: &RawBm25Query,
+        allowance: &mut QueryBudget,
+        mut frontier: Option<&mut Bm25Frontier>,
+    ) -> ServiceResult<RawBm25Page> {
         if !view.budgeted_for_bm25 {
             return Err(super::super::invalid(
                 "BM25 requires its separate budgeted native view",
@@ -273,7 +361,9 @@ impl NativeIndexedRecallProvider<'_> {
         };
         let mut tail_documents = Vec::new();
         for id in tail {
-            if let Some((raw, document)) = self.bm25_tail_document(view, id, allowance)? {
+            if let Some((raw, document)) =
+                self.bm25_tail_document(view, id, allowance, frontier.as_deref_mut())?
+            {
                 population.add(&document)?;
                 for term in &terms {
                     if document.term_frequencies.contains_key(term) {
@@ -390,8 +480,14 @@ impl NativeIndexedRecallProvider<'_> {
                     if !seen.insert(id) {
                         continue;
                     }
-                    let candidate =
-                        self.bm25_indexed_document(view, id, domain, through, allowance);
+                    let candidate = self.bm25_indexed_document(
+                        view,
+                        id,
+                        domain,
+                        through,
+                        allowance,
+                        frontier.as_deref_mut(),
+                    );
                     match candidate {
                         Ok(Some((raw, document))) => {
                             if let Err(reason) = allowance.charge(1, 128) {
@@ -571,10 +667,14 @@ impl NativeIndexedRecallProvider<'_> {
         view: &NativeIndexedView,
         work: super::super::capture::CaptureWork,
         allowance: &mut QueryBudget,
+        mut frontier: Option<&mut Bm25Frontier>,
     ) -> ServiceResult<Option<(IndexedOriginal, Bm25Document)>> {
         let id = work.event_id;
         if !self.authorize_bm25_source(view, id, allowance)? {
             return Ok(None);
+        }
+        if let Some(frontier) = frontier.as_deref_mut() {
+            frontier.guard(id, allowance)?;
         }
         let original =
             self.service
@@ -602,6 +702,9 @@ impl NativeIndexedRecallProvider<'_> {
             scope_count,
             allowance,
         )?;
+        if let Some(frontier) = frontier {
+            frontier.admit(&pair.0.source, allowance)?;
+        }
         Ok(Some(pair))
     }
 
@@ -650,9 +753,13 @@ impl NativeIndexedRecallProvider<'_> {
         domain: &str,
         through: u64,
         allowance: &mut QueryBudget,
+        mut frontier: Option<&mut Bm25Frontier>,
     ) -> ServiceResult<Option<(IndexedOriginal, Bm25Document)>> {
         if !self.authorize_bm25_source(view, id, allowance)? {
             return Ok(None);
+        }
+        if let Some(frontier) = frontier.as_deref_mut() {
+            frontier.guard(id, allowance)?;
         }
         let document: Bm25Document = value(
             self,
@@ -699,6 +806,9 @@ impl NativeIndexedRecallProvider<'_> {
             return Err(integrity(
                 "BM25 statistics differ from their accepted source/version/domain",
             ));
+        }
+        if let Some(frontier) = frontier {
+            frontier.admit(&document.source, allowance)?;
         }
         if !raw.lexical_complete
             || !document.source.independent_source

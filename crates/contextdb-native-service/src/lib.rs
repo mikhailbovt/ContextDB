@@ -3479,6 +3479,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != custody::CUSTODY_FEATURE
                 && feature != router_trace::TRACE_FEATURE
                 && feature != router_trace::TRACE_REPLAY_FEATURE
+                && feature != router_trace::hybrid::HYBRID_FEATURE
                 && feature != owned::OWNED_FEATURE
                 && feature != owned::TOOL_PAGES_FEATURE
                 && feature != owned::PAGE_RECALL_FEATURE
@@ -3521,6 +3522,13 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
             .features
             .contains(router_trace::TRACE_REPLAY_FEATURE)
             && !manifest.features.contains(router_trace::TRACE_FEATURE))
+        || (manifest
+            .features
+            .contains(router_trace::hybrid::HYBRID_FEATURE)
+            && (!manifest
+                .features
+                .contains(router_trace::TRACE_REPLAY_FEATURE)
+                || !manifest.features.contains(owned::OWNED_FEATURE)))
         || (manifest.features.contains(owned::TOOL_PAGES_FEATURE)
             && !manifest.features.contains(owned::OWNED_FEATURE))
         || (manifest.features.contains(owned::PAGE_RECALL_FEATURE)

@@ -27,6 +27,9 @@ pub(super) const OWNED_FEATURE: &str = "continuous-owned-runtime-v1";
 pub(super) const TOOL_PAGES_FEATURE: &str = "continuous-owned-tool-pages-v1";
 pub(super) const PAGE_RECALL_FEATURE: &str = "continuous-owned-original-page-recall-v1";
 
+mod query;
+pub(crate) use query::OwnedQueryAdmission;
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RunHead {

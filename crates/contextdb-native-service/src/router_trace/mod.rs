@@ -18,6 +18,7 @@ use contextdb_service::{
 };
 
 pub(crate) mod controls;
+pub(crate) mod hybrid;
 pub(crate) mod material;
 mod read;
 mod source_wire;
@@ -65,6 +66,8 @@ pub(super) struct RouterEnvelope {
     pub materials: PreparedMaterials,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_observation: Option<RouterReplayObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned_hybrid: Option<hybrid::OwnedHybridObservation>,
     pub discovery: Vec<IndexedCompletion>,
     pub generic_query: Option<PrepareRecallQuery>,
     pub generic_discovery: Option<material::GenericRecallObservation>,
@@ -162,6 +165,7 @@ impl RouterEnvelope {
             retrieval_origins,
             materials,
             replay_observation,
+            owned_hybrid: None,
             discovery,
             generic_query,
             generic_discovery,
@@ -172,6 +176,9 @@ impl RouterEnvelope {
 
     pub(super) fn validate(&self, budget: &mut QueryBudget) -> ServiceResult<()> {
         self.validate_material_profile()?;
+        if let Some(observation) = &self.owned_hybrid {
+            observation.validate(self, budget)?;
+        }
         self.request.validate(budget).map_err(trace_error)?;
         self.plan
             .validate(&self.request, budget)
@@ -368,6 +375,11 @@ impl RouterEnvelope {
     fn validate_material_profile(&self) -> ServiceResult<()> {
         match self.trace_version()? {
             contextdb_core::ROUTER_TRACE_VERSION => {
+                if self.owned_hybrid.is_some() {
+                    return Err(integrity(
+                        "owned hybrid observation requires replay trace v2",
+                    ));
+                }
                 if self.materials.prepared_policy.is_some() {
                     return Err(integrity(
                         "native router trace v1 does not support prepared policy material",
@@ -404,6 +416,19 @@ impl RouterEnvelope {
             REPLAY_FORMAT => Ok(contextdb_core::ROUTER_REPLAY_TRACE_VERSION),
             _ => Err(integrity("native router trace format is unsupported")),
         }
+    }
+
+    pub(crate) fn attach_hybrid_query(
+        &mut self,
+        observation: hybrid::OwnedHybridObservation,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        if self.owned_hybrid.is_some() {
+            return Err(invalid("owned hybrid observation is already attached"));
+        }
+        observation.validate(self, budget)?;
+        self.owned_hybrid = Some(observation);
+        Ok(())
     }
 }
 

@@ -5,6 +5,8 @@ use contextdb_recall::{QueryBudget, QueryLimit};
 use contextdb_service::ServiceResult;
 use contextdb_storage::{ReadSnapshot, ScanPageRequest};
 
+pub(crate) mod auth;
+
 const MAX_RECORD_BYTES: usize = 4 * 1024 * 1024;
 use contextdb_storage::{Entry, Keyspace, ScanPage, StorageError, StorageSequence};
 use std::cell::Cell;

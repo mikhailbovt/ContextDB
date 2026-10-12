@@ -60,7 +60,9 @@ jobs:
             experimental: true
     runs-on: "${{ matrix.os }}"
     continue-on-error: "${{ matrix.experimental }}"
-    timeout-minutes: 45
+    # Native Windows tests passed, but its clean documentation/wheel rebuilds
+    # need a larger job window on the hosted runner.
+    timeout-minutes: "${{ matrix.os == 'windows-2025' && 90 || 45 }}"
     env:
       CARGO_INCREMENTAL: "0"
       PYO3_PYTHON: python

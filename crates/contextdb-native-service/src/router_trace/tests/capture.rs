@@ -443,6 +443,7 @@ fn runtime_settings(source: &CaptureRequest) -> RuntimeSettings {
         cache_residency: None,
         automatic_recall_filter: RawFilter::default(),
         automatic_bm25: None,
+        automatic_hybrid: None,
         router_trace_profile: RouterTraceProfile::Required,
     }
 }

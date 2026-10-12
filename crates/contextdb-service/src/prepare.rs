@@ -19,9 +19,11 @@ use contextdb_recall::{
 };
 use serde::{Deserialize, Serialize};
 
+mod hybrid;
 mod recall;
 #[cfg(test)]
 mod tests;
+pub use hybrid::{OwnedHybridIntent, OwnedHybridLimits};
 pub use recall::deterministic_prepare_recall;
 
 /// Explicit protected trace mode. Required never falls back to an omitted trace.
@@ -383,6 +385,33 @@ pub trait PrepareContextPort: Send + Sync {
         encoder: &dyn OutgoingEncoder,
         budget: &mut QueryBudget,
     ) -> ServiceResult<PreparedContext>;
+
+    /// Trusted embedded-host query encoder boundary. The implementation must
+    /// authenticate the current owned attempt and every sampled source before
+    /// tokenization or inference; a serialized vector cannot replace this path.
+    /// Existing service profiles explicitly refuse this optional capability.
+    fn prepare_context_with_query_encoder(
+        &self,
+        _request: PrepareContextRequest,
+        _intent: OwnedHybridIntent,
+        _tokenizer: &dyn TokenCounter,
+        _encoder: &dyn OutgoingEncoder,
+        _query_encoder: &dyn crate::TextEmbeddingAdapter,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<PreparedContext> {
+        budget.charge(1, 0).map_err(|_| {
+            ServiceError::new(
+                ErrorCode::BudgetExhausted,
+                "owned hybrid allowance exhausted",
+                false,
+            )
+        })?;
+        Err(ServiceError::new(
+            ErrorCode::Unsupported,
+            "owned hybrid query preparation is unavailable in this service profile",
+            false,
+        ))
+    }
 
     /// Accept a trace-bearing request through the prepared owner's atomic capture
     /// boundary. Ordinary append cannot substitute for this admission path.

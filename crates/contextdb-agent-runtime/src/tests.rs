@@ -19,6 +19,7 @@ use super::*;
 mod capacity;
 mod economy;
 mod fences;
+mod hybrid;
 mod partial;
 mod recall;
 mod tools;
@@ -82,6 +83,7 @@ fn settings() -> RuntimeSettings {
         cache_residency: None,
         automatic_recall_filter: RawFilter::default(),
         automatic_bm25: None,
+        automatic_hybrid: None,
         router_trace_profile: RouterTraceProfile::Off,
     }
 }
