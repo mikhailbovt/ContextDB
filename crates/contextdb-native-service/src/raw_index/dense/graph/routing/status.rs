@@ -518,7 +518,16 @@ impl NativeService {
                 "routed status router covered Dense target differs",
             ));
         }
-        self.verify_prefix_segment_capture_boundary(snapshot, workspace, &manifest.ending, parent)?;
+        // Only the current directory's identical ending is already admitted
+        // under this snapshot. A stale router may name a different real ending.
+        if directory.is_none_or(|directory| directory.ending.reference() != &manifest.ending) {
+            self.verify_prefix_segment_capture_boundary(
+                snapshot,
+                workspace,
+                &manifest.ending,
+                parent,
+            )?;
+        }
         if manifest.coverage.directory.is_none()
             && (covered != &base.receipt.manifest.prefix
                 || manifest.covered_dense != base.receipt.manifest.target)

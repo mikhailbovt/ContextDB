@@ -249,6 +249,105 @@ fn status_reads_control_targets_without_dense_document_or_vector_rows() {
 }
 
 #[test]
+fn stale_router_ending_requires_its_own_real_capture_acceptance() {
+    use contextdb_service::CapturePort;
+
+    let f = fixture();
+    let accepted_base = base(&f);
+    let first = f
+        .native
+        .project_original_spans(&f.context, &f.encoder, 4, &mut budget())
+        .expect("project the genuine original after the base");
+    let mut interval = f
+        .native
+        .seal_original_span_prefix_segment(
+            &f.context,
+            &interval_types::PrefixSegmentSealRequestV2 {
+                generation: 1,
+                previous: None,
+                target: first,
+            },
+            &mut budget(),
+        )
+        .expect("first actual fine interval");
+    let old_router = router(&f);
+    for sequence in 4..=5 {
+        let mut request = crate::capture::tests::request(sequence, "later real fine endpoint");
+        request.context = f.context.clone();
+        request.event.source_version = Some(format!("status-ending-original-{sequence}"));
+        f.native
+            .append_event(request)
+            .expect("actual later capture");
+        f.native
+            .project_originals_bm25(&f.context, false, 64, &mut budget())
+            .expect("actual full raw progress");
+        let target = f
+            .native
+            .project_original_spans(&f.context, &f.encoder, 4, &mut budget())
+            .expect("actual later Dense target");
+        let previous = f
+            .native
+            .original_span_prefix_segment_head(&f.context, 1, &mut budget())
+            .expect("actual current fine predecessor");
+        interval = f
+            .native
+            .seal_original_span_prefix_segment(
+                &f.context,
+                &interval_types::PrefixSegmentSealRequestV2 {
+                    generation: 1,
+                    previous,
+                    target,
+                },
+                &mut budget(),
+            )
+            .expect("actual next fine interval");
+    }
+    let before = status(&f);
+    assert!(!before.router_matches_directory);
+    assert_eq!(before.router.as_ref(), Some(&old_router));
+    assert_eq!(before.directory.as_ref(), Some(&interval.directory));
+    let old_ending = &old_router.manifest.ending;
+    assert_ne!(old_ending, &interval.delta.manifest.start);
+    assert_ne!(old_ending, &interval.directory.head.ending);
+    assert!(old_ending.work.workspace_commit > accepted_base.manifest.prefix.through);
+    assert_eq!(old_ending.work.event_id, f.sources[2]);
+
+    let key = old_ending.global_commit.to_be_bytes();
+    let snapshot = f
+        .native
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("exact actual old endpoint event");
+    let original = snapshot
+        .get(&f.native.keyspaces.events, &key)
+        .expect("read accepted event")
+        .expect("accepted endpoint remains present");
+    drop(snapshot);
+    let mut tx = f.native.engine.begin_write().expect("endpoint fault");
+    tx.delete(&f.native.keyspaces.events, key.to_vec())
+        .expect("remove only the actual old endpoint event");
+    tx.commit(Durability::Sync).expect("durable endpoint fault");
+    let outcome = f
+        .native
+        .original_span_routed_maintenance_target(&f.context, &mut budget());
+
+    let mut tx = f.native.engine.begin_write().expect("restore endpoint");
+    tx.put(&f.native.keyspaces.events, key.to_vec(), original)
+        .expect("restore exact accepted bytes");
+    tx.commit(Durability::Sync).expect("durable restoration");
+    assert_eq!(
+        outcome
+            .expect_err("a current ending proof cannot admit a stale router endpoint")
+            .code,
+        ErrorCode::IntegrityFailure
+    );
+    assert_eq!(status(&f), before);
+    f.native
+        .verify_native(true)
+        .expect("restored native deep proof");
+}
+
+#[test]
 fn status_requires_operator_processing_capability_and_the_same_parent() {
     let f = fixture();
     let mut denied = f.context.clone();

@@ -33,6 +33,7 @@ pub const CAPTURE_MAX_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 pub const CAPTURE_MAX_REQUEST_PARTS: usize = 512;
 const CHUNK_BYTES: usize = 256 * 1024;
 
+mod authorized;
 pub(crate) mod keys;
 mod page;
 mod pruning;

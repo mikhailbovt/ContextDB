@@ -17,14 +17,23 @@ use contextdb_recall::QueryBudget;
 use contextdb_service::ServiceResult;
 use contextdb_storage::{ReadSnapshot, ScanPageRequest};
 use serde::{
-    Deserialize, Deserializer,
-    de::{MapAccess, Visitor},
+    Deserialize, Deserializer, Serialize,
+    de::{DeserializeOwned, MapAccess, Visitor},
 };
 use std::collections::{BTreeMap, BTreeSet};
 
 const HEAD_BYTES: usize = 8 * 1024;
 const MANIFEST_BYTES: usize = 128 * 1024;
 const MAX_HEADS: usize = crate::raw_index::MAX_GENERATIONS as usize;
+
+/// Exact canonical rows retained only after the existing full owner checks.
+/// Neither deserialization nor a caller-supplied receipt can construct this.
+pub(crate) struct CertifiedCurrentHeadRows {
+    pub(crate) workspace: Option<Vec<u8>>,
+    pub(crate) manifest: Option<Vec<u8>>,
+    pub(crate) mapping: Option<Vec<u8>>,
+    pub(crate) event: Option<Vec<u8>>,
+}
 
 pub(crate) fn deserialize_prefix_segment_heads<'de, D: Deserializer<'de>>(
     d: D,
@@ -200,6 +209,40 @@ impl NativeService {
         workspace_id: &str,
         parent: &mut QueryBudget,
     ) -> ServiceResult<WorkspaceState> {
+        self.current_prefix_segment_heads_inner(snapshot, workspace_id, parent, None)
+    }
+
+    pub(crate) fn current_prefix_segment_heads_with_rows<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace_id: &str,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<(WorkspaceState, CertifiedCurrentHeadRows)> {
+        parent
+            .charge(1, size_of::<CertifiedCurrentHeadRows>() as u64 + 256)
+            .map_err(crate::raw_index::budget_error)?;
+        let mut rows = CertifiedCurrentHeadRows {
+            workspace: None,
+            manifest: None,
+            mapping: None,
+            event: None,
+        };
+        let state = self.current_prefix_segment_heads_inner(
+            snapshot,
+            workspace_id,
+            parent,
+            Some(&mut rows),
+        )?;
+        Ok((state, rows))
+    }
+
+    fn current_prefix_segment_heads_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace_id: &str,
+        parent: &mut QueryBudget,
+        mut retained: Option<&mut CertifiedCurrentHeadRows>,
+    ) -> ServiceResult<WorkspaceState> {
         parent.check().map_err(crate::raw_index::budget_error)?;
         if workspace_id.len() > crate::MAX_IDENTIFIER_BYTES {
             return Err(crate::invalid(
@@ -212,22 +255,24 @@ impl NativeService {
         crate::validate_identifier(workspace_id, "prefix-segment heads workspace")?;
         let workspace = digest_bytes(workspace_id.as_bytes());
         let state = self
-            .head_read::<WorkspaceState, _>(
+            .current_head_row::<WorkspaceState, _>(
                 snapshot,
                 &self.keyspaces.workspace,
                 workspace.as_bytes(),
                 HEAD_BYTES,
                 parent,
+                retained.as_deref_mut().map(|rows| &mut rows.workspace),
             )?
             .unwrap_or_else(|| WorkspaceState::genesis(workspace.clone()));
         validate_workspace_state(&state, &workspace)?;
         let manifest = self
-            .head_read::<Manifest, _>(
+            .current_head_row::<Manifest, _>(
                 snapshot,
                 &self.keyspaces.meta,
                 crate::META_MANIFEST_KEY,
                 MANIFEST_BYTES,
                 parent,
+                retained.as_deref_mut().map(|rows| &mut rows.manifest),
             )?
             .ok_or_else(|| integrity("prefix-segment heads format manifest absent"))?;
         parent
@@ -235,12 +280,13 @@ impl NativeService {
             .map_err(crate::raw_index::budget_error)?;
         crate::validate_manifest(&manifest, &self.database_id)?;
         let key = workspace_map_key(&workspace, state.watermarks.journal);
-        let mapping = self.head_read::<CommitMap, _>(
+        let mapping = self.current_head_row::<CommitMap, _>(
             snapshot,
             &self.keyspaces.workspace_map,
             &key,
             HEAD_BYTES,
             parent,
+            retained.as_deref_mut().map(|rows| &mut rows.mapping),
         )?;
         if state.watermarks.journal == 0 {
             if mapping.is_some()
@@ -263,12 +309,13 @@ impl NativeService {
                 ));
             }
             let event = self
-                .head_read::<StoredEvent, _>(
+                .current_head_row::<StoredEvent, _>(
                     snapshot,
                     &self.keyspaces.events,
                     &mapping.global_commit.to_be_bytes(),
                     crate::MAX_JSON_BYTES,
                     parent,
+                    retained.map(|rows| &mut rows.event),
                 )?
                 .ok_or_else(|| integrity("current prefix-segment workspace event absent"))?;
             self.prefix_segment_head_auth(&state, parent)?;
@@ -335,6 +382,37 @@ impl NativeService {
             ));
         }
         Ok(state)
+    }
+
+    // Same IO, canonical decoding and fees as head_read. The ordinary path
+    // drops its read buffer immediately; the opt-in path moves it without clone.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "The optional exact-row sink preserves ordinary head reader fees and lifetime"
+    )]
+    fn current_head_row<T: DeserializeOwned + Serialize, S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        space: &contextdb_storage::Keyspace,
+        key: &[u8],
+        cap: usize,
+        parent: &mut QueryBudget,
+        retained: Option<&mut Option<Vec<u8>>>,
+    ) -> ServiceResult<Option<T>> {
+        let Some(bytes) = crate::budgeted::read_value(snapshot, space, key, cap, parent)? else {
+            return Ok(None);
+        };
+        parent
+            .charge(1, bytes.len() as u64 * 12 + 256)
+            .map_err(crate::raw_index::budget_error)?;
+        let value = decode(&bytes, "bounded segment heads metadata")?;
+        if encode(&value)? != bytes {
+            return Err(integrity("segment heads metadata is not canonical"));
+        }
+        if let Some(retained) = retained {
+            *retained = Some(bytes);
+        }
+        Ok(Some(value))
     }
 
     /// Bounded administrative replay under ONE parent, not a hot corpus scan.

@@ -202,6 +202,18 @@ impl NativeService {
         self.current_prefix_segment_heads(snapshot, workspace_id, parent)
     }
 
+    pub(crate) fn current_directory_router_heads_with_rows<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace_id: &str,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<(
+        WorkspaceState,
+        super::super::prefix_segments_v2::heads::CertifiedCurrentHeadRows,
+    )> {
+        self.current_prefix_segment_heads_with_rows(snapshot, workspace_id, parent)
+    }
+
     /// Bounded administrative replay under ONE parent, not a hot corpus scan.
     pub(crate) fn verify_directory_router_heads_records<S: ReadSnapshot>(
         &self,

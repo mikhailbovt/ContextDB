@@ -150,3 +150,99 @@ fn maintenance_and_authorized_ranges_pay_for_authenticated_chunks_and_receipt_re
         .verify_native(true)
         .expect("no partial publication from read failures");
 }
+
+#[test]
+fn admitted_original_checks_cross_chunk_range_and_current_external_denial() {
+    let (_authority_directory, ledger) = crate::suppression::tests::authority("range-reuse");
+    let directory = tempfile::tempdir().expect("native directory");
+    let owner =
+        NativeService::open_with_suppression(directory.path(), "range-reuse", [7; 32], ledger)
+            .expect("owner with current external authority");
+    let mut input = crate::capture::tests::request(1, "staged original");
+    let bytes = (0..CHUNK_BYTES * 2)
+        .map(|index| u8::try_from(index % 251).expect("byte"))
+        .collect::<Vec<_>>();
+    let staged = owner
+        .stage_payload(StagePayloadRequest {
+            context: input.context.clone(),
+            idempotency_key: "authorized-range-reuse".into(),
+            block_id: ContentBlockId::new(),
+            bytes: bytes.clone(),
+        })
+        .expect("staged bytes");
+    input.event.payload = EventPayload::Staged {
+        reference: staged.reference,
+        media_type: "application/octet-stream".into(),
+    };
+    owner.append_event(input.clone()).expect("actual capture");
+    let snapshot = owner
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("same immutable snapshot");
+    let mut allowance = budget(32 * 1024 * 1024);
+    let admitted = owner
+        .admit_captured_original(
+            &snapshot,
+            &input.context,
+            input.event.event_id,
+            &mut allowance,
+        )
+        .expect("genuine original admission");
+    let expected = &bytes[CHUNK_BYTES - 3..CHUNK_BYTES + 4];
+    let selected = OriginalSourceSpan {
+        event_id: input.event.event_id,
+        payload_digest: input.event.payload.digest().expect("payload digest"),
+        start: (CHUNK_BYTES - 3) as u64,
+        end: (CHUNK_BYTES + 4) as u64,
+        span_digest: raw_digest(expected),
+    };
+    let before = allowance.remaining_bytes();
+    assert_eq!(
+        owner
+            .source_span_from_authorized_original(&admitted, &selected, true, &mut allowance)
+            .expect("authenticated cross-chunk range"),
+        expected
+    );
+    assert!(before - allowance.remaining_bytes() >= (2 * CHUNK_BYTES + expected.len()) as u64);
+    let mut wrong = selected.clone();
+    wrong.span_digest = raw_digest(b"another range");
+    assert_eq!(
+        owner
+            .source_span_from_authorized_original(&admitted, &wrong, true, &mut allowance)
+            .expect_err("reuse retains the exact range digest")
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    wrong = selected.clone();
+    wrong.event_id = contextdb_core::ObservationId::new();
+    assert_eq!(
+        owner
+            .source_span_from_authorized_original(&admitted, &wrong, true, &mut allowance)
+            .expect_err("a capability cannot be used for another occurrence")
+            .code,
+        ErrorCode::InvalidArgument
+    );
+    owner
+        .revoke_original(
+            &input.context,
+            input.event.event_id,
+            "external-denial-after-range-admission",
+            &mut budget(32 * 1024 * 1024),
+        )
+        .expect("genuine external denial after admission");
+    let before = allowance.remaining_bytes();
+    assert_eq!(
+        owner
+            .source_span_from_authorized_original(&admitted, &selected, true, &mut allowance)
+            .expect_err("old-snapshot attribution cannot preserve revoked disclosure permission")
+            .code,
+        ErrorCode::IndexTooStale
+    );
+    assert!(
+        before - allowance.remaining_bytes() < CHUNK_BYTES as u64,
+        "external authority closes the old snapshot before another chunk read"
+    );
+    owner
+        .verify_native(true)
+        .expect("actual capture and denial remain valid");
+}

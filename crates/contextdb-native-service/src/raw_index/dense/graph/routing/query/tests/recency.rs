@@ -75,6 +75,203 @@ fn admitted_callbacks(
 }
 
 #[test]
+fn unchanged_certificate_allows_foreign_head_but_rejects_actual_vector_and_old_row_faults() {
+    let f = fixture();
+    base(&f);
+    router(&f);
+    let workspace = digest_bytes(f.context.request.workspace_id.as_bytes());
+    let generation_key = generation_key(&workspace, 1);
+    let receipt_key = dense::receipt_key(&workspace, 1);
+    let snapshot = f
+        .native
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("old genuine rows");
+    let old_generation = snapshot
+        .get(&f.native.keyspaces.continuous, &generation_key)
+        .expect("old generation read")
+        .expect("actual old generation");
+    let old_receipt = snapshot
+        .get(&f.native.keyspaces.continuous, &receipt_key)
+        .expect("old receipt read")
+        .expect("actual old Dense receipt");
+    drop(snapshot);
+    capture(&f, 501, "A genuinely newer sapphire orbital original");
+    project(&f, &f.encoder);
+    let (_, view) = f
+        .native
+        .admit_owned_routed_query_embedding_profile(
+            &f.context,
+            f.encoder.profile(),
+            &mut query_budget(),
+        )
+        .expect("full genuine current admission");
+    for _ in 0..2 {
+        f.native
+            .check_routed_query_view(&f.context, &view, &mut query_budget())
+            .expect("unchanged current certificate");
+    }
+    let embedded = f
+        .encoder
+        .embed(EmbeddingTextKind::Query, QUERY, &mut query_budget())
+        .expect("actual controlled query receipt");
+
+    let mut foreign = crate::capture::tests::request(502, "A separate workspace original");
+    foreign.context = f.context.clone();
+    foreign.event.workspace_id = contextdb_core::WorkspaceId::new();
+    foreign.context.request.workspace_id = foreign.event.workspace_id.to_string();
+    f.native
+        .append_event(foreign)
+        .expect("actual foreign-workspace global advance");
+    f.native
+        .check_routed_query_view(&f.context, &view, &mut query_budget())
+        .expect("foreign global scalar is not this workspace's successor");
+
+    let snapshot = f
+        .native
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("genuine current controls");
+    let generation = snapshot
+        .get(&f.native.keyspaces.continuous, &generation_key)
+        .expect("current generation read")
+        .expect("actual current generation");
+    let receipt = snapshot
+        .get(&f.native.keyspaces.continuous, &receipt_key)
+        .expect("current receipt read")
+        .expect("actual current receipt");
+    let vectors = snapshot
+        .scan_prefix(
+            &f.native.keyspaces.continuous,
+            format!("{}dense/vector/", generation_prefix(&workspace, 1)).as_bytes(),
+        )
+        .expect("actual source-vector rows");
+    assert!(!vectors.is_empty());
+    drop(snapshot);
+
+    let mut tx = f
+        .native
+        .engine
+        .begin_write()
+        .expect("actual vector corruption fault");
+    for row in &vectors {
+        tx.put(
+            &f.native.keyspaces.continuous,
+            row.key.clone(),
+            b"invalid vector sentinel".to_vec(),
+        )
+        .expect("damage actual source vector");
+    }
+    tx.commit(Durability::Sync).expect("vector fault Sync");
+    let unchanged = f
+        .native
+        .check_routed_query_view(&f.context, &view, &mut query_budget());
+    let vector_outcome = f.native.search_original_spans_routed_in_view(
+        &f.context,
+        QUERY,
+        &embedded,
+        limits(),
+        &view,
+        &mut query_budget(),
+    );
+    let mut tx = f
+        .native
+        .engine
+        .begin_write()
+        .expect("restore actual vectors");
+    for row in &vectors {
+        tx.put(
+            &f.native.keyspaces.continuous,
+            row.key.clone(),
+            row.value.clone(),
+        )
+        .expect("EXACT source vector restore");
+    }
+    tx.commit(Durability::Sync).expect("vector restore Sync");
+    unchanged.expect("metadata certificate grants no vector exemption");
+    assert_eq!(
+        vector_outcome
+            .expect_err("actual vector authentication still executes")
+            .code,
+        ErrorCode::IntegrityFailure
+    );
+
+    let mut tx = f
+        .native
+        .engine
+        .begin_write()
+        .expect("genuine older row replay during cached query");
+    tx.put(
+        &f.native.keyspaces.continuous,
+        generation_key.clone(),
+        old_generation,
+    )
+    .expect("EXACT older generation");
+    tx.put(
+        &f.native.keyspaces.continuous,
+        receipt_key.clone(),
+        old_receipt,
+    )
+    .expect("EXACT older receipt");
+    for row in &vectors {
+        tx.put(
+            &f.native.keyspaces.continuous,
+            row.key.clone(),
+            b"invalid vector sentinel".to_vec(),
+        )
+        .expect("vector-read sentinel");
+    }
+    tx.commit(Durability::Sync).expect("replay fault Sync");
+    let replay_outcome = f.native.search_original_spans_routed_in_view(
+        &f.context,
+        QUERY,
+        &embedded,
+        limits(),
+        &view,
+        &mut query_budget(),
+    );
+    let mut tx = f
+        .native
+        .engine
+        .begin_write()
+        .expect("restore authentic current archive");
+    tx.put(&f.native.keyspaces.continuous, generation_key, generation)
+        .expect("current generation restore");
+    tx.put(&f.native.keyspaces.continuous, receipt_key, receipt)
+        .expect("current receipt restore");
+    for row in vectors {
+        tx.put(&f.native.keyspaces.continuous, row.key, row.value)
+            .expect("actual vector restore");
+    }
+    tx.commit(Durability::Sync).expect("exact restore Sync");
+    assert_eq!(
+        replay_outcome
+            .expect_err("old genuine controls fail BEFORE vector sentinel")
+            .code,
+        ErrorCode::IndexTooStale
+    );
+    let mut zero = QueryBudget::new(
+        0,
+        512 * 1024 * 1024,
+        Duration::from_secs(60),
+        Default::default(),
+    );
+    assert_eq!(
+        f.native
+            .check_routed_query_view(&f.context, &view, &mut zero)
+            .expect_err("certificate never bypasses parent admission")
+            .code,
+        ErrorCode::BudgetExhausted
+    );
+    f.native
+        .verify(VerifyRequest {
+            context: f.context.request.clone(),
+            deep: true,
+        })
+        .expect("exact genuine rows restored before deep verification");
+}
+
+#[test]
 fn reused_opaque_view_refuses_changed_principal_and_new_dense_before_vector_reads() {
     let f = fixture();
     base(&f);

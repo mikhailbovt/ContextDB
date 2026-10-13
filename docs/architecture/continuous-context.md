@@ -974,6 +974,11 @@ rank for RRF. Routing centroids never become evidence or utility candidates.
 Protected replay under `continuous-owned-hybrid-routed-v1` records actual scores,
 selected paths, quotas and fresh proof. Current roots remain fenced through
 prepared capture and model dispatch; automatic preparation repeats after tools.
+Within one query, an owner-private certificate avoids reconstructing unchanged
+metadata. Every serving fence rereads exact current controls and checks authority,
+epoch and successor absence; source/vector checks remain independent. Capture
+and dispatch retain full current admission. Budgeted range reads can reuse one
+genuinely admitted original on the same snapshot while rechecking disclosure rights.
 Ranked path selection and locally
 complete ANN work do not establish exhaustive semantic recall. None preserves
 earlier profiles, and routed and segmented settings are mutually exclusive.

@@ -11,6 +11,8 @@ use super::super::verification::directory_router_request_digest;
 use super::super::*;
 use std::mem::size_of;
 
+#[path = "fence.rs"]
+mod fence;
 #[path = "points.rs"]
 mod points;
 pub(in crate::raw_index::dense::graph::routing) use points::{
@@ -29,6 +31,7 @@ pub(crate) struct VerifiedRoutedQueryView {
     principal: String,
     allowed_cohorts: Vec<DirectoryRouterCohortV1>,
     identity: ContentDigest,
+    certificate: Option<fence::CurrentCertificate>,
 }
 impl VerifiedRoutedQueryView {
     pub(crate) fn workspace(&self) -> &str {
@@ -76,6 +79,16 @@ impl NativeService {
         context: &AuthenticatedRequestContext,
         parent: &mut QueryBudget,
     ) -> ServiceResult<VerifiedRoutedQueryView> {
+        self.routed_query_view_inner(snapshot, context, parent, true)
+    }
+
+    fn routed_query_view_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        parent: &mut QueryBudget,
+        serving_certificate: bool,
+    ) -> ServiceResult<VerifiedRoutedQueryView> {
         let cost = crate::budgeted::auth::ContextCost::for_context(context, parent)?;
         for capability in [
             Capability::Recall,
@@ -92,8 +105,23 @@ impl NativeService {
         crate::budgeted::metadata(snapshot, parent, |r| {
             self.require_custody_ready(r, &workspace)
         })?;
-        let world =
-            self.current_directory_router_heads(snapshot, &context.request.workspace_id, parent)?;
+        let (world, head_rows) = if serving_certificate {
+            let (world, rows) = self.current_directory_router_heads_with_rows(
+                snapshot,
+                &context.request.workspace_id,
+                parent,
+            )?;
+            (world, Some(rows))
+        } else {
+            (
+                self.current_directory_router_heads(
+                    snapshot,
+                    &context.request.workspace_id,
+                    parent,
+                )?,
+                None,
+            )
+        };
         parent.charge(2, KEY_BYTES * 2).map_err(budget_error)?;
         let state: IndexState = self
             .prefix_read(
@@ -196,12 +224,6 @@ impl NativeService {
         {
             return Err(integrity("routed covered dense acceptance differs"));
         }
-        self.verify_prefix_segment_capture_boundary(
-            snapshot,
-            &workspace,
-            &router.manifest.ending,
-            parent,
-        )?;
         match head {
             Some(head)
                 if head.directory.head.covered != *covered
@@ -216,6 +238,20 @@ impl NativeService {
                 return Err(integrity("routed base-only dense target differs"));
             }
             _ => {}
+        }
+        if let Some(directory) = &admitted_directory {
+            // This proof was obtained from this same snapshot. The full ending
+            // reference must still match; it is never retained in the view.
+            if directory.ending.reference() != &router.manifest.ending {
+                return Err(integrity("routed admitted capture ending differs"));
+            }
+        } else {
+            self.verify_prefix_segment_capture_boundary(
+                snapshot,
+                &workspace,
+                &router.manifest.ending,
+                parent,
+            )?;
         }
         let current: DenseProjectionReceipt = self
             .prefix_read(
@@ -352,6 +388,25 @@ impl NativeService {
                 size_of::<VerifiedRoutedQueryView>() as u64 + 256,
             )
             .map_err(budget_error)?;
+        let certificate = head_rows
+            .map(|heads| {
+                fence::CurrentCertificate::mint(
+                    heads,
+                    &world,
+                    fence::AdmittedRows {
+                        state: &state,
+                        generation: &generation,
+                        router: &router,
+                        dense: &current,
+                        base: &admitted_base.receipt,
+                        directory: admitted_directory
+                            .as_ref()
+                            .map(|directory| &directory.publication.directory),
+                    },
+                    parent,
+                )
+            })
+            .transpose()?;
         let view = VerifiedRoutedQueryView {
             workspace,
             generation,
@@ -364,6 +419,7 @@ impl NativeService {
             principal,
             allowed_cohorts,
             identity: digest(&bytes),
+            certificate,
         };
         self.check_routed_query_view(context, &view, parent)?;
         Ok(view)
@@ -505,6 +561,15 @@ impl NativeService {
         crate::budgeted::metadata(&current, parent, |r| {
             self.require_custody_ready(r, view.workspace())
         })?;
+        if strict_journal && let Some(certificate) = &view.certificate {
+            certificate.check(self, &current, parent)?;
+            if self.graph_epoch(&current, view.workspace(), parent)?
+                != view.generation.authorization_epoch
+            {
+                return Err(stale_index());
+            }
+            return parent.check().map_err(budget_error);
+        }
         let world =
             self.current_directory_router_heads(&current, &context.request.workspace_id, parent)?;
         if world.workspace_digest != view.workspace
@@ -597,7 +662,10 @@ impl NativeService {
         binding: &crate::router_trace::hybrid::routed::HybridRoutedBinding,
         parent: &mut QueryBudget,
     ) -> ServiceResult<()> {
-        let view = self.routed_query_view(snapshot, context, parent)?;
+        // Capture/dispatch already prove the exact allowed ModelRequested frame.
+        // Keep their independent FULL current admission: no pre-query byte
+        // certificate or cache fee crosses that legitimate +1 workspace append.
+        let view = self.routed_query_view_inner(snapshot, context, parent, false)?;
         let bytes = metered_encode(view.generation(), parent, ROW_BYTES)?;
         if view.generation().number != binding.generation
             || digest(&bytes) != binding.generation_digest

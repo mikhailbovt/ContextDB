@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::raw_index::dense::graph::{
-    prefix_segments_v2::{types as interval, verification as interval_verification},
+    prefix_segments_v2::{
+        proof::VerifiedCaptureBoundary, types as interval, verification as interval_verification,
+    },
     prefix_v2::{types as prefix, verification as prefix_verification},
 };
 
@@ -16,6 +18,7 @@ pub(in crate::raw_index::dense::graph::routing) struct RoutedPointDirectory {
     pub(in crate::raw_index::dense::graph::routing) publication: PrefixSegmentPublicationV2,
     pub(in crate::raw_index::dense::graph::routing) reference: PrefixSegmentDirectoryRefV2,
     pub(in crate::raw_index::dense::graph::routing) covered: DenseProjectionReceipt,
+    pub(in crate::raw_index::dense::graph::routing) ending: VerifiedCaptureBoundary,
 }
 
 /// The caller has already authenticated this world's four stamps, active
@@ -321,8 +324,6 @@ impl NativeService {
             || bytes != accepted.response_bytes
             || manifest.ordinal != root.count
             || directory.head.content_digest != root.content_digest
-            || directory.head.content_digest
-                != self.prefix_segment_directory_digest(workspace, &directory.head, parent)?
             || directory.head.latest.receipt_digest != digest(&delta_bytes)
             || manifest.base != base.reference
             || base.receipt.manifest.raw.custody_version != manifest.raw.custody_version
@@ -382,7 +383,7 @@ impl NativeService {
             ));
         }
         self.verify_prefix_segment_capture_boundary(snapshot, workspace, &manifest.start, parent)?;
-        self.verify_prefix_segment_capture_boundary(
+        let ending = self.verify_prefix_segment_capture_boundary(
             snapshot,
             workspace,
             &directory.head.ending,
@@ -404,6 +405,7 @@ impl NativeService {
             publication,
             reference: root.clone(),
             covered,
+            ending,
         })
     }
 }

@@ -816,20 +816,10 @@ impl NativeService {
                     "owned query rendering does not match its original range",
                 ));
             }
-            self.authorized_capture_policy_with_budget(
-                &snapshot,
-                context,
-                source.event_id,
-                budget,
-            )?;
-            self.authorize_derived_custody_with_budget(
-                &snapshot,
-                context,
-                source.event_id,
-                budget,
-            )?;
+            let admitted =
+                self.admit_captured_original(&snapshot, context, source.event_id, budget)?;
             let bytes =
-                self.source_span_inner(&snapshot, Some(context), source, false, Some(budget))?;
+                self.source_span_from_authorized_original(&admitted, source, false, budget)?;
             if bytes != selected.as_bytes() {
                 return Err(invalid(
                     "owned query selected text differs from captured bytes",

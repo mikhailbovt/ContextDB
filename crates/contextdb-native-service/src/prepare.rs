@@ -107,16 +107,41 @@ impl AssemblyProvider for NativeAssemblyProvider<'_> {
                 .check_owned_hybrid_guard(guard, budget)
                 .map_err(context_error)?;
         }
-        self.service
-            .authorized_capture_policy_with_budget(&snapshot, self.context, span.event_id, budget)
-            .map_err(context_error)?;
-        self.service
-            .authorize_derived_custody_with_budget(&snapshot, self.context, span.event_id, budget)
-            .map_err(context_error)?;
-        let captured = self
-            .service
-            .load_captured_original_with_budget(&snapshot, span.event_id, budget)
-            .map_err(context_error)?;
+        let admitted = if self.budgeted_raw {
+            Some(
+                self.service
+                    .admit_captured_original(&snapshot, self.context, span.event_id, budget)
+                    .map_err(context_error)?,
+            )
+        } else {
+            None
+        };
+        let legacy_original;
+        let captured = if let Some(admitted) = &admitted {
+            admitted.original()
+        } else {
+            self.service
+                .authorized_capture_policy_with_budget(
+                    &snapshot,
+                    self.context,
+                    span.event_id,
+                    budget,
+                )
+                .map_err(context_error)?;
+            self.service
+                .authorize_derived_custody_with_budget(
+                    &snapshot,
+                    self.context,
+                    span.event_id,
+                    budget,
+                )
+                .map_err(context_error)?;
+            legacy_original = self
+                .service
+                .load_captured_original_with_budget(&snapshot, span.event_id, budget)
+                .map_err(context_error)?;
+            &legacy_original
+        };
         let length = RawSource::from(&captured.event).byte_length.unwrap_or(0);
         let original = if captured.event.role == EventRole::Tool
             && matches!(
@@ -152,9 +177,9 @@ impl AssemblyProvider for NativeAssemblyProvider<'_> {
                 ));
             }
             page.bytes
-        } else if self.budgeted_raw {
+        } else if let Some(admitted) = &admitted {
             self.service
-                .source_span_inner(&snapshot, Some(self.context), span, false, Some(budget))
+                .source_span_from_authorized_original(admitted, span, false, budget)
                 .map_err(context_error)?
         } else {
             self.service
