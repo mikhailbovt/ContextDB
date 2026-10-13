@@ -15,6 +15,7 @@ mod digest;
 mod error;
 mod journal_ops;
 mod report;
+pub mod router_corpus;
 mod runner;
 mod semantic;
 mod semantic_workload;

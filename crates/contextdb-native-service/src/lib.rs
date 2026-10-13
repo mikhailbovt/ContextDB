@@ -14,6 +14,14 @@
 #[cfg(test)]
 mod adapter_tests;
 mod assertions;
+mod budgeted;
+pub use assertions::{
+    NativeAssertionBackupInventory, NativeAssertionBatchKind, NativeAssertionCopyKind,
+    NativeAssertionKeyInventory, NativeAssertionPruningReceipt,
+    NativeAssertionRemovalWitnessReceipt, NativeAssertionValueDisposition,
+    NativeAssertionValueInventory, NativeAssertionValueWitnessReceipt,
+    NativeAssertionVersionOwnership,
+};
 mod backup;
 mod capture;
 mod custody;
@@ -29,20 +37,108 @@ mod publication;
 mod raw;
 mod raw_index;
 mod record_journal;
+mod router_trace;
+pub use record_journal::NativeRecordControlPreparationReceipt;
+pub use record_journal::controls::witness::pruning::NativeRecordPruningReceipt;
+pub use record_journal::controls::witness::{
+    NativeRecordBodyKind, NativeRecordKeyInventory, NativeRecordRemovalWitnessReceipt,
+};
+mod record_sources;
+pub use record_sources::{
+    NativePendingRecordWrites, NativeRecordSourceProgress, NativeRecordSourceReceipt,
+    NativeRecordSourceWorkspaceReceipt, NativeRecordWriteReceipt,
+    NativeRecordWriteRecoveryProgress,
+};
+mod retention;
 mod suppression;
 
 pub use backup::{
     NATIVE_BACKUP_FORMAT, NATIVE_CONTINUOUS_BACKUP_FORMAT, NATIVE_ENCRYPTED_BACKUP_FORMAT,
+    NativeArchiveCleanup, NativeArchiveCleanupAction, NativeArchiveCleanupAdvance,
+    NativeArchiveCleanupEntry, NativeArchiveCleanupInventory, NativeArchiveCleanupState,
+    NativeArchiveMaintenance, NativeArchiveMaintenanceAuthority, NativeArchiveMaintenanceBacklog,
+    NativeArchiveMaintenanceObservation, NativeArchiveMaintenanceOperation,
+    NativeArchiveMaintenanceOptions, NativeArchiveMaintenanceOutcome,
+    NativeArchiveMaintenanceStatus, NativeArchiveScopeResolver,
+    NativeArchiveWorkerDisposalProgress, NativeBackupCleanupJobProgress,
+    NativeBackupCleanupProgress, NativeBackupCleanupStage, NativeBackupPreservation,
+    NativeBackupPreservationPath, NativeBackupRecovery, NativeBackupRecoveryInput,
+    NativeBackupRecoveryInventory, NativeBackupRecoveryState, NativeRemovalBackup,
 };
 pub use capture::{CAPTURE_MAX_INLINE_BYTES, CAPTURE_MAX_PRODUCER_GAPS};
 pub use custody::CustodyProgress;
-pub use deletion::{NativeDeletionLineage, NativeDeletionSource};
+pub use deletion::{NativeDeletionLineage, NativeDeletionSource, NativeRemovalLocalInventory};
 pub use encryption::{
-    CustodyMasterKey, NativeBackupCatalogPage, NativeBackupRegistration, NativeCustodyKeys,
+    CustodyMasterKey, NativeBackupArtifactProgress, NativeBackupArtifactReceipt,
+    NativeBackupCatalogPage, NativeBackupCleanupJob, NativeBackupCleanupJobBinding,
+    NativeBackupCleanupJobReceipt, NativeBackupContentsInventory, NativeBackupContentsPage,
+    NativeBackupContentsReceipt, NativeBackupFrontier, NativeBackupKeyArchive, NativeBackupKeyCopy,
+    NativeBackupKeyInventory, NativeBackupPruningCounts, NativeBackupRegistration,
+    NativeBackupReplacement, NativeBackupReplacementReceipt, NativeBackupScopeContinuation,
+    NativeBackupScopeRequest, NativeBackupWorkerDisposal, NativeBackupWorkerDisposalBinding,
+    NativeBackupWorkerSeal, NativeCustodyKeys, NativeKeyAllocation, NativeKeyCatalogPage,
+    NativeKeyRetirement, NativeKeyRetirementClassification, NativeKeyRetirementEvidence,
+    NativeKeyRetirementReceipt, NativeKeyUseAddressInventory, NativeKeyUseCatalogPage,
+    NativeKeyUseChange, NativeKeyUseChangesPage, NativeKeyUseInventory, NativeKeyUseOutcome,
+    NativeKeyUseReceipt, NativeKeyUseTransaction, NativeKeyUseTransition, NativeKeyUseVersion,
 };
 pub use indexed_provider::{NativeIndexedRecallProvider, NativeIndexedView};
-pub use payload::{CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS};
-pub use raw_index::{OriginalRevocationReceipt, RawProjectionProgress, RawReclaimProgress};
+pub use payload::{
+    CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS, NativePayloadKeyInventory,
+    NativePayloadPruningProgress,
+};
+pub use prepare::NativeRoutedPreparationTimings;
+pub use raw_index::dense::graph::prefix_segments_v2::types::{
+    PrefixDeltaManifestV2, PrefixDeltaReceiptV2, PrefixSegmentDirectoryHeadV2,
+    PrefixSegmentDirectoryReceiptV2, PrefixSegmentDirectoryRefV2, PrefixSegmentPublicationV2,
+    PrefixSegmentSealRequestV2,
+};
+pub use raw_index::dense::graph::prefix_v2::types::{
+    DensePrefixBaseManifestV2, DensePrefixBaseReceiptV2, DensePrefixBaseRequestV2,
+};
+pub use raw_index::dense::graph::routing::NativeRoutedMaintenanceTarget;
+pub use raw_index::dense::graph::routing::query::{
+    DenseRoutedQueryCompletion, DenseRoutedQueryLimits, DenseRoutedQueryResult,
+};
+pub use raw_index::dense::graph::routing::types::{
+    DirectoryRouterCoverageV1, DirectoryRouterManifestV1, DirectoryRouterPublishRequestV1,
+    DirectoryRouterReceiptV1, DirectoryRouterRefV1,
+};
+pub use raw_index::dense::graph::segments::query::{
+    DenseSegmentQueryCompletion, DenseSegmentQueryLimits, DenseSegmentQueryResult,
+};
+pub use raw_index::dense::graph::segments::types::{
+    DenseDeltaManifest, DenseDeltaReceipt, DenseSegmentDirectoryHead, DenseSegmentDirectoryReceipt,
+    DenseSegmentPublication, DirectoryRef as DenseSegmentDirectoryRef,
+    SealRequest as DenseSegmentSealRequest,
+};
+pub use raw_index::dense::graph::{
+    DenseGraphHit, DenseGraphManifest, DenseGraphQueryLimits, DenseGraphQueryResult,
+    DenseGraphReceipt, DenseGraphTailCompletion, DenseGraphTailQueryLimits,
+    DenseGraphTailQueryResult,
+};
+pub use raw_index::{
+    DenseProjectionReceipt, NativeRawCopyKind, NativeRawCopyObservation, NativeRawCopyReceipt,
+    NativeRawCopyWitness, NativeRawSourceControl, NativeRawValueVersion, OriginalRevocationReceipt,
+    RawProjectionProgress, RawReclaimProgress,
+};
+pub use raw_index::{
+    NativeRawGenerationRole, NativeRawIndexGeneration, NativeRawIndexInventoryPage,
+    NativeRawIndexInventoryReceipt, NativeRawIndexInventoryWitness, NativeRawIndexKeyInventory,
+    NativeRawIndexSnapshot,
+};
+pub use raw_index::{
+    NativeRawKeyFamily, NativeRawKeyInventory, NativeRawObservationFrontier, NativeRawRemovalCopy,
+    NativeRawRemovalCopyPage,
+};
+pub use retention::{
+    NativeOwnedKeyAction, NativeOwnedKeyDisposition, NativeOwnedKeyInventory, NativeOwnedKeyOwner,
+    NativeOwnedKeyRemovalReceipt, NativeOwnedKeyRemovalWitness, NativePrimaryKeyAction,
+    NativePrimaryKeyDisposition, NativePrimaryKeyInventory, NativePrimaryKeyRemovalReceipt,
+    NativePrimaryKeyRemovalWitness, NativeRemovalBackupInventory, NativeRemovalKeyInventory,
+    NativeRemovalKeySelection, NativeRemovalPreparationReceipt, NativeRemovalRequestInventory,
+    NativeRemovalRequestReceipt, NativeSourcePruningReceipt,
+};
 pub use suppression::{NativeSuppressionLedger, SuppressionProgress};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -202,6 +298,30 @@ struct WorkspaceState {
     workspace_digest: String,
     latest_global_commit: u64,
     watermarks: Watermarks,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "raw_index::dense::graph::segments::heads::deserialize_heads"
+    )]
+    segment_heads: Option<BTreeMap<u64, raw_index::dense::graph::segments::types::DirectoryRef>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "raw_index::dense::graph::prefix_v2::heads::deserialize_prefix_bases"
+    )]
+    prefix_bases: Option<BTreeMap<u64, raw_index::dense::graph::prefix_v2::types::PrefixBaseRefV2>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "raw_index::dense::graph::prefix_segments_v2::heads::deserialize_prefix_segment_heads"
+    )]
+    prefix_segment_heads: Option<BTreeMap<u64, PrefixSegmentDirectoryRefV2>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "raw_index::dense::graph::routing::heads::deserialize_directory_routers"
+    )]
+    directory_routers: Option<BTreeMap<u64, DirectoryRouterRefV1>>,
 }
 
 impl WorkspaceState {
@@ -211,6 +331,10 @@ impl WorkspaceState {
             workspace_digest,
             latest_global_commit: 0,
             watermarks: Watermarks::default(),
+            segment_heads: None,
+            prefix_bases: None,
+            prefix_segment_heads: None,
+            directory_routers: None,
         }
     }
 }
@@ -308,11 +432,42 @@ struct StoredEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_original_revocation: Option<OriginalRevocationReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_raw_reclamation: Option<RawReclaimProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_assertions: Option<contextdb_service::AssertionReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     accepted_records: Vec<record_journal::RecordMutationRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     accepted_suppression: Option<suppression::SuppressionPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_removal_preparation: Option<retention::RemovalPreparationPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_source_pruning: Option<retention::SourcePruningPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_payload_pruning: Option<payload::PayloadPruningPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_assertion_pruning: Option<assertions::AssertionPruningPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_sources: Option<record_sources::RecordSourcesPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_write: Option<record_sources::writes::RecordWriteRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_write_completion: Option<record_sources::writes::RecordWriteCompletion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_control_preparation:
+        Option<record_journal::controls::preparation::ControlPreparation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_record_pruning:
+        Option<record_journal::controls::witness::pruning::RecordPruningPublication>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    segment_heads: Option<raw_index::dense::graph::segments::types::SegmentHeadStamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prefix_bases: Option<raw_index::dense::graph::prefix_v2::types::PrefixBaseStampV2>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prefix_segment_heads:
+        Option<raw_index::dense::graph::prefix_segments_v2::types::PrefixSegmentHeadStampV2>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    directory_routers: Option<raw_index::dense::graph::routing::types::DirectoryRouterHeadStampV1>,
     previous_event_digest: Option<String>,
     event_digest: String,
 }
@@ -348,15 +503,21 @@ struct HierarchyRewire {
 /// Incremental Fjall-backed implementation of the canonical application service.
 pub struct NativeService {
     engine: NativeStorage,
+    path: std::path::PathBuf,
     keyspaces: Keyspaces,
     database_id: String,
     token_key: Zeroizing<[u8; 32]>,
     writes: publication::PublicationQueue,
+    backup_jobs: publication::PublicationQueue,
     index_views: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     leases: Mutex<lease::LeaseRegistry>,
     lease_started: std::time::Instant,
+    #[cfg(test)]
+    lease_test_clock: Mutex<Option<(contextdb_core::TimestampMicros, u64)>>,
     lease_instance: uuid::Uuid,
     suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
+    record_write_recovery: Mutex<record_sources::writes::RecoveryCache>,
+    preparation_scorer: Option<prepare::scorer::InstalledScorer>,
 }
 
 impl fmt::Debug for NativeService {
@@ -388,65 +549,100 @@ impl NativeService {
         suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
         keys: Option<std::sync::Arc<NativeCustodyKeys>>,
     ) -> ServiceResult<Self> {
-        validate_identifier(&database_id, "database ID")?;
+        Self::validate_open_bindings(
+            &database_id,
+            &token_key,
+            suppression.as_deref(),
+            keys.as_deref(),
+        )?;
+        let engine = NativeStorage::open(path.as_ref(), keys).map_err(storage_error)?;
+        Self::finish_open(path.as_ref(), database_id, token_key, suppression, engine)
+    }
+
+    fn validate_open_bindings(
+        database_id: &str,
+        token_key: &[u8; 32],
+        suppression: Option<&NativeSuppressionLedger>,
+        keys: Option<&NativeCustodyKeys>,
+    ) -> ServiceResult<()> {
+        validate_identifier(database_id, "database ID")?;
         if token_key.iter().all(|byte| *byte == 0) {
             return Err(invalid("native service token key must not be all zero"));
         }
-        if let Some(ledger) = &suppression {
-            ledger.require_database(&database_id)?;
+        if let Some(ledger) = suppression {
+            ledger.require_database(database_id)?;
         }
-        if let Some(keys) = &keys {
-            keys.require_database(&database_id)?;
+        if let Some(keys) = keys {
+            keys.require_database(database_id)?;
             if suppression.is_none() {
                 return Err(invalid(
                     "encrypted native storage requires current suppression",
                 ));
             }
         }
-        let engine = NativeStorage::open(path.as_ref(), keys).map_err(storage_error)?;
-        if let Some(ledger) = &suppression {
-            let native_path = path
-                .as_ref()
-                .canonicalize()
-                .map_err(|_| integrity("native path is unavailable"))?;
-            if native_path.starts_with(&ledger.path) || ledger.path.starts_with(&native_path) {
-                return Err(invalid(
-                    "suppression and native authorities require separate directory trees",
-                ));
-            }
+        Ok(())
+    }
+
+    fn finish_open(
+        path: &Path,
+        database_id: String,
+        token_key: [u8; 32],
+        suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
+        engine: NativeStorage,
+    ) -> ServiceResult<Self> {
+        let service = Self::from_native_storage(path, database_id, token_key, suppression, engine)?;
+        service.install_or_verify_manifest()?;
+        service.verify_native(false)?;
+        Ok(service)
+    }
+
+    fn from_native_storage(
+        path: &Path,
+        database_id: String,
+        token_key: [u8; 32],
+        suppression: Option<std::sync::Arc<NativeSuppressionLedger>>,
+        engine: NativeStorage,
+    ) -> ServiceResult<Self> {
+        let native_path = path
+            .canonicalize()
+            .map_err(|_| integrity("native path is unavailable"))?;
+        if let Some(ledger) = &suppression
+            && (native_path.starts_with(&ledger.path) || ledger.path.starts_with(&native_path))
+        {
+            return Err(invalid(
+                "suppression and native authorities require separate directory trees",
+            ));
         }
-        if let Some(keys) = &engine.keys {
-            let native_path = path
-                .as_ref()
-                .canonicalize()
-                .map_err(|_| integrity("native path is unavailable"))?;
-            if native_path.starts_with(&keys.path)
+        if let Some(keys) = &engine.keys
+            && (native_path.starts_with(&keys.path)
                 || keys.path.starts_with(&native_path)
                 || suppression.as_ref().is_some_and(|ledger| {
                     ledger.path.starts_with(&keys.path) || keys.path.starts_with(&ledger.path)
-                })
-            {
-                return Err(invalid(
-                    "native, suppression and custody-key authorities require separate directory trees",
-                ));
-            }
+                }))
+        {
+            return Err(invalid(
+                "native, suppression and custody-key authorities require separate directory trees",
+            ));
         }
         let keyspaces = Keyspaces::new()?;
-        let service = Self {
+        Ok(Self {
             engine,
+            path: native_path,
             keyspaces,
             database_id,
             token_key: Zeroizing::new(token_key),
             writes: publication::PublicationQueue::default(),
+            backup_jobs: publication::PublicationQueue::default(),
             index_views: std::sync::Arc::default(),
             leases: Mutex::new(lease::LeaseRegistry::default()),
             lease_started: std::time::Instant::now(),
+            #[cfg(test)]
+            lease_test_clock: Mutex::new(None),
             lease_instance: contextdb_core::ObservationId::new().as_uuid(),
             suppression,
-        };
-        service.install_or_verify_manifest()?;
-        service.verify_native(false)?;
-        Ok(service)
+            record_write_recovery: Mutex::default(),
+            preparation_scorer: None,
+        })
     }
 
     /// Stable native profile name used by status and host capability manifests.
@@ -470,7 +666,7 @@ impl NativeService {
             self.verify_encryption_binding(&manifest)?;
             return Ok(());
         }
-        if snapshot.sequence() != 0 {
+        if snapshot.sequence() != 0 && !self.engine.is_protocol_genesis().map_err(storage_error)? {
             return Err(integrity(
                 "native manifest is absent from a non-empty physical store",
             ));
@@ -494,6 +690,15 @@ impl NativeService {
             manifest
                 .features
                 .insert(suppression::SUPPRESSION_FEATURE.into());
+        }
+        if self
+            .suppression
+            .as_ref()
+            .is_some_and(|ledger| ledger.supports_removal())
+        {
+            manifest
+                .features
+                .insert(retention::RETENTION_FEATURE.into());
         }
         if manifest.custody_authority.is_some() {
             manifest
@@ -592,17 +797,21 @@ impl NativeService {
         Ok((mapping.global_commit, mapping.state))
     }
 
-    fn begin_frame<T: WriteTransaction>(
+    fn begin_frame<T: ReadSnapshot>(
         &self,
         transaction: &T,
         workspace_id: &str,
         semantic: bool,
     ) -> ServiceResult<CommitFrame> {
+        if let Some(ledger) = &self.suppression {
+            ledger.register_removal_workspace(&digest_bytes(workspace_id.as_bytes()))?;
+        }
         let global_commit = self
             .global_head(transaction)?
             .checked_add(1)
             .ok_or_else(|| exhausted("native global commit sequence is exhausted"))?;
-        let mut state = self.workspace_state(transaction, workspace_id)?;
+        let mut state = self.segment_frame_workspace(transaction, workspace_id)?;
+        self.admit_segment_head_predecessor(transaction, &state, global_commit - 1)?;
         let workspace_commit = state
             .watermarks
             .journal
@@ -639,6 +848,14 @@ impl NativeService {
         let response_bytes = encode(response)?;
         let response_digest = digest_bytes(&response_bytes);
         let accepted_records = self.accepted_record_mutations(transaction, frame)?;
+        let accepted_record_write = self.accepted_record_write(
+            transaction,
+            frame,
+            operation,
+            request_digest,
+            idempotency_key,
+            &accepted_records,
+        )?;
         let mut event = StoredEvent {
             schema_version: SCHEMA_VERSION,
             global_commit: frame.global_commit,
@@ -672,18 +889,72 @@ impl NativeService {
             } else {
                 None
             },
+            accepted_raw_reclamation: if operation == "raw_reclamation_with_copies" {
+                Some(decode(&response_bytes, "raw reclamation progress")?)
+            } else {
+                None
+            },
             accepted_assertions: if operation == "assertions" {
                 Some(decode(&response_bytes, "assertion receipt")?)
             } else {
                 None
             },
             accepted_records,
+            accepted_record_write,
+            accepted_record_write_completion: if operation == "record_write_complete" {
+                Some(decode(&response_bytes, "record write completion")?)
+            } else {
+                None
+            },
+            accepted_record_control_preparation: if operation == "record_controls_prepare" {
+                Some(decode(&response_bytes, "record control preparation")?)
+            } else {
+                None
+            },
             accepted_suppression: if operation == "suppression_reconcile" {
                 Some(decode(&response_bytes, "suppression publication")?)
             } else {
                 None
             },
+            accepted_removal_preparation: if operation == "removal_prepare" {
+                Some(decode(&response_bytes, "removal preparation publication")?)
+            } else {
+                None
+            },
+            accepted_source_pruning: if operation == "source_prune" {
+                Some(decode(&response_bytes, "source pruning publication")?)
+            } else {
+                None
+            },
+            accepted_payload_pruning: if operation == "payload_prune" {
+                Some(decode(&response_bytes, "payload pruning publication")?)
+            } else {
+                None
+            },
+            accepted_assertion_pruning: if operation == "assertion_prune" {
+                Some(decode(&response_bytes, "assertion pruning publication")?)
+            } else {
+                None
+            },
+            accepted_record_sources: if operation == "record_sources_reconcile" {
+                Some(decode(&response_bytes, "record source application")?)
+            } else {
+                None
+            },
+            accepted_record_pruning: if operation == "record_prune" {
+                Some(decode(&response_bytes, "record pruning publication")?)
+            } else {
+                None
+            },
+            segment_heads: None,
+            prefix_bases: None,
+            prefix_segment_heads: None,
+            directory_routers: None,
         };
+        event.segment_heads = self.segment_head_stamp(&frame.state, &event)?;
+        event.prefix_bases = self.prefix_base_stamp(&frame.state, &event)?;
+        event.prefix_segment_heads = self.prefix_segment_head_stamp(&frame.state, &event)?;
+        event.directory_routers = self.directory_router_head_stamp(&frame.state, &event)?;
         event.event_digest = event_digest(&event)?;
         let idempotency = StoredIdempotency {
             schema_version: SCHEMA_VERSION,
@@ -851,7 +1122,11 @@ impl NativeService {
             .get(&self.keyspaces.content_history, &key)
             .map_err(storage_error)?
             .ok_or_else(|| integrity("native authorized record content is absent"))?;
-        let stored: StoredContent = decode(&bytes, "native record content")?;
+        self.decode_content(&bytes, policy)
+    }
+
+    fn decode_content(&self, bytes: &[u8], policy: &StoredPolicy) -> ServiceResult<MemoryRecord> {
+        let stored: StoredContent = decode(bytes, "native record content")?;
         if stored.schema_version != SCHEMA_VERSION
             || stored.record_digest != policy.record_digest
             || stored.digest != policy.content_digest
@@ -865,6 +1140,20 @@ impl NativeService {
         {
             return Err(integrity(
                 "native authorized policy/content binding changed",
+            ));
+        }
+        if let Some(ledger) = &self.suppression
+            && let Some(binding) = ledger.retained_record_sources(
+                &digest_bytes(policy.access.workspace_id.as_bytes()),
+                &policy.record_digest,
+                policy.revision,
+            )?
+            && (binding.record_control()?.transaction_from != policy.transaction_from
+                || binding.record_control()?.document_digest
+                    != canonical_digest(&stored.record.document)?)
+        {
+            return Err(integrity(
+                "record body differs from retained source provenance",
             ));
         }
         Ok(stored.record)
@@ -935,6 +1224,7 @@ impl NativeService {
         if !policy_allows(&request.context.request, &policy.access) {
             return Err(permission_denied());
         }
+        self.authorize_record_sources(&snapshot, &request.context.request, &policy)?;
         self.load_content(&snapshot, &policy)
     }
 
@@ -1017,7 +1307,18 @@ impl NativeService {
         Ok(())
     }
 
+    fn raw_manifest<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<Manifest> {
+        decode(
+            &snapshot
+                .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("native manifest absent"))?,
+            "native manifest",
+        )
+    }
+
     fn verify_all_records<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<String> {
+        let manifest = self.raw_manifest(snapshot)?;
         for entry in snapshot
             .scan_prefix(&self.keyspaces.policy_history, b"")
             .map_err(storage_error)?
@@ -1027,7 +1328,17 @@ impl NativeService {
             if entry.key != history_key(&policy.record_digest, policy.revision) {
                 return Err(integrity("native historical policy key is invalid"));
             }
-            let _ = self.load_content(snapshot, &policy)?;
+            if self
+                .pruned_record(
+                    snapshot,
+                    &policy.record_digest,
+                    policy.revision,
+                    &mut retention::audit_budget(),
+                )?
+                .is_none()
+            {
+                let _ = self.load_content(snapshot, &policy)?;
+            }
         }
         for entry in snapshot
             .scan_prefix(&self.keyspaces.policy_head, b"")
@@ -1094,8 +1405,11 @@ impl NativeService {
                     &self.keyspaces.observations_content,
                     policy.observation_digest.as_bytes(),
                 )
-                .map_err(storage_error)?
-                .ok_or_else(|| integrity("native observation content is absent"))?;
+                .map_err(storage_error)?;
+            let Some(bytes) = bytes else {
+                self.verify_pruned_observation(snapshot, &policy)?;
+                continue;
+            };
             let content: StoredObservationContent = decode(&bytes, "native observation content")?;
             if content.metadata.get("capture_format")
                 == Some(&serde_json::json!(contextdb_service::NATIVE_CAPTURE_DOMAIN))
@@ -1123,6 +1437,18 @@ impl NativeService {
                     "native observation policy/content binding is invalid",
                 ));
             }
+            if content.metadata.get("capture_format")
+                == Some(&serde_json::json!(contextdb_service::NATIVE_CAPTURE_DOMAIN))
+                && content.content.get("kind")
+                    == Some(&serde_json::json!(
+                        contextdb_core::EventKind::RunCheckpointed
+                    ))
+            {
+                let event: contextdb_core::EventEnvelope = serde_json::from_value(content.content)
+                    .map_err(|_| integrity("captured checkpoint envelope is invalid"))?;
+                let checkpoint = owned::decode_checkpoint(&event)?;
+                owned::require_tool_page_feature(&checkpoint, &manifest.features)?;
+            }
         }
         for entry in snapshot
             .scan_prefix(&self.keyspaces.idempotency, b"")
@@ -1146,14 +1472,24 @@ impl NativeService {
                 .map_err(|_| integrity("native workspace key is invalid"))?;
             validate_workspace_state(&state, digest)?;
         }
+        let mut heads_budget = retention::audit_budget();
+        self.verify_segment_heads_records(snapshot, &mut heads_budget)?;
+        self.verify_prefix_bases_records(snapshot, &mut heads_budget)?;
+        self.verify_prefix_segment_heads_records(snapshot, &mut heads_budget)?;
+        self.verify_directory_router_heads_records(snapshot, &mut heads_budget)?;
         self.verify_active_graph_invariants(snapshot)?;
         self.verify_capture_records(snapshot)?;
         self.verify_custody_records(snapshot)?;
         self.verify_suppression_records(snapshot)?;
+        self.verify_removal_preparations(snapshot)?;
+        self.verify_source_pruning(snapshot)?;
         self.verify_payload_records(snapshot)?;
         self.verify_raw_index_records(snapshot)?;
         self.verify_assertion_records(snapshot)?;
         self.verify_record_mutations(snapshot)?;
+        self.verify_record_pruning(snapshot)?;
+        self.verify_record_source_progress(snapshot)?;
+        self.verify_record_writes(snapshot)?;
         for entry in snapshot
             .scan_prefix(&self.keyspaces.events, b"")
             .map_err(storage_error)?
@@ -1183,152 +1519,7 @@ impl NativeService {
     }
 
     fn verify_active_graph_invariants<S: ReadSnapshot>(&self, snapshot: &S) -> ServiceResult<()> {
-        let mut active = BTreeMap::<String, (StoredPolicy, MemoryRecord)>::new();
-        for entry in snapshot
-            .scan_prefix(&self.keyspaces.policy_head, b"")
-            .map_err(storage_error)?
-        {
-            let policy: StoredPolicy = decode(&entry.value, "native active graph policy")?;
-            if policy.transaction_to.is_some() || policy.lifecycle != MemoryLifecycle::Active {
-                continue;
-            }
-            let record = self.load_content(snapshot, &policy)?;
-            if record.document.lifecycle != MemoryLifecycle::Active {
-                return Err(integrity(
-                    "active graph policy and content lifecycle disagree",
-                ));
-            }
-            if active
-                .insert(record.document.id.clone(), (policy, record))
-                .is_some()
-            {
-                return Err(integrity("active graph record identity is duplicated"));
-            }
-        }
-
-        let mut hierarchy_edges = Vec::new();
-        let mut candidate_edges = Vec::new();
-        for (id, (policy, record)) in &active {
-            let document = &record.document;
-            if document.kind == MemoryRecordKind::Edge
-                && document.links.predicate.as_deref() == Some(HIERARCHY_PARENT_PREDICATE)
-            {
-                let (Some(source), Some(target)) = (
-                    document.links.source.as_ref(),
-                    document.links.target.as_ref(),
-                ) else {
-                    return Err(integrity("active hierarchy edge endpoints are absent"));
-                };
-                if source == target || *id != hierarchy_edge_id(source, target)? {
-                    return Err(integrity(
-                        "active hierarchy edge identity or endpoints are invalid",
-                    ));
-                }
-                let Some((source_policy, source_record)) = active.get(source) else {
-                    return Err(integrity("active hierarchy edge source is absent"));
-                };
-                let Some((target_policy, target_record)) = active.get(target) else {
-                    return Err(integrity("active hierarchy edge target is absent"));
-                };
-                if source_policy.access != policy.access
-                    || target_policy.access != policy.access
-                    || matches!(
-                        source_record.document.kind,
-                        MemoryRecordKind::Edge | MemoryRecordKind::Candidate
-                    )
-                    || matches!(
-                        target_record.document.kind,
-                        MemoryRecordKind::Edge | MemoryRecordKind::Candidate
-                    )
-                {
-                    return Err(integrity(
-                        "active hierarchy edge crosses policy or record families",
-                    ));
-                }
-                hierarchy_edges.push((source.clone(), target.clone()));
-            }
-
-            if document.kind != MemoryRecordKind::Candidate {
-                if candidate_role(document).is_some()
-                    || document.links.predicate.as_deref()
-                        == Some(CANDIDATE_HIERARCHY_PARENT_PREDICATE)
-                {
-                    return Err(integrity(
-                        "candidate hierarchy metadata is attached to a canonical record",
-                    ));
-                }
-                continue;
-            }
-
-            match candidate_role(document) {
-                Some(CANDIDATE_MEMORY_ROLE) => {
-                    validate_candidate_proposal_document(document)?;
-                }
-                Some(CANDIDATE_EDGE_ROLE) => {
-                    validate_candidate_provenance_attributes(document)?;
-                    let (Some(source), Some(target), Some(predicate)) = (
-                        document.links.source.as_ref(),
-                        document.links.target.as_ref(),
-                        document.links.predicate.as_ref(),
-                    ) else {
-                        return Err(integrity("active candidate hierarchy link is malformed"));
-                    };
-                    if predicate != CANDIDATE_HIERARCHY_PARENT_PREDICATE
-                        || source == target
-                        || *id != candidate_hierarchy_edge_id(source, target)?
-                    {
-                        return Err(integrity(
-                            "active candidate hierarchy link identity is invalid",
-                        ));
-                    }
-                    let Some((source_policy, source_record)) = active.get(source) else {
-                        return Err(integrity(
-                            "active candidate hierarchy link source is absent",
-                        ));
-                    };
-                    let Some((target_policy, target_record)) = active.get(target) else {
-                        return Err(integrity(
-                            "active candidate hierarchy link target is absent",
-                        ));
-                    };
-                    if source_policy.access != policy.access
-                        || target_policy.access != policy.access
-                        || source_record.document.kind != MemoryRecordKind::Candidate
-                        || target_record.document.kind != MemoryRecordKind::Candidate
-                        || candidate_role(&source_record.document) != Some(CANDIDATE_MEMORY_ROLE)
-                        || candidate_role(&target_record.document) != Some(CANDIDATE_MEMORY_ROLE)
-                    {
-                        return Err(integrity(
-                            "active candidate hierarchy link crosses policy or candidate roles",
-                        ));
-                    }
-                    for attribute in [
-                        "contextdb.proposal.schema_version",
-                        "contextdb.proposal.state",
-                        "contextdb.proposal.input_digest",
-                        "contextdb.proposal.actor_id",
-                        "contextdb.proposal.agent_id",
-                        "contextdb.proposal.session_id",
-                        "contextdb.proposal.request_id",
-                        "contextdb.proposal.schema_id",
-                    ] {
-                        if document.attributes.get(attribute)
-                            != target_record.document.attributes.get(attribute)
-                        {
-                            return Err(integrity(
-                                "candidate hierarchy link provenance differs from its child",
-                            ));
-                        }
-                    }
-                    candidate_edges.push((source.clone(), target.clone()));
-                }
-                Some(_) | None => {
-                    return Err(integrity("active candidate role is absent or invalid"));
-                }
-            }
-        }
-        verify_acyclic_graph("hierarchy", &hierarchy_edges)?;
-        verify_acyclic_graph("candidate hierarchy", &candidate_edges)
+        self.verify_record_graph(snapshot)
     }
 }
 
@@ -1596,6 +1787,17 @@ impl NativeService {
         &self,
         request: PublishMemoryRequest,
     ) -> ServiceResult<MutationResponse> {
+        self.publish_explicit_memory_inner(request, None)
+    }
+
+    fn publish_explicit_memory_inner(
+        &self,
+        request: PublishMemoryRequest,
+        mut inputs: Option<(
+            &BTreeSet<contextdb_core::ObservationId>,
+            &mut contextdb_recall::QueryBudget,
+        )>,
+    ) -> ServiceResult<MutationResponse> {
         require_capability(&request.context, Capability::Correct)?;
         require_capability(&request.context, Capability::Observe)?;
         validate_identifier(&request.idempotency_key, "idempotency key")?;
@@ -1606,28 +1808,69 @@ impl NativeService {
             return Err(permission_denied());
         }
         let authorization_digest = request.context.authorization_binding_digest()?;
-        let request_digest = canonical_digest(&(
+        let mut request_digest = canonical_digest(&(
             "publish-memory-v1",
             &authorization_digest,
             &request.memory_id,
             &request.value,
             &request.search_text,
         ))?;
-        let idempotency_key = authenticated_idempotency_key(
-            "publish_memory",
-            &request.context,
-            &request.idempotency_key,
-        )?;
-        let _guard = self.lock_writes()?;
+        let operation = if let Some((sources, _)) = &inputs {
+            request_digest = canonical_digest(&(
+                record_sources::writes::WRITE_FEATURE,
+                "publish_memory_from_sources",
+                &request_digest,
+                sources,
+            ))?;
+            "publish_memory_from_sources"
+        } else {
+            "publish_memory"
+        };
+        let idempotency_key =
+            authenticated_idempotency_key(operation, &request.context, &request.idempotency_key)?;
+        // Accepted retries repair the original handoff even if its source has
+        // since been revoked. They never re-evaluate it as a new publication.
+        let prepared = if let Some((sources, budget)) = inputs.as_mut() {
+            let snapshot = self
+                .engine
+                .begin_read(SnapshotSelector::Latest)
+                .map_err(storage_error)?;
+            if let Some(mut replay) = self.replay::<MutationResponse, _>(
+                &snapshot,
+                &idempotency_key,
+                operation,
+                &request_digest,
+            )? {
+                replay.replayed = true;
+                return Ok(replay);
+            }
+            Some(self.prepare_record_write(&request.context, sources, budget)?)
+        } else {
+            None
+        };
+        #[cfg(test)]
+        if prepared.is_some() {
+            record_sources::writes::before_publication();
+        }
+        let _guard = if let Some((_, budget)) = &inputs {
+            self.lock_index_publication(budget)?
+        } else {
+            self.lock_writes()?
+        };
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(mut replay) = self.replay::<MutationResponse, _>(
             &transaction,
             &idempotency_key,
-            "publish_memory",
+            operation,
             &request_digest,
         )? {
             replay.replayed = true;
             return Ok(replay);
+        }
+        if let Some(prepared) = &prepared {
+            self.check_record_write_preparation(&transaction, &request.context, prepared)?;
+        } else {
+            self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
         }
         if self.load_head(&transaction, &request.memory_id)?.is_some() {
             return Err(invalid("memory ID has already been used"));
@@ -1663,14 +1906,27 @@ impl NativeService {
             request_digest: request_digest.clone(),
             watermarks: frame.state.watermarks.clone(),
         };
+        if let Some(prepared) = prepared {
+            self.stage_record_write(
+                &mut transaction,
+                &frame,
+                (&request_digest, &idempotency_key),
+                prepared,
+                &record,
+                inputs.as_mut().expect("prepared source write").1,
+            )?;
+        }
         self.finish_frame(
             &mut transaction,
             &frame,
-            "publish_memory",
+            operation,
             &idempotency_key,
             &request_digest,
             &response,
         )?;
+        if let Some((_, budget)) = &inputs {
+            budget.check().map_err(raw_index::budget_error)?;
+        }
         require_sync(
             transaction
                 .commit(Durability::Sync)
@@ -1683,6 +1939,14 @@ impl NativeService {
     fn propose_memory_atomic(
         &self,
         request: ProposeMemoryRequest,
+    ) -> ServiceResult<ProposeMemoryResponse> {
+        self.propose_memory_atomic_inner(request, None)
+    }
+
+    fn propose_memory_atomic_inner(
+        &self,
+        request: ProposeMemoryRequest,
+        mut inputs: Option<record_sources::writes::Inputs<'_>>,
     ) -> ServiceResult<ProposeMemoryResponse> {
         require_capability(&request.context, Capability::Observe)?;
         validate_identifier(&request.idempotency_key, "idempotency key")?;
@@ -1730,23 +1994,56 @@ impl NativeService {
             &request.parent_candidate_ids,
             &request.supersedes_candidate_ids,
         ))?;
-        let request_digest =
+        let mut request_digest =
             canonical_digest(&("propose-memory-v1", &authorization_digest, &input_digest))?;
-        let idempotency_key = authenticated_idempotency_key(
-            "propose_memory",
+        let operation = if inputs.is_some() {
+            record_sources::writes::PROPOSE
+        } else {
+            "propose_memory"
+        };
+        if let Some((sources, _)) = &inputs {
+            request_digest = canonical_digest(&(
+                record_sources::writes::GROUP_FEATURE,
+                operation,
+                &request_digest,
+                sources,
+            ))?;
+        }
+        let idempotency_key =
+            authenticated_idempotency_key(operation, &request.context, &request.idempotency_key)?;
+        let (prepared, replay) = self.prepare_record_write_or_replay::<ProposeMemoryResponse>(
             &request.context,
-            &request.idempotency_key,
+            operation,
+            &idempotency_key,
+            &request_digest,
+            &mut inputs,
         )?;
-        let _guard = self.lock_writes()?;
+        if let Some(replay) = replay {
+            return Ok(replay);
+        }
+        #[cfg(test)]
+        if prepared.is_some() {
+            record_sources::writes::before_publication();
+        }
+        let _guard = if let Some((_, budget)) = &inputs {
+            self.lock_index_publication(budget)?
+        } else {
+            self.lock_writes()?
+        };
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(mut replay) = self.replay::<ProposeMemoryResponse, _>(
             &transaction,
             &idempotency_key,
-            "propose_memory",
+            operation,
             &request_digest,
         )? {
             replay.mutation.replayed = true;
             return Ok(replay);
+        }
+        if let Some(prepared) = &prepared {
+            self.check_record_write_preparation(&transaction, &request.context, prepared)?;
+        } else {
+            self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
         }
         if self
             .load_head(&transaction, &request.candidate_id)?
@@ -1772,6 +2069,10 @@ impl NativeService {
             {
                 return Err(permission_denied());
             }
+            self.authorize_record_sources(&transaction, &request.context.request, &parent_policy)?;
+            if let Some((_, budget)) = inputs.as_mut() {
+                self.charge_source_record_body(&transaction, &parent_policy, budget)?;
+            }
             let parent = self.load_content(&transaction, &parent_policy)?;
             if parent.document.lifecycle != MemoryLifecycle::Active
                 || candidate_role(&parent.document) != Some(CANDIDATE_MEMORY_ROLE)
@@ -1793,6 +2094,14 @@ impl NativeService {
                 || predecessor_policy.access != candidate_access
             {
                 return Err(permission_denied());
+            }
+            self.authorize_record_sources(
+                &transaction,
+                &request.context.request,
+                &predecessor_policy,
+            )?;
+            if let Some((_, budget)) = inputs.as_mut() {
+                self.charge_source_record_body(&transaction, &predecessor_policy, budget)?;
             }
             let predecessor = self.load_content(&transaction, &predecessor_policy)?;
             if candidate_role(&predecessor.document) != Some(CANDIDATE_MEMORY_ROLE) {
@@ -1819,6 +2128,7 @@ impl NativeService {
             &request.context.request,
             global_head,
             &candidate_access,
+            inputs.as_mut().map(|(_, budget)| &mut **budget),
         )?;
         reject_candidate_hierarchy_cycle(
             &active_edges,
@@ -1940,14 +2250,31 @@ impl NativeService {
             proposal_state: contextdb_service::CandidateProposalState::Quarantined,
             canonical: false,
         };
+        if let Some(prepared) = prepared {
+            self.stage_record_group(
+                &mut transaction,
+                &frame,
+                record_sources::writes::GroupRequest::new(
+                    operation,
+                    &request_digest,
+                    &idempotency_key,
+                    &response.candidate_id,
+                ),
+                prepared,
+                inputs.as_mut().expect("prepared source group").1,
+            )?;
+        }
         self.finish_frame(
             &mut transaction,
             &frame,
-            "propose_memory",
+            operation,
             &idempotency_key,
             &request_digest,
             &response,
         )?;
+        if let Some((_, budget)) = &inputs {
+            budget.check().map_err(raw_index::budget_error)?;
+        }
         require_sync(
             transaction
                 .commit(Durability::Sync)
@@ -1963,18 +2290,33 @@ impl NativeService {
         principal: &RequestContext,
         global_commit: u64,
         exact_access: &AccessPolicy,
+        mut budget: Option<&mut contextdb_recall::QueryBudget>,
     ) -> ServiceResult<Vec<(StoredPolicy, MemoryRecord)>> {
-        let policies = self.authorized_policies(
-            snapshot,
-            principal,
-            global_commit,
-            MemoryLifecycle::Active,
-            AuthorizedPolicyFamily::Candidate,
-        )?;
+        let policies = if let Some(budget) = budget.as_deref_mut() {
+            self.source_graph_policies(
+                snapshot,
+                principal,
+                global_commit,
+                exact_access,
+                AuthorizedPolicyFamily::Candidate,
+                budget,
+            )?
+        } else {
+            self.authorized_policies(
+                snapshot,
+                principal,
+                global_commit,
+                MemoryLifecycle::Active,
+                AuthorizedPolicyFamily::Candidate,
+            )?
+        };
         let mut edges = Vec::new();
         for policy in policies.into_values() {
             if policy.kind != MemoryRecordKind::Candidate || policy.access != *exact_access {
                 continue;
+            }
+            if let Some(budget) = budget.as_deref_mut() {
+                self.charge_source_record_body(snapshot, &policy, budget)?;
             }
             let record = self.load_content(snapshot, &policy)?;
             if candidate_role(&record.document) == Some(CANDIDATE_EDGE_ROLE) {
@@ -2035,18 +2377,33 @@ impl NativeService {
         principal: &RequestContext,
         global_commit: u64,
         exact_access: &AccessPolicy,
+        mut budget: Option<&mut contextdb_recall::QueryBudget>,
     ) -> ServiceResult<Vec<(StoredPolicy, MemoryRecord)>> {
-        let policies = self.authorized_policies(
-            snapshot,
-            principal,
-            global_commit,
-            MemoryLifecycle::Active,
-            AuthorizedPolicyFamily::Canonical,
-        )?;
+        let policies = if let Some(budget) = budget.as_deref_mut() {
+            self.source_graph_policies(
+                snapshot,
+                principal,
+                global_commit,
+                exact_access,
+                AuthorizedPolicyFamily::Canonical,
+                budget,
+            )?
+        } else {
+            self.authorized_policies(
+                snapshot,
+                principal,
+                global_commit,
+                MemoryLifecycle::Active,
+                AuthorizedPolicyFamily::Canonical,
+            )?
+        };
         let mut edges = Vec::new();
         for policy in policies.into_values() {
             if policy.kind != MemoryRecordKind::Edge || policy.access != *exact_access {
                 continue;
+            }
+            if let Some(budget) = budget.as_deref_mut() {
+                self.charge_source_record_body(snapshot, &policy, budget)?;
             }
             let record = self.load_content(snapshot, &policy)?;
             if record.document.links.predicate.as_deref() == Some(HIERARCHY_PARENT_PREDICATE) {
@@ -2132,6 +2489,21 @@ impl NativeService {
         frame: &CommitFrame,
         rewire: HierarchyRewire,
     ) -> ServiceResult<()> {
+        let successor = MemoryRecord {
+            document: hierarchy_rewire_document(
+                &rewire.old_record.document,
+                &rewire.new_source,
+                &rewire.new_target,
+            )?,
+            revision: 1,
+            transaction_from: frame.global_commit,
+            transaction_to: None,
+        };
+        if successor.document.id != rewire.new_edge_id {
+            return Err(integrity(
+                "hierarchy successor identity differs from its plan",
+            ));
+        }
         let mut old_record = rewire.old_record;
         old_record.transaction_to = Some(frame.global_commit);
         let closed_policy = policy_for(&old_record)?;
@@ -2142,33 +2514,6 @@ impl NativeService {
         }
         self.put_record(transaction, &closed_policy, &old_record)?;
 
-        let old_edge_id = old_record.document.id;
-        let mut links = old_record.document.links;
-        links.source = Some(rewire.new_source.clone());
-        links.target = Some(rewire.new_target.clone());
-        links.supersedes.insert(old_edge_id);
-        let successor = MemoryRecord {
-            document: MemoryDocument {
-                id: rewire.new_edge_id,
-                kind: MemoryRecordKind::Edge,
-                access: old_record.document.access,
-                valid_time: old_record.document.valid_time,
-                lifecycle: MemoryLifecycle::Active,
-                links,
-                value: serde_json::json!({
-                    "schema_version": SCHEMA_VERSION,
-                    "relation": "parent",
-                    "parent_id": rewire.new_source,
-                    "child_id": rewire.new_target,
-                }),
-                search_text: None,
-                vector: None,
-                attributes: old_record.document.attributes,
-            },
-            revision: 1,
-            transaction_from: frame.global_commit,
-            transaction_to: None,
-        };
         let successor_policy = policy_for(&successor)?;
         self.put_record(transaction, &successor_policy, &successor)
     }
@@ -2515,6 +2860,14 @@ impl NativeService {
     }
 
     fn correct_memory(&self, request: CorrectRequest) -> ServiceResult<MutationResponse> {
+        self.correct_memory_inner(request, None)
+    }
+
+    fn correct_memory_inner(
+        &self,
+        request: CorrectRequest,
+        mut inputs: Option<record_sources::writes::Inputs<'_>>,
+    ) -> ServiceResult<MutationResponse> {
         require_capability(&request.context, Capability::Correct)?;
         validate_identifier(&request.idempotency_key, "idempotency key")?;
         validate_identifier(&request.target_id, "correction target")?;
@@ -2535,24 +2888,60 @@ impl NativeService {
             ));
         }
         let authorization_digest = request.context.authorization_binding_digest()?;
-        let request_digest = canonical_digest(&(
+        let mut request_digest = canonical_digest(&(
             "correct-memory-v1",
             &authorization_digest,
             &request.target_id,
             &request.replacement,
         ))?;
+        let operation = if inputs.is_some() {
+            record_sources::writes::CORRECT
+        } else {
+            "correct"
+        };
+        if let Some((sources, _)) = &inputs {
+            request_digest = canonical_digest(&(
+                record_sources::writes::CORRECTION_FEATURE,
+                operation,
+                &request_digest,
+                sources,
+            ))?;
+        }
         let idempotency_key =
-            authenticated_idempotency_key("correct", &request.context, &request.idempotency_key)?;
-        let _guard = self.lock_writes()?;
+            authenticated_idempotency_key(operation, &request.context, &request.idempotency_key)?;
+        let (prepared, replay) = self.prepare_record_write_or_replay::<MutationResponse>(
+            &request.context,
+            operation,
+            &idempotency_key,
+            &request_digest,
+            &mut inputs,
+        )?;
+        if let Some(replay) = replay {
+            return Ok(replay);
+        }
+        #[cfg(test)]
+        if prepared.is_some() {
+            record_sources::writes::before_publication();
+        }
+        let _guard = if let Some((_, budget)) = &inputs {
+            self.lock_index_publication(budget)?
+        } else {
+            self.lock_writes()?
+        };
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(mut replay) = self.replay::<MutationResponse, _>(
             &transaction,
             &idempotency_key,
-            "correct",
+            operation,
             &request_digest,
         )? {
             replay.replayed = true;
             return Ok(replay);
+        }
+        if let Some(prepared) = &prepared {
+            self.check_record_write_preparation(&transaction, &request.context, prepared)?;
+        } else {
+            self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
         }
         let target_policy = self
             .load_head(&transaction, &request.target_id)?
@@ -2569,7 +2958,10 @@ impl NativeService {
         {
             return Err(permission_denied());
         }
-        // Content is loaded only after the target policy has authorized it.
+        self.authorize_record_sources(&transaction, &request.context.request, &target_policy)?;
+        if let Some((_, budget)) = inputs.as_mut() {
+            self.charge_source_record_body(&transaction, &target_policy, budget)?;
+        }
         let mut target = self.load_content(&transaction, &target_policy)?;
         if target.document.kind == MemoryRecordKind::Candidate {
             return Err(invalid(
@@ -2606,6 +2998,7 @@ impl NativeService {
             &request.context.request,
             global_head,
             &target.document.access,
+            inputs.as_mut().map(|(_, budget)| &mut **budget),
         )?;
         let rewires = self.prepare_hierarchy_rewire(
             &transaction,
@@ -2613,6 +3006,14 @@ impl NativeService {
             &request.target_id,
             &request.replacement.id,
         )?;
+        let replacement_id = request.replacement.id.clone();
+        let group_request = record_sources::writes::GroupRequest::new(
+            operation,
+            &request_digest,
+            &idempotency_key,
+            &replacement_id,
+        )
+        .correcting(&target_policy, &rewires);
         if !rewires.is_empty()
             && (target.document.kind == MemoryRecordKind::Edge
                 || request.replacement.kind != target.document.kind)
@@ -2647,14 +3048,26 @@ impl NativeService {
             request_digest: request_digest.clone(),
             watermarks: frame.state.watermarks.clone(),
         };
+        if let Some(prepared) = prepared {
+            self.stage_record_group(
+                &mut transaction,
+                &frame,
+                group_request,
+                prepared,
+                inputs.as_mut().expect("prepared source group").1,
+            )?;
+        }
         self.finish_frame(
             &mut transaction,
             &frame,
-            "correct",
+            operation,
             &idempotency_key,
             &request_digest,
             &response,
         )?;
+        if let Some((_, budget)) = &inputs {
+            budget.check().map_err(raw_index::budget_error)?;
+        }
         require_sync(
             transaction
                 .commit(Durability::Sync)
@@ -2665,6 +3078,14 @@ impl NativeService {
     }
 
     fn retract_memory(&self, request: ForgetRequest) -> ServiceResult<MutationResponse> {
+        self.retract_memory_inner(request, None)
+    }
+
+    fn retract_memory_inner(
+        &self,
+        request: ForgetRequest,
+        mut inputs: Option<record_sources::writes::Inputs<'_>>,
+    ) -> ServiceResult<MutationResponse> {
         require_capability(&request.context, Capability::Forget)?;
         if request.mode == ForgetMode::HardDelete {
             require_capability(&request.context, Capability::HardDelete)?;
@@ -2675,25 +3096,61 @@ impl NativeService {
         validate_identifier(&request.idempotency_key, "idempotency key")?;
         validate_identifier(&request.target_id, "retraction target")?;
         let authorization_digest = request.context.authorization_binding_digest()?;
-        let request_digest = canonical_digest(&(
+        let mut request_digest = canonical_digest(&(
             "retract-memory-v1",
             &authorization_digest,
             &request.target_id,
             request.mode,
             &request.reason,
         ))?;
+        let operation = if inputs.is_some() {
+            record_sources::writes::RETRACT
+        } else {
+            "retract"
+        };
+        if let Some((sources, _)) = &inputs {
+            request_digest = canonical_digest(&(
+                record_sources::writes::GROUP_FEATURE,
+                operation,
+                &request_digest,
+                sources,
+            ))?;
+        }
         let idempotency_key =
-            authenticated_idempotency_key("retract", &request.context, &request.idempotency_key)?;
-        let _guard = self.lock_writes()?;
+            authenticated_idempotency_key(operation, &request.context, &request.idempotency_key)?;
+        let (prepared, replay) = self.prepare_record_write_or_replay::<MutationResponse>(
+            &request.context,
+            operation,
+            &idempotency_key,
+            &request_digest,
+            &mut inputs,
+        )?;
+        if let Some(replay) = replay {
+            return Ok(replay);
+        }
+        #[cfg(test)]
+        if prepared.is_some() {
+            record_sources::writes::before_publication();
+        }
+        let _guard = if let Some((_, budget)) = &inputs {
+            self.lock_index_publication(budget)?
+        } else {
+            self.lock_writes()?
+        };
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(mut replay) = self.replay::<MutationResponse, _>(
             &transaction,
             &idempotency_key,
-            "retract",
+            operation,
             &request_digest,
         )? {
             replay.replayed = true;
             return Ok(replay);
+        }
+        if let Some(prepared) = &prepared {
+            self.check_record_write_preparation(&transaction, &request.context, prepared)?;
+        } else {
+            self.require_legacy_record_writer(&transaction, &request.context.request.workspace_id)?;
         }
         let target_policy = self
             .load_head(&transaction, &request.target_id)?
@@ -2707,6 +3164,10 @@ impl NativeService {
         {
             return Err(permission_denied());
         }
+        self.authorize_record_sources(&transaction, &request.context.request, &target_policy)?;
+        if let Some((_, budget)) = inputs.as_mut() {
+            self.charge_source_record_body(&transaction, &target_policy, budget)?;
+        }
         let mut target = self.load_content(&transaction, &target_policy)?;
         if target.document.lifecycle != MemoryLifecycle::Active {
             return Err(invalid("retraction target is not active"));
@@ -2717,6 +3178,7 @@ impl NativeService {
             &request.context.request,
             global_head,
             &target.document.access,
+            inputs.as_mut().map(|(_, budget)| &mut **budget),
         )?;
         let has_incident_hierarchy_edges = hierarchy_edges.iter().any(|(_, record)| {
             record.document.links.source.as_deref() == Some(&request.target_id)
@@ -2730,6 +3192,7 @@ impl NativeService {
                 &request.context.request,
                 global_head,
                 &target.document.access,
+                inputs.as_mut().map(|(_, budget)| &mut **budget),
             )?
         } else {
             Vec::new()
@@ -2778,14 +3241,31 @@ impl NativeService {
             request_digest: request_digest.clone(),
             watermarks: frame.state.watermarks.clone(),
         };
+        if let Some(prepared) = prepared {
+            self.stage_record_group(
+                &mut transaction,
+                &frame,
+                record_sources::writes::GroupRequest::new(
+                    operation,
+                    &request_digest,
+                    &idempotency_key,
+                    &request.target_id,
+                ),
+                prepared,
+                inputs.as_mut().expect("prepared source group").1,
+            )?;
+        }
         self.finish_frame(
             &mut transaction,
             &frame,
-            "retract",
+            operation,
             &idempotency_key,
             &request_digest,
             &response,
         )?;
+        if let Some((_, budget)) = &inputs {
+            budget.check().map_err(raw_index::budget_error)?;
+        }
         require_sync(
             transaction
                 .commit(Durability::Sync)
@@ -2836,6 +3316,11 @@ impl NativeService {
                 || !policy_allows(&request.context.request, &policy.access)
             {
                 continue;
+            }
+            match self.authorize_record_sources(&snapshot, &request.context.request, &policy) {
+                Ok(()) => {}
+                Err(error) if record_sources::source_unavailable(&error) => continue,
+                Err(error) => return Err(error),
             }
             let mut record = self.load_content(&snapshot, &policy)?;
             if record.transaction_to.is_some_and(|to| to > global_commit) {
@@ -3013,6 +3498,11 @@ impl NativeService {
                     && policy_allows(principal, &policy.access)
                     && family.accepts(policy.kind)
                 {
+                    match self.authorize_record_sources(snapshot, principal, &policy) {
+                        Ok(()) => {}
+                        Err(error) if record_sources::source_unavailable(&error) => continue,
+                        Err(error) => return Err(error),
+                    }
                     selected.insert(policy.record_digest.clone(), policy);
                     if selected.len() > MAX_AUTHORIZED_CANDIDATES {
                         return Err(exhausted(
@@ -3067,21 +3557,162 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != capture::IMPACT_FEATURE
                 && feature != capture::RECOVERY_FEATURE
                 && feature != custody::CUSTODY_FEATURE
+                && feature != router_trace::TRACE_FEATURE
+                && feature != router_trace::TRACE_REPLAY_FEATURE
+                && feature != router_trace::hybrid::HYBRID_FEATURE
+                && feature != router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE
+                && feature != router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE
                 && feature != owned::OWNED_FEATURE
+                && feature != owned::TOOL_PAGES_FEATURE
+                && feature != owned::PAGE_RECALL_FEATURE
                 && feature != payload::SOURCE_FEATURE
                 && feature != payload::MODEL_PROTOCOL_FEATURE
                 && feature != payload::REQUEST_TRANSFORM_FEATURE
                 && feature != raw_index::INDEX_FEATURE
+                && feature != raw_index::bm25::FEATURE
+                && feature != raw_index::dense::FEATURE
+                && feature != raw_index::dense::graph::FEATURE
+                && feature != raw_index::dense::graph::segments::types::FEATURE
+                && feature != raw_index::dense::graph::prefix_v2::types::FEATURE
+                && feature != raw_index::dense::graph::prefix_segments_v2::types::FEATURE
+                && feature != raw_index::dense::graph::routing::types::FEATURE
                 && feature != raw_index::GC_FEATURE
+                && feature != raw_index::COPY_FEATURE
+                && feature != raw_index::REMOVAL_FEATURE
                 && feature != assertions::STATE_FEATURE
+                && feature != assertions::PRUNING_FEATURE
                 && feature != assertions::CATALOG_FEATURE
                 && feature != record_journal::RECORD_FEATURE
+                && feature != record_journal::CONTROL_FEATURE
+                && feature != record_journal::controls::preparation::FEATURE
+                && feature != record_journal::controls::witness::pruning::FEATURE
+                && feature != record_sources::FEATURE
+                && feature != record_sources::writes::WRITE_FEATURE
+                && feature != record_sources::writes::GROUP_FEATURE
+                && feature != record_sources::writes::CORRECTION_FEATURE
                 && feature != suppression::SUPPRESSION_FEATURE
+                && feature != retention::RETENTION_FEATURE
+                && feature != retention::PRUNING_FEATURE
+                && feature != payload::PAYLOAD_PRUNING_FEATURE
                 && feature != encryption::ENCRYPTION_FEATURE
         })
         || manifest.features.contains(suppression::SUPPRESSION_FEATURE)
             != manifest.suppression_authority.is_some()
+        || (manifest.features.contains(router_trace::TRACE_FEATURE)
+            && (!manifest.features.contains(custody::CUSTODY_FEATURE)
+                || !manifest.features.contains(capture::RECOVERY_FEATURE)
+                || !manifest.features.contains(payload::SOURCE_FEATURE)
+                || !manifest.features.contains(encryption::ENCRYPTION_FEATURE)
+                || !manifest.features.contains(capture::CAPTURE_FEATURE)))
+        || (manifest
+            .features
+            .contains(router_trace::TRACE_REPLAY_FEATURE)
+            && !manifest.features.contains(router_trace::TRACE_FEATURE))
+        || (manifest
+            .features
+            .contains(router_trace::hybrid::HYBRID_FEATURE)
+            && (!manifest
+                .features
+                .contains(router_trace::TRACE_REPLAY_FEATURE)
+                || !manifest.features.contains(owned::OWNED_FEATURE)))
+        || (manifest.features.contains(owned::TOOL_PAGES_FEATURE)
+            && !manifest.features.contains(owned::OWNED_FEATURE))
+        || (manifest
+            .features
+            .contains(router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE)
+            && (!manifest
+                .features
+                .contains(router_trace::hybrid::HYBRID_FEATURE)
+                || !manifest
+                    .features
+                    .contains(raw_index::dense::graph::segments::types::FEATURE)))
+        || (manifest
+            .features
+            .contains(router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE)
+            && (!manifest
+                .features
+                .contains(router_trace::hybrid::HYBRID_FEATURE)
+                || !manifest
+                    .features
+                    .contains(raw_index::dense::graph::routing::types::FEATURE)
+                || !manifest
+                    .features
+                    .contains(raw_index::dense::graph::prefix_v2::types::FEATURE)))
+        || (manifest.features.contains(owned::PAGE_RECALL_FEATURE)
+            && (!manifest.features.contains(owned::TOOL_PAGES_FEATURE)
+                || !manifest.features.contains(payload::SOURCE_FEATURE)
+                || !manifest.features.contains(capture::RECOVERY_FEATURE)))
         || manifest.suppression_authority.is_some_and(|id| id.is_nil())
+        || ((manifest.features.contains(record_journal::CONTROL_FEATURE)
+            || manifest
+                .features
+                .contains(record_journal::controls::preparation::FEATURE))
+            && !manifest.features.contains(record_journal::RECORD_FEATURE))
+        || (manifest
+            .features
+            .contains(record_sources::writes::CORRECTION_FEATURE)
+            && !manifest
+                .features
+                .contains(record_sources::writes::GROUP_FEATURE))
+        || (manifest
+            .features
+            .contains(record_sources::writes::GROUP_FEATURE)
+            && !manifest
+                .features
+                .contains(record_sources::writes::WRITE_FEATURE))
+        || (manifest
+            .features
+            .contains(record_sources::writes::WRITE_FEATURE)
+            && (!manifest.features.contains(record_sources::FEATURE)
+                || !manifest.features.contains(record_journal::RECORD_FEATURE)
+                || manifest.suppression_authority.is_none()))
+        || (manifest.features.contains(retention::RETENTION_FEATURE)
+            && manifest.suppression_authority.is_none())
+        || (manifest
+            .features
+            .contains(record_journal::controls::witness::pruning::FEATURE)
+            && (!manifest.features.contains(record_journal::RECORD_FEATURE)
+                || !manifest.features.contains(retention::RETENTION_FEATURE)))
+        || (manifest.features.contains(raw_index::REMOVAL_FEATURE)
+            && !manifest.features.contains(retention::RETENTION_FEATURE))
+        || (manifest.features.contains(raw_index::bm25::FEATURE)
+            && !manifest.features.contains(raw_index::INDEX_FEATURE))
+        || (manifest.features.contains(raw_index::dense::FEATURE)
+            && (!manifest.features.contains(raw_index::bm25::FEATURE)
+                || !manifest.features.contains(capture::RECOVERY_FEATURE)
+                || !manifest.features.contains(custody::CUSTODY_FEATURE)))
+        || (manifest.features.contains(raw_index::dense::graph::FEATURE)
+            && !manifest.features.contains(raw_index::dense::FEATURE))
+        || (manifest
+            .features
+            .contains(raw_index::dense::graph::segments::types::FEATURE)
+            && !manifest.features.contains(raw_index::dense::graph::FEATURE))
+        || (manifest
+            .features
+            .contains(raw_index::dense::graph::prefix_v2::types::FEATURE)
+            && !manifest.features.contains(raw_index::dense::FEATURE))
+        || (manifest
+            .features
+            .contains(raw_index::dense::graph::prefix_segments_v2::types::FEATURE)
+            && (!manifest
+                .features
+                .contains(raw_index::dense::graph::prefix_v2::types::FEATURE)
+                || !manifest.features.contains(raw_index::dense::FEATURE)))
+        || (manifest
+            .features
+            .contains(raw_index::dense::graph::routing::types::FEATURE)
+            && (!manifest
+                .features
+                .contains(raw_index::dense::graph::prefix_v2::types::FEATURE)
+                || !manifest.features.contains(raw_index::dense::FEATURE)))
+        || (manifest.features.contains(retention::PRUNING_FEATURE)
+            && !manifest.features.contains(retention::RETENTION_FEATURE))
+        || (manifest.features.contains(assertions::PRUNING_FEATURE)
+            && (!manifest.features.contains(retention::RETENTION_FEATURE)
+                || !manifest.features.contains(assertions::STATE_FEATURE)))
+        || (manifest.features.contains(payload::PAYLOAD_PRUNING_FEATURE)
+            && (!manifest.features.contains(retention::PRUNING_FEATURE)
+                || !manifest.features.contains(payload::SOURCE_FEATURE)))
         || manifest.features.contains(encryption::ENCRYPTION_FEATURE)
             != manifest.custody_authority.is_some()
         || manifest.custody_authority.is_some_and(|id| id.is_nil())
@@ -3116,6 +3747,10 @@ fn validate_workspace_state(state: &WorkspaceState, digest: &str) -> ServiceResu
     {
         return Err(integrity("native workspace state is invalid"));
     }
+    raw_index::dense::graph::segments::heads::validate_segment_heads(state)?;
+    raw_index::dense::graph::prefix_v2::heads::validate_prefix_bases(state)?;
+    raw_index::dense::graph::prefix_segments_v2::heads::validate_prefix_segment_heads(state)?;
+    raw_index::dense::graph::routing::heads::validate_directory_routers(state)?;
     Ok(())
 }
 
@@ -3665,6 +4300,34 @@ fn reject_candidate_hierarchy_cycle(
         }
     }
     Ok(())
+}
+
+fn hierarchy_rewire_document(
+    old: &MemoryDocument,
+    source: &str,
+    target: &str,
+) -> ServiceResult<MemoryDocument> {
+    let mut links = old.links.clone();
+    links.source = Some(source.into());
+    links.target = Some(target.into());
+    links.supersedes.insert(old.id.clone());
+    Ok(MemoryDocument {
+        id: hierarchy_edge_id(source, target)?,
+        kind: MemoryRecordKind::Edge,
+        access: old.access.clone(),
+        valid_time: old.valid_time,
+        lifecycle: MemoryLifecycle::Active,
+        links,
+        value: serde_json::json!({
+            "schema_version": SCHEMA_VERSION,
+            "relation": "parent",
+            "parent_id": source,
+            "child_id": target,
+        }),
+        search_text: None,
+        vector: None,
+        attributes: old.attributes.clone(),
+    })
 }
 
 fn hierarchy_edge_id(parent_id: &str, child_id: &str) -> ServiceResult<String> {

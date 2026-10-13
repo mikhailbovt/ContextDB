@@ -85,6 +85,7 @@ fn fixture(service: &NativeService) -> SaveRunCheckpointRequest {
                     role: OutgoingRole::User,
                     tool_calls: vec![],
                     tool_result: None,
+                    tool_page: None,
                 }],
             }],
             obligations: vec![ScopedObligation {

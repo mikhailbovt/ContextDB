@@ -9,7 +9,7 @@ use super::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct StateBinding {
+pub(crate) struct StateBinding {
     pub principal: String,
     pub key: StateKey,
     pub known_at: u64,
@@ -102,6 +102,12 @@ impl NativeService {
             let label: MutationLabel = decode(&entry.value, "state mutation label")?;
             if label.commit > known {
                 break;
+            }
+            if label.pruned_at.is_some() {
+                if !gaps.contains(&StateCoverageGap::SupportUnavailable) {
+                    gaps.push(StateCoverageGap::SupportUnavailable);
+                }
+                continue;
             }
             match self.authorize_state_label(&snapshot, &request.context, &label, budget) {
                 Ok(()) => {}
@@ -319,7 +325,7 @@ fn wall_time() -> ServiceResult<TimestampMicros> {
 
 /// The semantic envelope can narrow original access, never broaden it. Consent
 /// uses current wall time even for a historical valid-time query.
-fn envelope_allows(
+pub(crate) fn envelope_allows(
     context: &AuthenticatedRequestContext,
     envelope: &SemanticEnvelope,
     now: TimestampMicros,

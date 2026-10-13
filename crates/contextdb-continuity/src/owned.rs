@@ -12,6 +12,103 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ContinuityError, Result, canonical_digest, validate_text};
 
+/// Maximum visible original bytes in one tool-result page.
+pub const TOOL_RESULT_PAGE_BYTES: u32 = 4096;
+/// Reserved pure operation for a source-bound original page.
+pub const ORIGINAL_PAGE_OPERATION: &str = "contextdb.original.page";
+/// Host tool definition shared by retained views and historical source discovery.
+pub const ORIGINAL_PAGE_DEFINITION: &str = "Pure tool contextdb.original.page: read an original tool-result page. Arguments are JSON {handle: the complete locator displayed with the result, start: byte cursor, max_bytes: 1..4096}. The host validates current permissions and version. A partial page is not the complete result; the handle grants no authority.";
+
+/// Immutable full-original locator. A handle is a selector, never authorization.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OriginalPageHandle {
+    /// Native database that acknowledged the original.
+    pub database_id: String,
+    /// Complete captured event identity.
+    pub event_id: ObservationId,
+    /// Digest of the complete original, not of its displayed page.
+    pub payload_digest: ContentDigest,
+    /// Complete archived byte length.
+    pub byte_length: u64,
+}
+impl OriginalPageHandle {
+    /// Validate bounded locator metadata; the owner must validate its truth.
+    pub fn validate(&self) -> Result<()> {
+        validate_text(&self.database_id, "original database", 256)?;
+        if self.byte_length == 0 || self.byte_length > 64 * 1024 * 1024 {
+            return Err(invalid("original page handle exceeds capture bounds"));
+        }
+        Ok(())
+    }
+}
+
+/// Model-proposed page selector, without context, permissions or processing grants.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OriginalPageArguments {
+    /// Complete original locator obtained from an owned tool result.
+    pub handle: OriginalPageHandle,
+    /// Byte cursor within that immutable original.
+    pub start: u64,
+    /// Maximum requested original bytes, at most the fixed page ceiling.
+    pub max_bytes: u32,
+}
+impl OriginalPageArguments {
+    /// Validate the fixed selector bounds without asserting source access.
+    pub fn validate(&self) -> Result<()> {
+        self.handle.validate()?;
+        if self.max_bytes == 0
+            || self.max_bytes > TOOL_RESULT_PAGE_BYTES
+            || self.start >= self.handle.byte_length
+        {
+            return Err(invalid(
+                "original page selector exceeds its declared bounds",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Parse bounded selector JSON, rejecting unknown authorization-like fields.
+    pub fn from_json(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > TOOL_RESULT_PAGE_BYTES as usize {
+            return Err(invalid("original page selector JSON exceeds its bound"));
+        }
+        let selector: Self = serde_json::from_slice(bytes)
+            .map_err(|_| invalid("original page selector JSON is invalid"))?;
+        selector.validate()?;
+        Ok(selector)
+    }
+}
+
+/// An explicit partial display of a fully retained tool original.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolResultPageView {
+    /// Selector for the complete immutable original.
+    pub handle: OriginalPageHandle,
+    /// Exact visible original range, with its independently verified page digest.
+    pub preview: OriginalSourceSpan,
+}
+impl ToolResultPageView {
+    /// Validate the original/page relationship without asserting source access.
+    pub fn validate(&self) -> Result<()> {
+        self.handle.validate()?;
+        validate_span(&self.preview)?;
+        if self.preview.event_id != self.handle.event_id
+            || self.preview.payload_digest != self.handle.payload_digest
+            || self.preview.end > self.handle.byte_length
+            || self.preview.end - self.preview.start > u64::from(TOOL_RESULT_PAGE_BYTES)
+            || (self.preview.start == 0
+                && self.preview.end == self.handle.byte_length
+                && self.preview.span_digest != self.handle.payload_digest)
+        {
+            return Err(invalid("tool page differs from its full original locator"));
+        }
+        Ok(())
+    }
+}
+
 /// Exact host identity; input text cannot expand these scopes or change its owner.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,6 +143,9 @@ pub struct CapturedMessage {
     pub tool_calls: Vec<String>,
     /// Tool call ID completed by this result message.
     pub tool_result: Option<String>,
+    /// Optional explicit original-page view; ordinary messages retain their shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_page: Option<ToolResultPageView>,
 }
 
 /// An indivisible captured user/assistant/tool exchange.
@@ -222,6 +322,22 @@ impl OwnedRunCheckpoint {
             let mut outstanding = BTreeSet::new();
             for message in &group.messages {
                 validate_span(&message.source)?;
+                if let Some(page) = &message.tool_page {
+                    page.validate()?;
+                    if message.role != OutgoingRole::Tool
+                        || message.tool_result.is_none()
+                        || (message.source.event_id == page.preview.event_id
+                            && message.source != page.preview)
+                    {
+                        return Err(invalid(
+                            "original page lacks its authentic tool protocol anchor",
+                        ));
+                    }
+                    if message.source != page.preview {
+                        source_bytes =
+                            source_bytes.saturating_add(page.preview.end - page.preview.start);
+                    }
+                }
                 source_bytes =
                     source_bytes.saturating_add(message.source.end - message.source.start);
                 if !messages.insert(&message.id)
@@ -324,7 +440,15 @@ impl OwnedRunCheckpoint {
         self.groups
             .iter()
             .flat_map(|group| &group.messages)
-            .map(|message| &message.source)
+            .flat_map(|message| {
+                std::iter::once(&message.source).chain(
+                    message
+                        .tool_page
+                        .as_ref()
+                        .filter(|page| page.preview != message.source)
+                        .map(|page| &page.preview),
+                )
+            })
             .chain(
                 self.obligations
                     .iter()

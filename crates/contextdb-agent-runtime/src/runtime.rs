@@ -9,8 +9,9 @@ use contextdb_service::*;
 
 use super::{
     CacheResidencyController, CacheResidencyPolicy, ModelDispatchFence, ModelReconciliation,
-    PreparationHook, ReaderAdapter, ReaderOutcome, ReaderReply, RollingPolicy, RuntimeMeasurements,
-    StepMeasurement, charge, context_error, conversation_routes, exhausted, invalid, rolling,
+    PreparationHook, PreparationPhaseTimings, ReaderAdapter, ReaderOutcome, ReaderReply,
+    RollingPolicy, RuntimeMeasurements, StepMeasurement, charge, context_error, exhausted, invalid,
+    rolling,
     telemetry::{self, Telemetry},
 };
 
@@ -20,6 +21,25 @@ mod persistence;
 mod tools;
 pub use drive::*;
 pub use tools::QueuedTool;
+
+/// Explicit host-owned query encoder and bounded per-step hybrid discovery.
+/// The native preparation owner authorizes every tokenizer and neural callback.
+#[derive(Clone)]
+pub struct OwnedHybridSettings {
+    /// Trusted embedding implementation; never serialized as request data.
+    pub query_encoder: Arc<dyn TextEmbeddingAdapter>,
+    /// Shared-parent retrieval caps, independent of memory utility scoring.
+    pub limits: OwnedHybridLimits,
+}
+impl std::fmt::Debug for OwnedHybridSettings {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OwnedHybridSettings")
+            .field("query_encoder", &"trusted host adapter")
+            .field("limits", &self.limits)
+            .finish()
+    }
+}
 
 /// Host configuration. Changing control text changes the next complete request.
 #[derive(Clone, Debug)]
@@ -40,10 +60,37 @@ pub struct RuntimeSettings {
     /// Default selects all authorized originals. Explicit expansion routes and
     /// mandatory current state remain separate; this is not an access policy.
     pub automatic_recall_filter: RawFilter,
+    /// Optional native BM25 frontier size. None preserves the legacy R0 routes.
+    pub automatic_bm25: Option<u32>,
+    /// Optional owned query encoding and hybrid preparation before every model
+    /// step, including after tools. None preserves existing preparation paths.
+    pub automatic_hybrid: Option<OwnedHybridSettings>,
+    /// Required tracing preserves the complete authorized routing inventory.
+    pub router_trace_profile: RouterTraceProfile,
 }
 impl RuntimeSettings {
     fn validate(&self, profile: &ModelProfile) -> ServiceResult<()> {
         profile.validate().map_err(context_error)?;
+        if let Some(hybrid) = &self.automatic_hybrid {
+            hybrid.limits.validate()?;
+            hybrid.query_encoder.profile().validate()?;
+            if self.automatic_bm25.is_some()
+                || self.router_trace_profile != RouterTraceProfile::RequiredReplayV2
+                || self.automatic_recall_filter != RawFilter::default()
+            {
+                return Err(invalid(
+                    "owned hybrid requires replay-v2 tracing, unrestricted automatic filter and no separate automatic BM25",
+                ));
+            }
+        }
+        if self
+            .automatic_bm25
+            .is_some_and(|limit| !(1..=100).contains(&limit))
+        {
+            return Err(invalid(
+                "automatic BM25 frontier must contain 1..100 sources",
+            ));
+        }
         if self.automatic_recall_filter.event_ids.len() > 64 {
             return Err(invalid(
                 "automatic recall identity filter exceeds 64 originals",
@@ -183,6 +230,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         budget: &mut QueryBudget,
     ) -> ServiceResult<Self> {
         settings.validate(&start.model_profile)?;
+        owner.recover_record_writes(&context, budget)?;
         let run_uuid = start.identity.run_id.as_uuid();
         let checkpoint = OwnedRunCheckpoint {
             version: 1,
@@ -236,6 +284,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         now: TimestampMicros,
         budget: &mut QueryBudget,
     ) -> ServiceResult<Self> {
+        owner.recover_record_writes(&context, budget)?;
         let saved = owner
             .load_run_checkpoint(&context, run, budget)?
             .ok_or_else(|| {
@@ -270,7 +319,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
         }
         let changed = !tail.events.is_empty();
         for original in tail.events {
-            runtime.apply_original(&original)?;
+            runtime.apply_original(&original, budget)?;
         }
         // No request receipt after the planned checkpoint proves no permitted send.
         if matches!(runtime.phase, CallPhase::Planned) {
@@ -535,6 +584,7 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
     ) -> ServiceResult<CompletedTurn> {
         self.ensure_active()?;
         validate_reader(reader)?;
+        self.owner.recover_record_writes(&self.context, budget)?;
         self.validate_reader_protocol(&reader.profile())?;
         if reader.profile() != self.state.model_profile {
             return Err(invalid("reader switch requires an explicit checkpoint"));
@@ -591,20 +641,55 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 if evicted != 0 {
                     self.save_checkpoint(now, budget)?;
                 }
-                let started = Instant::now();
-                let hook_result = hook.before_prepare(&self.context, budget);
-                measurement.preparation_hook_micros += telemetry::elapsed(started);
-                hook_result?;
-                let mut routes = extra_routes.to_vec();
-                for mut route in conversation_routes(&base) {
-                    route.filter = self.settings.automatic_recall_filter.clone();
-                    if routes.len() == 8 {
-                        break;
-                    }
-                    if !routes.contains(&route) {
-                        routes.push(route);
-                    }
+                let composite = self
+                    .settings
+                    .automatic_hybrid
+                    .as_ref()
+                    .filter(|hybrid| hybrid.limits.routed.is_some())
+                    .and_then(|_| hook.owned_hybrid_preparer());
+                if composite.is_none() {
+                    let started = Instant::now();
+                    let hook_result = hook.before_prepare(&self.context, budget);
+                    measurement.preparation_hook_micros += telemetry::elapsed(started);
+                    hook_result?;
                 }
+                let mut routes = extra_routes.to_vec();
+                // The owner recomputes and authorizes hybrid query cues from the
+                // exact post-rotation base. Runtime supplies no dense text/vector.
+                let bm25_query = if self.settings.automatic_hybrid.is_some() {
+                    None
+                } else {
+                    let cues = if self.settings.automatic_bm25.is_some() {
+                        rolling::bm25_step_routes(&base, budget)?
+                    } else {
+                        rolling::current_step_routes(&base, budget)?
+                    };
+                    let query = match self.settings.automatic_bm25 {
+                        Some(limit) => rolling::bm25_step_query(
+                            &cues,
+                            &self.settings.automatic_recall_filter,
+                            limit,
+                            budget,
+                        )?,
+                        None => None,
+                    };
+                    measurement.automatic_recall_inspected_bytes += cues.inspected_bytes;
+                    measurement.automatic_recall_omitted_bytes += cues.omitted_bytes;
+                    for mut route in cues
+                        .routes
+                        .into_iter()
+                        .filter(|_| self.settings.automatic_bm25.is_none())
+                    {
+                        route.filter = self.settings.automatic_recall_filter.clone();
+                        if routes.len() == 8 {
+                            break;
+                        }
+                        if !routes.contains(&route) {
+                            routes.push(route);
+                        }
+                    }
+                    query
+                };
                 let request = PrepareContextRequest {
                     context: self.context.clone(),
                     pack_id: ContextPackId::new(),
@@ -619,13 +704,67 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     base,
                     outgoing_budget: self.settings.outgoing_budget,
                     explicit_memory_request: false,
+                    router_trace_profile: self.settings.router_trace_profile,
+                    memory_query: None,
+                    bm25_query,
                 };
                 let started = Instant::now();
                 measurement.prepare_attempts += 1;
-                let preparation =
+                let preparation = if let Some(hybrid) = &self.settings.automatic_hybrid {
+                    let pending = self
+                        .state
+                        .pending_model
+                        .as_ref()
+                        .ok_or_else(|| invalid("owned hybrid pending call is absent"))?;
+                    let interaction = self
+                        .state
+                        .groups
+                        .last()
+                        .filter(|group| !group.complete)
+                        .ok_or_else(|| invalid("owned hybrid current interaction is absent"))?;
+                    let intent = OwnedHybridIntent {
+                        call_id: pending.call_id,
+                        request_event: pending.request_event,
+                        interaction_sequence: interaction.sequence,
+                        attempt,
+                        limits: hybrid.limits,
+                    };
+                    intent.validate()?;
+                    if let Some(composite) = composite {
+                        let mut timings = PreparationPhaseTimings::default();
+                        let result = composite.prepare_owned_hybrid(
+                            request,
+                            intent,
+                            reader.tokenizer(),
+                            reader,
+                            hybrid.query_encoder.as_ref(),
+                            budget,
+                            &mut timings,
+                        );
+                        measurement.preparation_hook_micros = measurement
+                            .preparation_hook_micros
+                            .saturating_add(timings.hook_micros);
+                        measurement.prepare_micros = measurement
+                            .prepare_micros
+                            .saturating_add(timings.prepare_micros);
+                        result
+                    } else {
+                        self.owner.prepare_context_with_query_encoder(
+                            request,
+                            intent,
+                            reader.tokenizer(),
+                            reader,
+                            hybrid.query_encoder.as_ref(),
+                            budget,
+                        )
+                    }
+                } else {
                     self.owner
-                        .prepare_context(request, reader.tokenizer(), reader, budget);
-                measurement.prepare_micros += telemetry::elapsed(started);
+                        .prepare_context(request, reader.tokenizer(), reader, budget)
+                };
+                if composite.is_none() {
+                    measurement.prepare_micros += telemetry::elapsed(started);
+                }
                 match preparation {
                     Ok(result) => {
                         if measurement.prepare_attempts == 1 {
@@ -638,7 +777,9 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                         if matches!(
                             error.code,
                             ErrorCode::BudgetExhausted | ErrorCode::ResourceExhausted
-                        ) && attempt + 1 < self.settings.rolling.max_prepare_attempts =>
+                        ) && (error.retryable
+                            || self.settings.router_trace_profile == RouterTraceProfile::Off)
+                            && attempt + 1 < self.settings.rolling.max_prepare_attempts =>
                     {
                         charge(budget, 1, 0)?;
                         let evicted = rolling::evict(&mut self.state, self.settings.rolling);
@@ -659,13 +800,15 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 .pending_model
                 .as_ref()
                 .ok_or_else(|| invalid("model intent absent"))?;
-            let manifest = reader.capture_manifest(
+            let mut manifest = reader.capture_manifest(
                 pending.call_id,
                 &prepared.messages,
                 &prepared.outgoing,
                 budget,
             )?;
-            if manifest.model_call_id != pending.call_id
+            if manifest.router_trace.is_some()
+                || manifest.original_page_recall
+                || manifest.model_call_id != pending.call_id
                 || manifest.wire_digest != prepared.assembly.wire_digest
                 || manifest.byte_length != prepared.outgoing.wire.len() as u64
             {
@@ -673,6 +816,17 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                     "reader capture manifest differs from the prepared wire",
                 ));
             }
+            if prepared.router_trace.as_ref().map(|trace| trace.version)
+                != self.settings.router_trace_profile.version()
+            {
+                return Err(invalid(
+                    "prepared router trace differs from the required profile",
+                ));
+            }
+            if let Some(trace) = &prepared.router_trace {
+                manifest.router_trace = Some(Box::new(trace.attach(pending.call_id, budget)?));
+            }
+            manifest.original_page_recall = prepared.original_page_recall;
             telemetry::manifest_counts(&manifest, measurement);
             let mut request = self.event(
                 EventKind::ModelRequested,

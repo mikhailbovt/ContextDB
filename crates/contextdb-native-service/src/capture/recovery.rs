@@ -10,9 +10,12 @@ use contextdb_core::{
 
 use super::*;
 
+mod metadata;
+
 pub(in super::super) const RECOVERY_FEATURE: &str = "continuous-capture-recovery-v1";
 const ACTIVATED: &[u8] = b"recovery/activated";
 const MAX_RECOVERY_BYTES: usize = 1024 * 1024;
+const MAX_CAPTURE_CONTROL_BYTES: usize = 2 * MAX_RECOVERY_BYTES;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
@@ -39,9 +42,9 @@ struct PayloadMetadata {
 /// adapter/source/gap strings and checkpoint content are deliberately not copied.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CaptureRecovery {
+pub(in super::super) struct CaptureRecovery {
     version: u16,
-    pub(super) scope_ids: BTreeSet<ScopeId>,
+    pub(in super::super) scope_ids: BTreeSet<ScopeId>,
     producer_id: StreamId,
     kind: EventKind,
     role: EventRole,
@@ -55,18 +58,175 @@ pub(super) struct CaptureRecovery {
     task_id: Option<TaskId>,
     parent_event_ids: BTreeSet<ObservationId>,
     supersedes_event_id: Option<ObservationId>,
-    coverage: EventCoverage,
-    upstream_truncated: bool,
+    pub(in super::super) coverage: EventCoverage,
+    pub(in super::super) upstream_truncated: bool,
     gap_reason_digest: Option<ContentDigest>,
     pub(super) response_stream: Option<ResponseStream>,
     provenance: Option<EventProvenance>,
     payload: PayloadMetadata,
-    inputs: crate::custody::Inputs,
+    pub(in super::super) inputs: crate::custody::Inputs,
     pub(super) checkpoint: Option<crate::owned::CheckpointControl>,
+    /// Preserves trace presence and immutable commitments after body pruning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in super::super) router_trace: Option<contextdb_core::RouterTraceHeader>,
+    /// Supported request-source paging semantics survive explicit body pruning.
+    #[serde(default, skip_serializing_if = "is_false")]
+    original_page_recall: bool,
+    /// Required protected query encoding survives body pruning as accepted
+    /// control metadata; it is not an execution or source-access grant.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(in super::super) owned_hybrid: bool,
+    /// The distinct segmented encoding remains declared after body pruning.
+    /// This marker grants neither current source access nor query completeness.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(in super::super) owned_hybrid_segments: bool,
+    /// Routing observations remain explicitly declared after request body pruning.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(in super::super) owned_hybrid_routed: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl CaptureRecovery {
+    pub(super) fn verify_features(&self, manifest: &Manifest) -> ServiceResult<()> {
+        if self.version != if self.router_trace.is_some() { 2 } else { 1 }
+            || self.router_trace.is_some() != self.inputs.trace_controls.is_some()
+            || (self.router_trace.is_some()
+                && !manifest
+                    .features
+                    .contains(crate::router_trace::TRACE_FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery router trace format is incomplete",
+            ));
+        }
+        if let Some(header) = &self.router_trace {
+            Validate::validate(header)
+                .map_err(|_| integrity("capture recovery router trace header is invalid"))?;
+            if header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                && !manifest
+                    .features
+                    .contains(crate::router_trace::TRACE_REPLAY_FEATURE)
+            {
+                return Err(integrity(
+                    "capture recovery router replay feature is absent",
+                ));
+            }
+            if self.payload.model_call != Some(header.model_call_id)
+                || self.payload.digest != Some(header.wire_digest)
+                || self.payload.bytes != Some(header.wire_byte_length)
+            {
+                return Err(integrity(
+                    "capture recovery router trace wire binding differs",
+                ));
+            }
+            let controls = self
+                .inputs
+                .trace_controls
+                .as_ref()
+                .ok_or_else(|| integrity("capture recovery router trace inputs are absent"))?;
+            controls.validate()?;
+            if digest(&encode(controls)?) != header.origin_closure_digest {
+                return Err(integrity("capture recovery router trace origins changed"));
+            }
+        }
+        if self.owned_hybrid
+            && (!self.router_trace.as_ref().is_some_and(|header| {
+                header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+            }) || !manifest
+                .features
+                .contains(crate::router_trace::hybrid::HYBRID_FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery owned hybrid feature is absent or incompatible",
+            ));
+        }
+        if self.owned_hybrid_segments
+            && (!self.owned_hybrid
+                || !matches!(self.payload.shape, PayloadShape::Assembly)
+                || !self.router_trace.as_ref().is_some_and(|header| {
+                    header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                })
+                || !manifest
+                    .features
+                    .contains(crate::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE)
+                || !manifest
+                    .features
+                    .contains(crate::raw_index::dense::graph::segments::types::FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery segmented hybrid feature is absent or incompatible",
+            ));
+        }
+        if self.owned_hybrid_routed
+            && (!self.owned_hybrid
+                || self.owned_hybrid_segments
+                || !matches!(self.payload.shape, PayloadShape::Assembly)
+                || !self.router_trace.as_ref().is_some_and(|header| {
+                    header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                })
+                || !manifest
+                    .features
+                    .contains(crate::router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE)
+                || !manifest
+                    .features
+                    .contains(crate::raw_index::dense::graph::routing::types::FEATURE)
+                || !manifest
+                    .features
+                    .contains(crate::raw_index::dense::graph::prefix_v2::types::FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery routed hybrid feature is absent or incompatible",
+            ));
+        }
+        if (matches!(self.provenance, Some(EventProvenance::ModelOutput { .. }))
+            && !manifest
+                .features
+                .contains(crate::payload::MODEL_PROTOCOL_FEATURE))
+            || (self.checkpoint.is_some()
+                && !manifest.features.contains(crate::owned::OWNED_FEATURE))
+            || (self
+                .checkpoint
+                .as_ref()
+                .is_some_and(|checkpoint| checkpoint.requires_tool_pages())
+                && !manifest.features.contains(crate::owned::TOOL_PAGES_FEATURE))
+            || (self.original_page_recall
+                && (!matches!(self.payload.shape, PayloadShape::Assembly)
+                    || !manifest
+                        .features
+                        .contains(crate::owned::PAGE_RECALL_FEATURE)))
+            || ((self.provenance.is_some()
+                || matches!(
+                    self.payload.shape,
+                    PayloadShape::Staged | PayloadShape::Assembly
+                ))
+                && !manifest.features.contains(crate::payload::SOURCE_FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery requires missing source format features",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn owned_payload(&self) -> Option<contextdb_core::ContentBlockId> {
+        if self.payload.shape == PayloadShape::Staged {
+            self.inputs.payloads.first().map(|value| value.block_id)
+        } else {
+            None
+        }
+    }
+
     pub(super) fn from_event(event: &EventEnvelope) -> ServiceResult<Self> {
+        Self::from_event_with_inputs(event, crate::custody::inputs(event)?)
+    }
+
+    pub(super) fn from_event_with_inputs(
+        event: &EventEnvelope,
+        inputs: crate::custody::Inputs,
+    ) -> ServiceResult<Self> {
         let (shape, bytes, media_type, renderer, model_call) = match &event.payload {
             EventPayload::InlineUtf8 { text, .. } => (
                 PayloadShape::Utf8,
@@ -110,8 +270,17 @@ impl CaptureRecovery {
             ),
         };
         let checkpoint = crate::owned::CheckpointControl::from_event(event)?;
+        let router_trace = match &event.payload {
+            EventPayload::Assembly { manifest } => manifest
+                .router_trace
+                .as_ref()
+                .map(|trace| trace.header.clone()),
+            _ => None,
+        };
+        let (owned_hybrid_segments, owned_hybrid_routed) =
+            crate::router_trace::hybrid::event_hybrid_query_modes(event)?;
         let metadata = Self {
-            version: 1,
+            version: if router_trace.is_some() { 2 } else { 1 },
             scope_ids: event.scope_ids.clone(),
             producer_id: event.producer_id,
             kind: event.kind,
@@ -139,8 +308,13 @@ impl CaptureRecovery {
                 renderer_digest: renderer.map(text_digest),
                 model_call,
             },
-            inputs: crate::custody::inputs(event)?,
+            inputs,
             checkpoint,
+            router_trace,
+            original_page_recall: matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.original_page_recall),
+            owned_hybrid: crate::router_trace::hybrid::event_has_hybrid(event)?,
+            owned_hybrid_segments,
+            owned_hybrid_routed,
         };
         if encode(&metadata)?.len() > MAX_RECOVERY_BYTES {
             return Err(exhausted("capture recovery metadata exceeds 1 MiB"));
@@ -154,12 +328,228 @@ impl CaptureRecovery {
 }
 
 impl NativeService {
+    pub(super) fn capture_record_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<CaptureRecord> {
+        budget.check().map_err(crate::raw_index::budget_error)?;
+        let bytes = crate::budgeted::read_value(
+            snapshot,
+            &self.keyspaces.continuous,
+            &record_key(id),
+            MAX_CAPTURE_CONTROL_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("capture control metadata is absent"))?;
+        if bytes.len() > MAX_CAPTURE_CONTROL_BYTES {
+            return Err(integrity(
+                "capture control metadata exceeds its stored bound",
+            ));
+        }
+        budget
+            .charge(1, bytes.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        decode(&bytes, "bounded capture control metadata")
+    }
+
+    pub(crate) fn capture_recovery_metadata<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<(CaptureReceipt, Option<CaptureRecovery>)> {
+        let record = self.capture_record_with_budget(snapshot, id, budget)?;
+        if let Some(recovery) = &record.recovery {
+            crate::budgeted::metadata(snapshot, budget, |reader| {
+                self.verify_recovery_features(reader, recovery)
+            })?;
+        }
+        Ok((record.receipt, record.recovery))
+    }
+    /// Administrative metadata for either a complete original or an explicitly
+    /// pruned original with independently retained control authority. Never used
+    /// to manufacture an EventEnvelope or a successful original read.
+    pub(in super::super) fn verified_capture_control<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<VerifiedCaptureControl> {
+        let record = self.capture_record_with_budget(snapshot, id, budget)?;
+        if let Some(recovery) = &record.recovery {
+            crate::budgeted::metadata(snapshot, budget, |reader| {
+                self.verify_recovery_features(reader, recovery)
+            })?;
+        }
+        if let Some(control_digest) = self.verify_pruned_source(snapshot, id, budget)? {
+            return Ok(VerifiedCaptureControl {
+                receipt: record.receipt,
+                recovery: record
+                    .recovery
+                    .ok_or_else(|| integrity("pruned recovery is absent"))?,
+                control_digest,
+                original: None,
+            });
+        }
+        let original = self.load_captured_original_with_budget(snapshot, id, budget)?;
+        budget
+            .charge(1, encode(&original.event)?.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        let recovery = if let Some(recovery) = record.recovery {
+            recovery
+        } else {
+            let controls = crate::router_trace::decode_envelope(&original.event, budget)?
+                .map(|envelope| envelope.origins);
+            let inputs = crate::custody::inputs_with_trace_controls(&original.event, controls)?;
+            CaptureRecovery::from_event_with_inputs(&original.event, inputs)?
+        };
+        Ok(VerifiedCaptureControl {
+            control_digest: crate::budgeted::metadata(snapshot, budget, |reader| {
+                self.capture_control_digest(reader, &original)
+            })?,
+            recovery,
+            receipt: original.receipt,
+            original: Some(original.event),
+        })
+    }
+
+    // The retained authority has already proved membership of this exact source.
+    // Only immutable control bytes are read here; this is not disclosure authority.
+    pub(in super::super) fn verify_retained_capture_control<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        source: &crate::NativeDeletionSource,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<()> {
+        let bytes = crate::budgeted::read_value(
+            snapshot,
+            &self.keyspaces.continuous,
+            &record_key(source.receipt.event_id),
+            MAX_CAPTURE_CONTROL_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("retained capture control is missing"))?;
+        budget
+            .charge(1, bytes.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        let record: CaptureRecord = decode(&bytes, "retained capture control")?;
+        if let Some(recovery) = &record.recovery {
+            crate::budgeted::metadata(snapshot, budget, |reader| {
+                self.verify_recovery_features(reader, recovery)
+            })?;
+        }
+        if record.receipt != source.receipt
+            || control_digest(&bytes) != source.control_digest
+            || record.work()?.recovery_digest != Some(source.recovery_digest)
+        {
+            return Err(integrity(
+                "capture control differs from the retained removal source",
+            ));
+        }
+        let (global, _) = crate::budgeted::metadata(snapshot, budget, |reader| {
+            self.select_snapshot(
+                reader,
+                &source.receipt.workspace_id.to_string(),
+                Some(source.receipt.workspace_commit),
+            )
+        })?;
+        let bytes = crate::budgeted::read_value(
+            snapshot,
+            &self.keyspaces.events,
+            &global.to_be_bytes(),
+            crate::MAX_JSON_BYTES,
+            budget,
+        )?
+        .ok_or_else(|| integrity("retained capture journal is missing"))?;
+        budget
+            .charge(1, bytes.len() as u64)
+            .map_err(crate::raw_index::budget_error)?;
+        let journal: crate::StoredEvent = decode(&bytes, "retained capture journal")?;
+        if journal.operation != "capture"
+            || journal.accepted_original.as_ref() != Some(&record.work()?)
+            || journal.workspace_digest
+                != digest_bytes(source.receipt.workspace_id.to_string().as_bytes())
+            || journal.workspace_commit != source.receipt.workspace_commit
+            || journal.event_digest != crate::event_digest(&journal)?
+        {
+            return Err(integrity(
+                "retained control has no matching accepted capture",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(in super::super) fn capture_control_digest<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        original: &CapturedOriginal,
+    ) -> ServiceResult<ContentDigest> {
+        let bytes = snapshot
+            .get(
+                &self.keyspaces.continuous,
+                &record_key(original.event.event_id),
+            )
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("capture control record is missing"))?;
+        let record: CaptureRecord = decode(&bytes, "capture control record")?;
+        if record.receipt != original.receipt
+            || record.producer_sequence != original.event.producer_sequence
+            || blake3::Hash::from_hex(&record.producer_key).is_err()
+            || blake3::Hash::from_hex(&record.idempotency_digest).is_err()
+            || encode(&record)? != bytes
+        {
+            return Err(integrity(
+                "capture control differs from its accepted original",
+            ));
+        }
+        let positioned: ObservationId = read_required(
+            snapshot,
+            self,
+            &position_key(&record.producer_key, record.producer_sequence),
+        )?;
+        let retry: crate::StoredIdempotency = decode(
+            &snapshot
+                .get(
+                    &self.keyspaces.idempotency,
+                    record.idempotency_digest.as_bytes(),
+                )
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("capture control retry receipt is missing"))?,
+            "capture control retry receipt",
+        )?;
+        if positioned != original.event.event_id
+            || retry.operation != "capture"
+            || retry.response_bytes != encode(&record.receipt)?
+            || retry.response_digest != digest_bytes(&retry.response_bytes)
+        {
+            return Err(integrity(
+                "capture control position or retry binding differs",
+            ));
+        }
+        Ok(control_digest(&bytes))
+    }
+
     pub(in super::super) fn capture_work_for_receipt<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         receipt: &CaptureReceipt,
     ) -> ServiceResult<CaptureWork> {
         let record: CaptureRecord = read_required(snapshot, self, &record_key(receipt.event_id))?;
+        if record.receipt != *receipt {
+            return Err(integrity("capture journal receipt differs"));
+        }
+        record.work()
+    }
+
+    pub(in super::super) fn capture_work_for_receipt_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        receipt: &CaptureReceipt,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<CaptureWork> {
+        let record = self.capture_record_with_budget(snapshot, receipt.event_id, budget)?;
         if record.receipt != *receipt {
             return Err(integrity("capture journal receipt differs"));
         }
@@ -204,10 +594,27 @@ impl NativeService {
         event: &EventEnvelope,
         global: u64,
     ) -> ServiceResult<()> {
+        self.validate_capture_recovery_with_inputs(snapshot, record, event, global, None)
+    }
+
+    pub(super) fn validate_capture_recovery_with_inputs<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        record: &CaptureRecord,
+        event: &EventEnvelope,
+        global: u64,
+        inputs: Option<crate::custody::Inputs>,
+    ) -> ServiceResult<()> {
         let activation: Option<u64> = read_optional(snapshot, self, ACTIVATED)?;
         match (&record.recovery, activation) {
             (Some(recovery), Some(first)) if first != 0 && global >= first => {
-                if *recovery != CaptureRecovery::from_event(event)? {
+                self.verify_recovery_features(snapshot, recovery)?;
+                let expected = if let Some(inputs) = inputs {
+                    CaptureRecovery::from_event_with_inputs(event, inputs)?
+                } else {
+                    CaptureRecovery::from_event(event)?
+                };
+                if *recovery != expected {
                     return Err(integrity(
                         "capture recovery metadata differs from its original",
                     ));
@@ -221,6 +628,21 @@ impl NativeService {
             }
         }
         Ok(())
+    }
+
+    fn verify_recovery_features<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        recovery: &CaptureRecovery,
+    ) -> ServiceResult<()> {
+        let manifest: Manifest = decode(
+            &snapshot
+                .get(&self.keyspaces.meta, META_MANIFEST_KEY)
+                .map_err(storage_error)?
+                .ok_or_else(|| integrity("capture recovery native manifest is absent"))?,
+            "capture recovery native manifest",
+        )?;
+        recovery.verify_features(&manifest)
     }
 
     pub(super) fn verify_capture_recovery_format<S: ReadSnapshot>(
@@ -271,6 +693,20 @@ impl NativeService {
         }
         Ok(Some(first))
     }
+}
+
+pub(in super::super) struct VerifiedCaptureControl {
+    pub(in super::super) receipt: CaptureReceipt,
+    pub(in super::super) recovery: CaptureRecovery,
+    pub(in super::super) control_digest: ContentDigest,
+    pub(in super::super) original: Option<EventEnvelope>,
+}
+
+pub(super) fn control_digest(bytes: &[u8]) -> ContentDigest {
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"contextdb/native-capture-control/v1\0");
+    hash.update(bytes);
+    ContentDigest::from_bytes(*hash.finalize().as_bytes())
 }
 
 fn digest(bytes: &[u8]) -> ContentDigest {

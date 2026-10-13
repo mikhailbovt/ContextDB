@@ -435,8 +435,10 @@ dependencies = [
  "contextdb-native-service",
  "contextdb-recall",
  "contextdb-service",
+ "contextdb-windows-job",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
@@ -473,6 +475,7 @@ version = "0.2.0-alpha.3"
 dependencies = [
  "blake3",
  "contextdb-core",
+ "contextdb-recall",
  "contextdb-service",
  "serde",
  "serde_json",
@@ -509,6 +512,8 @@ dependencies = [
  "blake3",
  "chacha20poly1305",
  "clap",
+ "contextdb-agent-runtime",
+ "contextdb-capture",
  "contextdb-context",
  "contextdb-continuity",
  "contextdb-core",
@@ -527,6 +532,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "winreg",
@@ -604,6 +610,7 @@ dependencies = [
 name = "contextdb-core"
 version = "0.2.0-alpha.3"
 dependencies = [
+ "blake3",
  "proptest",
  "serde",
  "serde_json",
@@ -753,6 +760,7 @@ version = "0.2.0-alpha.3"
 dependencies = [
  "blake3",
  "chacha20poly1305",
+ "contextdb-agent-runtime",
  "contextdb-capture",
  "contextdb-chat",
  "contextdb-context",
@@ -895,6 +903,7 @@ dependencies = [
  "contextdb-context",
  "contextdb-continuity",
  "contextdb-core",
+ "contextdb-model",
  "contextdb-recall",
  "contextdb-reference",
  "proptest",
@@ -962,6 +971,13 @@ dependencies = [
  "contextdb-storage",
  "redb",
  "tempfile",
+]
+
+[[package]]
+name = "contextdb-windows-job"
+version = "0.2.0-alpha.3"
+dependencies = [
+ "windows-sys",
 ]
 
 [[package]]

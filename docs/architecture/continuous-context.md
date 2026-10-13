@@ -59,6 +59,47 @@ batch. Reconstruction uses these bytes and source history. Activation is explici
 (`continuous-record-mutations-v1` / `continuous-assertions-v1`); neither retrofit
 claims to recreate an old payload that the legacy journal never retained.
 
+New record births and closures also bind a compact control in the same Sync
+(`continuous-record-controls-v1`). It retains host access policy, lifecycle and
+time, with hashes for record/link identifiers, values, text, vectors and
+attributes. Scope reconstruction can use these accepted controls. Their complete
+family and exact match to full bodies are verified across reopen and restore;
+missing controls cannot fall back to legacy behavior. Old references keep their
+encoding and receipts. Unpruned bodies remain required. Controls have a separate
+16 MiB bound per mutation group; overflow rejects the complete publication.
+
+`prepare_record_controls` adds verified controls for one older full mutation group
+through a separate accepted publication (`continuous-record-control-preparation-v1`).
+It requires Admin and each revision's access policy, uses bounded analysis and a
+workspace CAS, and preserves original events and receipts. Retries validate the
+accepted history; a missing locator cannot create another preparation. Prepared
+controls support scope reconstruction; deletion also requires an independent
+removal witness and an accepted pruning publication.
+Hash-only history and unknown source provenance still require explicit migration.
+Origin classification and control preparation can inspect non-retrievable legacy
+revisions for cleanup; scope, audience, purpose, consent and clearance still apply.
+Neither operation changes the stored disclosure policy.
+
+`prepare_record_removal` verifies one classified revision's accepted birth and
+optional closure, then retains their controls in the independent v3 removal
+journal. The witness binds an exact removal request and captured source, plus
+typed candidate roles and hashed graph/provenance facts. Record bodies, endpoint
+names and proposal actor/request strings are excluded. Old journal entries keep
+their encoding; new witnesses use a `record_witness` operation. Admin, revision
+policy, bounded analysis and a workspace CAS precede external Sync. Retries
+check accepted history even when a locator is missing. The witness survives
+native restore; it neither erases bodies nor completes removal. Older full
+mutations require explicit control preparation first.
+
+`prune_record_revision` removes a classified revision's primary projection and
+every accepted birth/closure body in one native Sync. Its retained witness, current
+policy and workspace CAS bind the operation. Before the first member of a
+source-aware group disappears, the complete group's validation is independently
+committed against its exact event and origin intent. Deep verification then uses
+the retained controls and typed graph facts, checks all remaining bodies and
+rejects missing metadata or resurrected copies. Original receipts and hashed
+identity reservations survive partial cleanup, reopen and native restore.
+
 The first native capture implementation exposes `CapturePort` and the
 `NativeConversationCapture` host adapter (`contextdb-chat/service-adapter`).
 It preserves UTF-8 or binary originals, explicit omissions, immutable edits,
@@ -71,9 +112,10 @@ New captures also bind compact recovery metadata into both the journal and outbo
 coverage and checkpoint control transitions, with digests for arbitrary strings
 and payloads. Verification compares it to the complete original before replaying
 producer, stream, scope and run heads. Activation preserves the legacy prefix;
-subsequent missing metadata fails verification. This prepares explicit retention
-removal without duplicating deleted text; it neither permits a missing original
-nor changes its immutable receipt or the existing logical backup digest.
+subsequent missing metadata fails verification. An explicitly pruned original also
+requires independently retained control commitments and accepted native removal
+publications. Recovery metadata alone never permits a missing body or changes
+the original's immutable receipt.
 
 `inspect_original_deletion` computes captured descendants from the accepted
 journal, including revisions, model/tool/checkpoint inputs and shared staged
@@ -118,26 +160,324 @@ these gates pass. New denials after restore close them again. Independent captur
 can continue, but an externally denied source ID cannot be recaptured. Competing
 native owners compare the external head under its publication owner before append.
 
+Explicit removal has a separate durable request. `request_original_removal`
+retains the complete inspected source inventory and every known descendant-ID
+denial in one external Sync. Version 2 and later authorities require permanent
+workspace registration and request history; legacy authorities require migration.
+Request-bound pages prove exact source and block membership. Shared novel blocks
+with an independent captured owner are excluded from removal targets.
+
+Version 3 authorities additionally retain immutable captured origins for ordinary
+record revisions. `bind_record_sources` accepts an authenticated administrator's
+complete declaration of 1..64 earlier captures and binds their controls to the
+original accepted record bytes. Empty evidence links or similar text never prove
+independence. The external declaration survives native restore and closes
+disclosure until `maintain_record_sources` verifies and applies its prefix. Each
+page contains at most 256 entries and 384 KiB; native application compares the
+workspace before one Sync. Applied progress is journal-bound and advances the
+declared record scopes. Whole registry loss is an error, including at reopen.
+
+`initialize_record_sources` activates these requirements before the first generic
+record. It checks accepted workspace history and policy projections within a
+budget, then compares the workspace before external Sync. Captured history may
+already exist; existing generic records require explicit migration. Registration
+is a separate journal control and preserves existing v3 record-binding bytes.
+
+Once a workspace is activated, unclassified record revisions are
+unavailable. Get, timeline, candidate/ordinary recall, traversal and ContextPack
+reads apply current original and inherited custody policies before loading record
+bodies. Independent records remain available after ordinary source revocation.
+`publish_memory_from_sources` accepts explicit memory and complete captured-input
+controls in one native Sync, then transfers its actual birth commitments to the
+retained authority. Reads wait for a separate journal-bound completion, including
+after manual provenance catch-up or an older restore. An interrupted response
+includes the accepted workspace commit; exact retry or `resume_record_source_write`
+finishes that same operation without its original request body. Current source
+revocation still denies disclosure. Restored archives cannot reuse retained record
+identities, and administrative repair cannot replace accepted input declarations.
+`propose_memory_from_sources` and `retract_from_sources` extend this handoff to
+complete candidate/link and retraction groups. Copied revisions retain predecessor
+origins plus new captured inputs; independent new candidates retain their own
+inputs. Closed revisions keep their original birth bindings. New and historical
+reads wait for the entire group to complete, even if some origins have transferred.
+Candidates remain quarantined. Structural writes reject an unavailable edge in
+the affected access domain instead of silently omitting it; source authorization
+precedes body decoding. Groups retain at most 1,024 mutations / 16 MiB, with 1..64
+origins per new revision; an unrepresentable union rejects the whole publication.
+`correct_memory_from_sources` binds the exact target closure and each rewired
+hierarchy edge to its predecessor. Its fully supplied successor uses new captured
+inputs; each copied edge also retains its own predecessor's origins. Verification
+reconstructs copied metadata and rejects missing or swapped copy witnesses before
+transfer. The correction format is explicitly versioned; older groups keep their
+original encoding. Completion retries up to two snapshot conflicts within the
+shared budget, rechecking accepted history without accepting another mutation.
+`pending_record_source_writes` discovers interrupted groups from accepted workspace
+commits in pages of 1..256. `repair_record_source_writes` returns continuation only
+after a complete page has been repaired. Cursors bind the caller, database,
+operation and fixed journal frontier; restore revalidates their history anchors.
+Missing mappings, intents, receipts or completion proofs fail closed. Before
+creating a missing completion, recovery checks later accepted events to reject a
+lost locator for an already completed group. Control reads share the operation's
+work, byte, time and cancellation budget, with bytes charged before decoding.
+
+The owned runtime invokes recovery on start, resume and before each interaction.
+It requires the host's Runtime and Admin grants in a source-aware workspace;
+model output cannot grant them. A bounded process-local cache retains completed
+64-commit pages between attempts. Reopen rechecks accepted history; durable
+checkpoints and measured recovery/backlog limits remain open. Proving a completion
+absent may rescan the later journal after budget exhaustion. Origin aggregation
+for longer revision chains also remains unfinished.
+Legacy workspaces retain their existing behavior. Version 1/2 authorities require
+explicit migration before accepting origins; this API does not perform migration
+or establish that a host's declaration is semantically complete.
+
+The current local maintenance sequence is:
+
+1. `prepare_original_removal_sources` validates complete originals and their
+   dependencies, revokes access and retains immutable control commitments.
+2. `maintain_custody`, `project_originals` and `reclaim_raw_generations` propagate
+   restrictions, build a generation omitting prepared sources and discard old copies.
+3. `prune_source_assertions` removes affected assertions and retractions from one
+   accepted batch, preserving independent mutations and the original receipt.
+   Journal-bound controls retain IDs, evidence offsets/hashes and negative
+   relationships without values or envelopes. Explicit host authority policies
+   remain schema configuration. Pruned labels permanently report unavailable
+   support, so an erased negative transition cannot revive an old current value.
+4. `prepare_record_removal` and `prune_record_revision` remove affected generic
+   revisions, including copied edges and historical bodies. Primary removal
+   checks the complete revision inventory; unknown origins or unaccepted copies
+   block cleanup, while independently sourced records remain intact.
+5. `prune_original_sources` removes up to 256 primary body rows per Sync, retaining
+   exact policy/control commitments and journal-bound tombstones.
+6. `prune_original_payload` removes up to 32 staged chunks (8 MiB) per Sync after
+   all affected primary bodies are pruned. Starting a block checks fresh ownership
+   and its full original, at most 64 MiB; continuation verifies the accepted progress
+   chain and the next batch. The immutable staging header remains available.
+
+Analysis precedes publication; a changed workspace rejects the attempt without
+partial removal. Restart and pristine restore resume the exact accepted progress.
+Missing tombstones, unexplained chunk holes, resurrected data and changed controls
+fail verification. A backup made during cleanup hashes the actual remaining rows
+with the existing deep-digest algorithm; old full archives remain verifiable under
+the retained keys and restore behind current suppression.
+
+This executor is incomplete: primary pruning rejects affected assertions or
+generic revisions whose body copies remain, and records with unknown origins.
+No local completion/admission publication exists, so removal requests continue to
+close disclosure. Complete copy inventory, legacy migration, key destruction and
+physical/provider/export closure remain open. These Rust APIs do not
+claim completed hard deletion or expose a model-facing deletion tool.
+
 `NativeService::open_with_suppression` retains plaintext native values.
 `NativeService::open_encrypted` additionally requires `NativeCustodyKeys` and seals
-every native value, including original bodies, chunks, index documents, accepted
-semantic batches and captured checkpoints. Each value address has a random data
-key; XChaCha20-Poly1305 binds ciphertext to the database, authority, keyspace,
-record address and key identity. New keys synchronize in one bounded batch before
-native publication. An interrupted publication may leave unused keys, never an
-acknowledged original without its durable key. Ordinary reads fetch one key
-descriptor; complete key-inventory verification happens when opening the authority.
+every application value, including original bodies, chunks, index documents,
+accepted semantic batches and captured checkpoints. Version 3 and 4 authorities allocate
+a random data key per changed value address per native transaction. Historical
+ciphertext retains its exact key identity; rewriting a mixed-content row uses a
+different key. Version 1 and 2 authorities retain their original address-key reuse
+and require explicit migration. XChaCha20-Poly1305 binds ciphertext
+to the database, authority, keyspace, record address and key identity.
+
+New keys and an authenticated allocation journal synchronize in one bounded batch
+before native publication, with at most 32,768 new key addresses. An interrupted
+publication may leave unused keys, never an acknowledged original without its
+durable key. Decrypting a value fetches one exact key descriptor. Opening the authority
+verifies the complete allocation journal and key inventory, rejecting missing,
+changed or orphaned versions. Historical keys remain available; allocation does
+not disable keys or establish deletion completion.
+
+New authorities use version 4 and retain native-use history. Before native Sync,
+the same key-store transaction records the final address transitions, including
+authenticated ciphertext/key IDs and value commitments before and after each
+change. The native transaction writes a sealed commit marker with the data; a
+second independent Sync acknowledges its outcome. The custody publication queue
+covers this entire sequence. Recovery synchronizes the existing native journal
+and compares the marker with the prepared or unchanged base before recording
+Committed or Aborted. It does not rewrite data or invent an acknowledgement.
+Prepared means the outcome is unknown; data may already have committed.
+Acknowledged snapshots read without waiting for the custody writer. A visible
+unacknowledged commit requires recovery; a busy publisher causes an immediate
+retryable refusal. An older retained view stays readable only while the current
+physical store satisfies the independently retained acceptance frontier.
+
+Each native directory has a registered instance. Its sealed marker is local
+protocol metadata, excluded from logical archives and their application-row digest.
+Restore retains the target instance and records imports with the original
+ciphertext/key identities. Missing markers, untracked physical writes and stale
+instance state close native admission. Versions 1–3 remain readable under their
+existing contracts; adding this tracking requires explicit migration.
+
+Host `native_use_catalog_page` scans at most 64 mandatory journal events and 8 MiB
+per page, with an authenticated frontier and one budget. Empty pages can continue;
+native-use growth invalidates the cursor, while allocation-only changes do not.
+`native_use_changes_page` reads at most 256 transitions from an exact preparation
+and distinguishes its pending, committed or aborted outcome. These reads check
+their own pages and bindings; full authority-open verification also replays each
+instance's before/after history and closes its state and outcome indexes. This
+history alone does not assign source ownership, cover legacy unobserved copies,
+count external copies or authorize key disablement.
+
+Primary, payload, record, assertion and raw key inventories now attach native-use
+history to the addresses selected by their retained request or ownership witness.
+The join runs the complete history/index verifier under the caller's shared budget
+and returns at most 65,536 transitions and 32 MiB. Both allocation and use frontiers
+must remain unchanged. Each address retains exact before/after versions, outcomes
+and the last acknowledged value per registered instance. Pending and aborted
+attempts remain distinct; a missing tracked use does not prove external absence.
+Raw observations also match the committed ciphertext and decoded-value digest.
+Version 3 reports return `native_use: null`; older serialized reports also lack
+this evidence. Shared batches can still contain
+independently needed versions; a source-bound report is not a retirement witness.
+
+Admin `retain_original_key_removal` independently persists primary-version
+decisions after complete custody replay. The custody publication guard keeps both
+frontiers unchanged through witness Sync. Exact retries recover the same receipt;
+new frontiers append new witnesses. Each selected key records its exact known
+ciphertexts, acknowledged instances and unresolved preparations. The next task is
+to resolve pending use, remove acknowledged copies, or assess retained copies.
+Unused allocations and logically removed versions still require that last task.
+
+`read_original_key_removal` verifies the retained request and current Admin access,
+then projects complete current custody history to the witness's authenticated
+frontiers. Later outcomes, pruning and old-ciphertext restores cannot rewrite the
+saved evidence. The removal journal retains one inventory blob, at most 5 MiB;
+decisions are derived from it, without another stored copy. This v4 API covers
+exclusively owned primary rows. Shared versions, archives, physical key destruction,
+current key disablement and deletion completion remain separate gates.
+
+`retain_payload_key_removal` and `retain_record_key_removal` use the same fenced
+decisions and historical replay for selected chunks and generic revision bodies.
+Their corresponding read methods verify the exact owner, complete address/key
+membership, journal acceptance and both custody checkpoints. Payloads require
+Admin and the retained workspace/request; records additionally retain all stored
+access labels. Shared blocks are excluded. One bounded inventory survives partial
+cleanup, both authority restarts and archives predating the selected payload.
+These witnesses preserve pending and retained-copy obligations; they do not disable
+keys or establish archive preservation or physical absence.
+
+`key_catalog_page` enumerates at most 256 accepted descriptors with a shared
+work/byte/time budget and an authenticated continuation. Pages bind the authority,
+allocation revision and exact batch chain; new allocations invalidate a pending
+enumeration, while backup registration alone does not. Continuations survive
+authority reopen. New journal records contain at most 256 descriptors, all sharing
+the transaction's key-store Sync; older larger batches remain readable and budgeted.
+Descriptors expose address/key identities and commitments,
+without wrapped or raw keys; the complete chain must reach its retained terminal.
+This is allocation evidence, including potentially unused keys after interruption.
+
+Admin `read_original_key_inventory` joins that catalog to the selected request's
+retained roots and descendants, including historical primary keys after pruning
+or old-native restore. `read_payload_key_inventory` identifies each selected
+block's chunk keys from retained ownership and length, even if an older archive
+predates staging. Independent source addresses and retained shared blocks are
+excluded. `read_record_key_inventory` uses an independent revision witness to
+identify its historical primary, accepted birth and optional closure keys; Admin
+and all other stored access labels remain required for non-retrievable revisions.
+Each complete scan admits at most 65,536 selected allocations and 32 MiB of output.
+Their native-use attachment covers tracked versions at selected addresses; these
+reports do not establish physical absence, cover all copy classes, retire keys or
+reopen disclosure.
+
+`prepare_assertion_removal` verifies a mixed semantic batch and retains its source
+ownership and commitments in the version 3 removal authority, without values,
+envelopes or host policy bodies. It works before or after logical pruning; a
+workspace comparison precedes independent Sync, and exact retries preserve the
+receipt. `read_assertion_key_inventory` uses that witness after cleanup or older
+restore, including archives predating the batch. It separates shared original and
+rewritten batches from selected assertion/retraction bodies and labels. Independent
+mutation addresses are excluded. Admin, scope and stored batch policy govern both
+operations. Shared batch keys and cleaned replacement label
+keys can still be needed, so this allocation report grants no permission to disable
+them. Witnesses are limited to 5 MiB; preparation and readback use shared budgets
+and may scan accepted semantic history or the retained removal suffix.
+
+With custody v4 and removal authority v3, assertion pruning also retains exact
+before/after value compositions before native cleanup. A custody-authenticated
+witness binds source ownership, address/value digests and live mutation ordinals;
+it contains no values or envelopes. Shared batches include independent host policies.
+Each witness is at most 1 MiB and 512 values. Native pruning references its exact
+receipt; an interrupted attempt may retain classification without publishing data.
+
+`read_assertion_key_inventory` joins these witnesses to tracked ciphertext versions
+as `value_ownership`. Values require removal, preserve independent mutations,
+preserve replay controls, or remain explicitly unclassified. The same value can
+have a different disposition under a later removal request. Readback checks both
+the removal journal and custody attestation, including after both authorities
+restart or native restore. The budgeted scan admits at most 256 witnesses per batch;
+versions without matching evidence never imply independence or absence. Legacy
+publications remain readable without inventing classification or a migration.
+Composition evidence does not establish native use, archive preservation or erasure.
+
+With a current removal authority, `reclaim_raw_generations` independently retains
+each page's copy addresses and source controls before deleting it. Document and
+route rows are checked against their original; shared policy/scope rows have no
+single source owner. Witnesses retain value commitments and authenticated
+ciphertext/key identities, with no normalized words or payloads. Native progress
+binds the witness to its observed history and preceding page. Admin
+`read_raw_copy_witness` survives source pruning and older encrypted restore.
+Pages contain at most 1,024 rows plus the final manifest and occupy at most 1 MiB.
+Cancellation after independent Sync can leave a valid observation without a
+completed GC. Untracked older prefixes and unknown rows remain unresolved;
+these witnesses neither cover all historical copies nor authorize key retirement.
+
+`read_raw_removal_copies` discovers these observations from an exact retained
+removal request, without old native receipts. Each page consumes at most 64 journal
+events and selects at most 8 MiB of witness metadata; complete request inventory
+and predecessor validation share the budget. Authenticated continuations bind
+request, caller and retained frontier, survive native restore with the same token
+key, and reject authority growth. An empty page can still have a continuation.
+`read_reclaimed_raw_key_inventory` joins selected source addresses to allocated
+keys and distinct observed ciphertexts. It keeps shared/unknown witness references
+and other custody authorities explicit. Addresses, allocations, ciphertexts and
+witness pages each have a 65,536-entry cap; output is limited to 32 MiB. Current
+generations and untracked history remain outside this GC observation report.
+
+Admin `inventory_raw_removal_copies` independently retains present rows in every
+generation listed by the native index state, including active, building, older and
+partly reclaimed generations. Each page observes at most 1,024 rows plus the final
+manifest, with an 8 MiB scan, a 1 MiB witness and one shared budget. The exact
+removal request, native event commitment, index state and retained manifests bind
+the page chain. A native write fence precedes independent Sync; native rows do not
+change. Exact retries recover the accepted receipt, including after a lost reply.
+Encrypted continuations bind caller and request, survive reopen with the same token
+key and require restart after native changes. Unrelated removal-journal growth is
+allowed. Raw keys and source bodies are absent from the retained witnesses.
+
+`read_raw_index_inventory_witness` verifies one accepted page and its immediate
+predecessor after pruning or older restore. `read_raw_index_key_inventory` requires
+a terminal receipt and validates every ancestor before joining selected source
+addresses to allocations and observed ciphertexts. Duplicate addresses, missing
+pages and unallocated current-authority keys reject the whole report. Selected
+addresses, allocations, ciphertexts and pages each have a 65,536-entry cap; output
+is limited to 32 MiB. Its receipt preserves shared/unknown rows and reclaimed
+prefixes in the inspected chain. Completion means that this retained snapshot was
+scanned; the separate native-use attachment verifies tracked versions at its
+selected addresses. Neither establishes expected projection coverage, absence of
+unobserved copies, key disablement or erasure.
+
+`retain_reclaimed_raw_key_removal` freezes the explicit `observation_frontier()`
+from a GC key report. Later journal appends, including the decision itself, do not
+change its coverage or exact retry. `retain_raw_index_key_removal` instead requires
+the terminal receipt of a complete inspection. Both reuse the owned-key decision
+engine, custody fence and 5 MiB inventory limit. The removal journal independently
+reconstructs selected source/address coverage and observed versions from retained
+pages. Corresponding read methods verify current Admin/request authorization and
+the historical custody frontiers after pruning, authority reopen or older restore.
+Shared/unknown rows, foreign authorities and untracked prefixes remain explicit
+obligations in the referenced pages; empty selected families do not prove absence.
 
 Create the key inventory in its own directory and independently retain its ID and
 host-provisioned `CustodyMasterKey`. Reopen with `NativeCustodyKeys::open`; never
 derive that master key from the rotatable token key. Encrypted backups use
 `contextdb.native-fjall.encrypted-backup.v3`, preserve ciphertext and require the
 same current key and suppression authorities. Neither authority nor the master key
-is included. Restore checks logical closure before publishing freshly sealed values.
+is included. Restore checks logical closure and authenticates each exact address
+and key before importing the original ciphertext, preserving historical key IDs
+without allocating a fresh key batch for the archive.
 Wrong/missing keys and plaintext/encrypted format mismatches fail without fallback.
 Existing plaintext stores require a separate explicit migration.
 
-Version 2 key authorities also retain an authenticated issued-backup registry.
+Version 2 and later key authorities retain an authenticated issued-backup registry.
 Archive digest, logical verification digest, commit, size and predecessor are
 synchronized before encrypted backup bytes are returned. Exact retries reuse the
 registration, including after a crash before the response. `backup_registration`
@@ -145,12 +485,284 @@ provides a point lookup; `backup_catalog_page` returns at most 256 entries and
 requires the same registry revision across pages. New key allocations alone do
 not invalidate that enumeration. Native restore never imports or rewinds the registry.
 Version 1 authorities still open existing values, but creating new backups requires
-explicit registry migration; a missing v2 registry is corruption, never an empty
+explicit registry migration; a missing required registry is corruption, never an empty
 replacement. Registrations count distinct issued archives, not physical copies.
 They contain no source payload and prove neither external-copy erasure nor absence.
 
-These are local Rust APIs; the CLI and MCP do not yet provision this encrypted
-profile. Record addresses, sizes, lexical hashes and archive metadata remain
+V4 issuance also accepts complete archive membership in the same Sync: address
+digests, immutable key UUIDs, ciphertext/value commitments and lengths, in pages
+of 256. The required registry head anchors this separate contents journal;
+original archive bytes and issuance receipts remain unchanged. `backup_contents`
+resolves the immutable inventory, and `backup_contents_page` reads its receipt-bound
+pages under a shared budget. Full custody verification checks every page and the
+event/index closure. `retain_backup_contents` permits Admin backfill only from
+fully verified bytes matching an already issued archive. Older registrations
+without membership remain unknown. These observations survive native restore;
+they do not infer the original native instance, preserve a replacement archive or
+authorize disabling keys needed by independent data.
+
+`read_removal_backup_inventory` joins a retained removal request's primary,
+payload, revision or observed raw keys to every issued archive. It applies current
+Admin/workspace/owner policy, verifies complete issuance and membership closure,
+and returns exact matching copies alongside explicit unknown legacy archives.
+An empty match list means selected keys are absent only from verified contents.
+One custody guard rechecks allocation, native-use, issuance, membership,
+replacement and artifact frontiers together; concurrent publication requires a retry. The shared
+budget and 32 MiB result bound apply to the whole report.
+
+`read_assertion_backup_inventory` covers mixed batches and selected mutation keys
+under the same archive checks. It classifies exact archived versions using retained
+value commitments, including versions without native-use observations. Independent
+mutations, replay controls, selected data and unknown compositions remain distinct.
+The final custody fence also checks the independent classification journal.
+Both archive inventories bind the current key-refusal frontier. Complete membership
+reports whether every key remains usable, including keys outside the selected
+removal family. Unknown membership never establishes key availability.
+
+Both reports include preservation for every issued archive. A path follows verified
+replacement proofs under one removal authority. Single-context calls stay within
+their workspace; host scope APIs authenticate each edge's exact retained request
+in its own workspace. Successive authorized removals can then share a path.
+The target must be free of selected removal values and have usable keys.
+Routing follows later authorized replacements when an earlier target has a retired
+key, even if its bytes remain completely retained. `Preserved` also requires
+complete, verified artifact bytes. Unknown membership or composition, absent paths
+and incomplete artifacts remain separate obligations. Native ancestry determines
+path order; issuance order and a newer clean archive alone prove no preservation.
+These scope-specific reports neither change keys nor authorize deletion completion;
+key retirement must revalidate current coverage and all independently needed copies.
+
+`retire_removal_keys` accepts 1..256 primary, payload, revision, observed raw or
+assertion keys after deriving fresh removal, native-use and archive evidence.
+Prepared or current acknowledged native copies, unknown membership and unresolved
+preservation block acceptance. Every key needed to read a selected clean target
+must remain available. The custody queue rechecks all frontiers through Sync.
+
+Assertion selections bind an exact retained ownership witness. Every known value
+of a retiring key must contain selected mutations. Each instance with a current
+managed-copy obligation must acknowledge a usable replacement batch preserving
+replay controls, host policies and still-required independent mutations. Other
+removals can reduce that set only through their exact authorized ownership
+witnesses. Pending batch publications require reconciliation. Acceptance holds
+both custody and classification publication queues through Sync and records the
+classification frontier. These acknowledgements do not prove that every physical
+copy remains intact or that unobserved copies have been erased.
+
+Current refusal is an independently sealed, append-only journal anchored in the
+allocation head. Exact retries recover the original receipt; new allocations and
+native restore cannot remove its anchor. Authority reopen verifies the complete
+chain, locators and allocation bindings. Old snapshots consult current refusal on
+every decrypt. Native transactions record the retirement frontier and must retry
+if it changes before publication, including staged ciphertext imports. A read
+already materialized before refusal cannot be recalled. An uncertain custody Sync
+closes ordinary key use until authority recovery establishes the durable outcome.
+
+Retirement receipts contain commitments and allocation identities, bounded to
+128 KiB. Wrapped descriptors remain for verification: this is current refusal,
+not physical destruction or protection against a holder of the master key and its
+copies. This API does not grant deletion completion or disclosure admission.
+
+`create_removal_backup` issues actual encrypted replacement bytes after existing
+request-authorized cleanup. Both archives undergo full native verification. The
+target must extend the original journal byte-for-byte, retain original receipts
+and payload manifests, and preserve independent original bodies. Every new pruning
+publication must bind the supplied request and workspace; hash-only record history
+requires migration. Native replay retains independent semantic mutations and graph
+history. A later sequence alone never establishes archive ancestry.
+
+Target issuance, complete membership and source-to-target provenance share one
+custody Sync. `backup_replacement` recovers the immutable proof; catalog verification
+checks its sealed chain and reverse closure. Exact retries and native restore do
+not duplicate or rewind acceptance. Verified source backfill can precede that Sync.
+
+`retain_removal_backup` stores the verified encrypted bytes in independent custody,
+in authenticated chunks of at most 256 KiB and at most 4 MiB per Sync. Callers resume
+from the accepted page prefix; an exact start/limit retry returns its original
+immutable receipt, even after a lost response. The artifact journal binds issuance,
+complete membership and each prefix, with its own required registry-head anchor.
+Complete availability requires every byte and the original full archive digest.
+Missing, extra or changed chunks fail verification; incomplete receipts stay
+incomplete. Opening custody scans bounded pages rather than collecting all archive
+payloads in memory.
+
+`read_retained_removal_backup` requires Admin, the exact retained removal request,
+replacement proof and a complete artifact receipt. Request binding precedes byte
+access; recovery verifies both the full digest and native replay. Actual bytes and
+progress survive native restore and custody restart.
+
+`retain_issued_backup` also retains original archive bytes in the same bounded
+artifact journal. It requires Admin, verified native replay and existing complete
+membership; legacy membership needs explicit backfill. It creates no replacement
+proof or new issuance. `read_removal_backup_recovery` finds inputs for every issued
+archive through separately authorized replacement edges, distinguishing unknown
+membership, unavailable keys, missing bytes and complete readable artifacts.
+`read_removal_backup_input` selects and reads an available original or successor
+without a caller-supplied path, then verifies native replay and rechecks the
+custody frontier under publication authority. An available input can still require
+cleanup. The selected baseline can be bound to a durable isolated cleanup job.
+
+`start_removal_backup_job` retains the exact request, input artifact, replacement
+path and registered worker instance before importing anything. The worker must
+initially be pristine; hosts retain its directory. `advance_removal_backup_job`
+imports once, then resumes native journals on that same instance. Interrupted
+import acknowledgement verifies the exact restored bytes and native sequence;
+unrelated worker writes cannot replace initialization. Start and finish
+receipts resolve to the latest accepted state after cold reopen or a lost response.
+The sealed custody journal verifies every event and locator; caller stage markers
+cannot finish a job. A subsequent request continues the prior result without
+reimporting its original. Job advances share bounded FIFO admission, and native
+publication fences initial binding. Unfinished jobs retain their input-key
+dependency through finish Sync. Terminal retries need no old-input decryption;
+they report historical logical cleanup, not current availability or global removal.
+
+`NativeArchiveScopeResolver` gives explicitly configured hosts a separate route
+across 1..64 exact workspace IDs. Configuration supplies names, not grants.
+Each operation obtains fresh Admin authentication and verifies every required
+complete retained request before reading bytes or opening a worker. Private
+operation frames keep contexts separate; persisted continuation binds only exact
+request/scope provenance, including earlier continuation requirements. Input paths
+are limited to 256 edges and transitive provenance to 512 requests; overflow fails
+explicitly. Neither model contexts nor stored receipts supply or union grants.
+Mixed-job mutations through the original single-context APIs refuse even when
+the predecessor was unchanged and the input path is empty.
+
+`NativeArchiveCleanup` owns automatic archive selection and one open worker at a
+time. Configure a stable absolute root, then call `advance` from host maintenance.
+It resumes jobs in round-robin order and links accepted input/output aliases to
+their existing owner, including across successive requests. Final coverage requires
+an exact completed job, authorized ancestry and currently readable retained bytes.
+Later authorized replacements preserve earlier cleanup. Coverage reports both the
+original-to-target path and the completed-job-result-to-target `clean_path`, so a
+later output stays covered without claiming the old job inspected it. Unrelated
+archives cannot inherit cleanup from issuance order or native commit alone.
+Unknown inputs, busy owners and unavailable preservation remain explicit; no
+eligible action can mean blocked work. Returned inventory precedes the action.
+Worker identities are deterministic within the custody authority and original.
+Before opening a directory, full native-use verification checks its bootstrap
+state. Only a registration with no preparation or accepted native data may resume
+an interrupted empty bootstrap. Missing later history requires the original worker;
+another directory cannot silently create a new instance. Paths remain separate
+from primary and authority trees, and exact identity is checked before reconciliation.
+
+`seal_removal_backup_worker` permanently fences a completed worker before its
+future replacement or disposal. It requires the latest completed job, unchanged
+native archive bytes, reconciled native use and a complete currently readable
+result. The independent native-use `Seal` event rejects reopen, new snapshot
+admission, new jobs and commits staged before sealing. Exact retries and
+`read_removal_backup_worker_seal` recover the receipt through an authorized owner
+after lost acknowledgement or cold restart. Existing copy history, admitted
+snapshots, directory contents and key obligations remain; this is no erasure claim.
+The required v4 journal extension makes older readers fail closed on the unknown
+operation.
+
+A later request can replace a sealed worker with a fresh pristine instance. Its
+first job retains the exact prior seal and completed job, the same removal
+authority, and the prior result's complete readable input. A workspace change
+requires fresh host authority for its complete provenance. For that change, the
+host controller automatically seals the exact completed predecessor before admitting a
+deterministic pristine generation on a later step. This acceptance
+reserves the input keys through finish Sync. Interrupted registration, job admission
+and import acknowledgement recover the same identity and exact bytes. Previously
+used instances, unsealed lost workers and unrelated input cannot substitute for this
+transition. The controller derives a stable generation from the retained seal and
+uses a sibling directory; later jobs on that generation reuse it without import.
+Old jobs, copy obligations and sealed directories remain. Replacement does not
+authorize disposal or physical erasure.
+
+`NativeArchiveCleanup::dispose_worker` requires explicit Admin authority, that
+exact seal, a matching closed native directory and complete readable preservation.
+Fjall's actual OS lock waits for the last backend handle, including snapshot clones.
+An independent Sync retains intent before the directory moves to a sibling
+quarantine; each call removes at most 1..256 entries, without following aliases.
+The custody publication fence spans filesystem work. Windows rename releases and
+reacquires the backend lock under that fence; the host must exclusively administer
+the managed namespace. Preservation keys stay reserved until a second Sync records
+observed absence of both names. Lost responses and restart resume the same intent.
+New scoped disposal can preserve the latest authorized readable result through
+later workspace replacements; accepted intents keep their fixed path and keys.
+`read_removal_backup_worker_disposal` returns the historical observation; a disposal
+retry checks both names again and refuses any reappeared directory. Power-loss
+durability of namespace changes, media remnants, keys and external copies are not
+certified. All copy and job history remains, and global disclosure stays closed.
+Only fully verified completed disposal discharges that managed instance's current
+key obligation. A seal, pending intent or unexplained directory absence does not.
+Versioned inventories distinguish this current disposition from historical
+acknowledgements; older witnesses retain their conservative acknowledged set.
+Key refusal still verifies all current native, archive and independent-data
+dependencies through its publication fence.
+
+Embedded hosts can enable `NativeArchiveMaintenance::start` with the encrypted
+owner, stable worker root, explicit workspace list and a host authentication
+adapter. The owned background thread obtains fresh Admin authentication for the
+exact workspace on every tick; runtime/model contexts do not supply these grants.
+It discovers requests through `read_original_removal_requests`, which verifies
+ordered retention history, request/retry/current indexes and the final frontier.
+Missing metadata cannot become an idle queue. Each tick shares a cooperative
+budget across authentication, discovery and one archive operation. Workspaces and
+requests advance round-robin; capture does not invoke this loop. Status retains
+bounded pre-action counts, missing-worker obligations and failures. Shutdown
+cancels work, wakes the timer and joins the thread, retaining unfinished obligations.
+Restart rediscovers requests and resumes durable jobs without an enqueue command.
+Already accepted disposal intents are also rediscovered, alternating with archive
+jobs and removing at most 16 entries per tick. A seal alone never creates intent.
+Archive and disposal cursors alternate work within each request; interleaved requests
+and recurring failures cannot reset another request's progress. At most 65,536 active
+request cursors are retained. Exhaustion fails explicitly; observing an idle request
+releases its cursor without evicting active work. Scoped scheduling marks denied
+foreign ancestry as `WorkerScopeRequired` while allowing unrelated authorized
+originals to progress. Selected input/job operations verify their own complete
+provenance; whole-catalog recovery, preservation and retirement reports require
+all scopes they inspect and fail if a required grant is unavailable.
+
+`advance_removal_backup` coordinates logical cleanup in a separate encrypted native
+owner restored from the exact issued original. Each call verifies request, ancestry
+and native replay, then advances bounded source/origin preparation, custody,
+index rebuild/reclamation, assertion/revision pruning, original/chunk pruning or
+replacement-byte retention. Accepted journals determine restart progress; no caller
+stage or filesystem marker grants authority. Final publication rechecks the native
+storage sequence, including after restore. `Available` identifies one verified
+target with completely retained bytes; it does not cover later writes or other
+archives.
+
+`read_original_removal_local_inventory` reconciles the exact retained selection
+with the complete current source history. Older archives can lack the requested
+roots while containing earlier selected co-owners or staged blocks. Cleanup
+includes those present copies and preserves globally shared novel blocks even
+before their independent owners appear locally. Absence requires a verified
+history and no orphan capture or payload rows; the final storage sequence is
+rechecked. This local report grants no pruning or completion authority.
+
+When original keys have been retired, `read_removal_backup_successor` follows
+1..256 exact replacement receipts from an original membership receipt. Every
+edge must match the previous complete target and an independently retained
+request in this workspace and authority. Only a complete, currently readable
+terminal artifact is returned after native replay; intermediate archives need
+not be decrypted. Restore that successor into an isolated owner, then use
+`advance_removal_backup_from_replacement` with the same path across restarts.
+New proofs start at that successor; earlier requests retain separate proofs.
+If its keys are later retired, supply the accepted path to a usable successor.
+
+Unclassified records and unretained branch descendants
+require explicit reconciliation. Discovery rescans remain budgeted administrative
+work. The inventory reports identify remaining replacement obligations.
+Physical/external-copy dispositions, migration and measured scale remain open.
+Maintenance observations cover one request at a time;
+they do not complete global deletion or reopen disclosure.
+
+The CLI can explicitly provision this native profile for a fresh Codex sidecar
+with `codex-native-init`. A signed descriptor pins the database, independent
+authority identities and canonical paths in the external state head before
+creating native state. MCP authenticates that profile and its master key before
+joining an owner; normal startup only opens existing authorities and native
+state. Missing configuration cannot select plaintext. Operator composite restore
+requires the exact retained custody and lifecycle archive before creating a
+pristine native target. An externally retained restore fence prevents a failed
+restore from exposing a newly created blank target, even after local Ready-profile
+replay. Interrupted initialization or restore remains closed and requires
+explicit operator recovery; plaintext migration is separate. See
+[provisioning and recovery](../operations/backup-restore.md).
+This encrypts native values, not the separate lifecycle archive/runtime ledger.
+Record addresses, sizes, lexical hashes and archive metadata remain
 visible. Values are limited to 16 MiB before encryption; each envelope adds 64
 bytes, counted against scan and backup limits. Inventory growth is incremental;
 key reclamation, key rotation and deletion closure remain open. This profile
@@ -210,6 +822,243 @@ epoch. Rebuilds switch separately constructed generations after catch-up. Reads
 use short Fjall snapshots; neither index construction nor archive-wide corpus
 materialization runs inside a query. Empty projection polls do not create writes.
 
+An explicit native BM25 profile uses `project_originals_bm25` to publish exact
+term frequencies, document lengths and policy-partitioned corpus/DF statistics
+in the same atomic source batches. The fixed Unicode analyzer uses k1=1.2 and
+b=0.75, with [positive BM25 IDF and average document length](https://lucene.apache.org/core/10_2_2/core/org/apache/lucene/search/similarities/BM25Similarity.html).
+Ordinary incremental maintenance preserves the selected profile; a
+legacy generation requires an explicit rebuild to adopt it. Accepted projection
+receipts retain that declaration after generation reclamation. Deep verification
+reconstructs statistics from originals; shared aggregates remain separate from
+source-owned document copies.
+
+`RuntimeSettings::automatic_bm25` enables an OR query derived from the current
+step before every model request, including after tools. It samples visible source
+bytes rather than locator wrappers, preserves original token spelling for one
+native Unicode analysis, and admits up to 64 terms within 4 KiB. Native preparation joins
+persisted postings with at most 128 freshly captured sources, ranks up to 100
+candidates and verifies exact source spans under the same operation budget.
+It reads authorized policy partitions only and reports unsupported historical
+or filtered queries, missing projection, lexical omissions and bounded search
+completion explicitly. Sources exceeding the 1 MiB text, lexical or atomic row
+limits keep their originals and legacy routes; they do not receive invented
+frequency statistics. Model-request echoes and operational run snapshots remain
+archived and retain legacy routes, but are excluded from the BM25 text population.
+Actual scores supply a fixed uncalibrated R0 prior: 1,000,000 plus score times
+1,000,000 rounded and capped at 100,000,000. They grant neither confidence nor
+mandatory-state priority. This opt-in Rust path is BM25 retrieval infrastructure;
+recall quality and default client integration remain separate gates. The CLI
+retains its previous profile.
+
+`project_original_spans` optionally maintains exact source-span embeddings on an
+accepted BM25 generation, with its own consumed prefix and explicit coverage.
+The native owner publishes whole source plans, f32 bit patterns and authenticated
+receipts atomically. Source documents/vectors are source-owned copies; the batch
+receipt is shared metadata. Retained accepted declarations protect the encoder
+profile after generation GC. Deep verification reconstructs original spans and
+checks accepted vector commitments.
+
+`OwnedLocalEmbedding` verifies the provisioned backend artifact manifest and
+pinned [Qwen3-Embedding-0.6B Q8_0 weights](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/blob/370f27d7550e0def9b39c1f16d3fbaa13aa67728/README.md),
+then owns a dedicated local llama.cpp process. Its fixed profile uses last
+pooling, L2 normalization, 1024 dimensions and exact tokenizer token-array input;
+inference usage must equal the admitted token count. Source text is preserved,
+while queries receive the fixed retrieval instruction. Oversized input is
+refused. Each native span callback checks fresh source/custody permissions and
+the frozen encoder profile; publication repeats the current owner fence.
+
+The initial projection supports independent UTF-8 originals up to 64 KiB and
+64 spans. Larger, nontext, derived request and operational control originals
+have explicit omissions. `caught_up` names the frozen raw prefix, rather than
+semantic retrieval coverage. The syntax-preserving `dense_step_query` helper
+samples up to 4 KiB of current user/tool/working/assistant source excerpts and
+retains observational span provenance. Explicit refinements re-form that sample
+at 4096/2048/1024/512 bytes with new exact ranges and visible gaps. The adapter's
+separate token measurement includes the instruction and special tokens without
+inference; an oversized measurement leaves the owned encoder available. Actual
+embedding still refuses inputs above 2048 exact tokens without truncation.
+
+`search_ann_partition_v2` provides a separate point-only best-first kernel with
+node/vector/discovery caps and typed owner failures. The storage-neutral builder
+accepts a complete finite cohort and produces canonical nodes and its final root
+under the caller's budget. Its deterministic construction revision is explicit.
+
+`publish_original_span_graph` publishes one immutable native graph per raw
+generation, with a whole-base ceiling of 4096 vectors and 64 exact compound
+policy cohorts. Final row authentication binds the graph content commitment,
+accepted source vectors and encoder profile. Member mappings are source-owned;
+topology, cohort headers and the graph receipt are shared copies. Retained
+declarations, deep reconstruction and paged generation GC cover these rows.
+
+`search_original_spans` validates an explicitly supplied query embedding, admits
+permitted cohorts and point-reads current members, nodes and vectors. It checks
+the owner fence at entry, during reads and at exit. Results contain attributed
+source spans and approximate traversal status; original bytes are verified at
+materialization. This strict API refuses an advanced source generation.
+
+The separate `search_original_spans_with_tail` path serves that immutable base
+alongside a bounded fresh dense prefix. It authenticates accepted capture work
+and complete tagged source documents, then reproduces the exact latest ordered
+dense commitment before reading tail vectors. At most 128 work items and 256
+permitted tail vectors share the operation's ANN and parent budgets. Profile,
+active generation, epoch and removal boundaries remain fixed; changed authority
+refuses the attempt. Proof limits, dense lag, omissions and traversal limits stay
+explicit. Queries perform no graph build, neural forward or original-body census.
+
+`seal_original_span_segment` appends an immutable interval after an accepted
+nonempty base. Each interval covers at most 128 accepted work items, including
+explicit omissions, and 256 vectors from whole source plans. Accepted dense prefixes
+may lag the raw archive; their receipts still bind the actual raw totals. A fixed
+authenticated directory and retained ordinal locators support repeated appends,
+exact historical retry, cold reconstruction and generation GC. The operator
+resolves its CAS predecessor with `original_span_segment_head`.
+
+The explicit embedded `OwnedHybridLimits::segments` profile searches the base,
+up to 64 segment ordinals and a completely authenticated fresh prefix under one
+shared allowance. All scored spans participate in global source ranking before
+one dense RRF vote per source. Protected replay records actual per-path work,
+cutoffs and incomplete coverage under `continuous-owned-hybrid-segments-v1`;
+current owner fences remain required around every processing callback. None
+preserves the earlier profile. CLI segment maintenance and scalable routing over
+every retained ordinal remain open; bounded ordinal selection does not establish
+whole-database recall.
+
+The separate `publish_original_span_prefix_base` maintenance API accepts a genuine
+current dense prefix while preserving the full raw archive totals. Its distinct
+`continuous-raw-span-ann-prefix-v2` format requires 1..4096 whole-plan vectors,
+at most 128 accepted work items and 64 policy cohorts. A native journal proof
+includes prepared removals before exact outbox joins; all construction uses the
+operator's parent budget. Owner roots, retained acceptance and source/shared copy
+verification survive cold retry and paged generation GC. The base remains
+immutable after indexing advances. This family is exclusive with v1 graph bases
+per generation. The routed profile below serves this family. Larger bootstrap
+inputs and useful recall remain open.
+
+`seal_original_span_prefix_segment` extends this independent base through the
+separate `continuous-raw-span-ann-prefix-segments-v2` maintenance family. Each
+interval covers at most 128 accepted capture work items, 256 whole-plan vectors
+and 64 policy cohorts; total history is not capped at 128. An authenticated
+capture boundary starts the complete native journal range. Neither dense nor
+base publication time can serve as that boundary: a raw backlog may predate both.
+Signed before/after states and exact outbox joins include omission-only intervals
+without inventing vectors. Current owner stamps, immutable ordinal locators,
+cold reconstruction and source/shared copy proofs remain valid through paged GC.
+An exact old request returns its historical receipt without replacing the current
+directory. Full scans can exhaust the operator budget. High-recall discovery
+remains a gate.
+
+`publish_original_span_directory_router` adds complete, separate offline routing
+maintenance over the prefix base and every accepted interval. Streamed coverage
+includes zero-node intervals without a path-count prefix; the finite build admits
+at most 4096 representatives and 64 exact policy conjunctions or refuses entirely.
+Each nonempty fine cohort contributes a centroid from its genuine accepted vectors
+in a distinct declared comparison space, with an explicit first-vector fallback
+for an exactly zero mean. Routing rows have shared ownership and cannot become
+original evidence. A fourth owner map, immutable revision locators, cold replay
+and paged GC bind the full final topology. Fine append makes existing coverage
+stale; replacement is explicit maintenance. Full rebuilds can exhaust the parent.
+Useful recall and physical per-source key closure for shared derived rows
+remain open.
+
+`OwnedHybridLimits::routed` enables separate embedded serving over these real
+prefix-v2 paths. Admission requires exact current router/base/directory coverage
+and a complete native projection-successor proof before tokenization. The proof
+walks from the accepted Dense event to the certified current head, including
+foreign frames, under the same parent; exhaustion refuses. It does not rebuild
+the router or restart at archive genesis. Signed cohort control rows physically
+include opaque partition bytes;
+permission checks precede partition decoding and all ANN traversal/vector reads.
+Coarse selection may choose any covered ordinal. Coarse, fine and fresh work use
+one total allowance, with reserved fine/fresh opportunities and one dense source
+rank for RRF. Routing centroids never become evidence or utility candidates.
+Protected replay under `continuous-owned-hybrid-routed-v1` records actual scores,
+selected paths, quotas and fresh proof. Current roots remain fenced through
+prepared capture and model dispatch; automatic preparation repeats after tools.
+Within one query, an owner-private certificate avoids reconstructing unchanged
+metadata. Every serving fence rereads exact current controls and checks authority,
+epoch and successor absence; source/vector checks remain independent. Capture
+and dispatch retain full current admission. Budgeted range reads can reuse one
+genuinely admitted original on the same snapshot while rechecking disclosure rights.
+Ranked path selection and locally
+complete ANN work do not establish exhaustive semantic recall. None preserves
+earlier profiles, and routed and segmented settings are mutually exclusive.
+
+The local text CLI accepts this opt-in profile in `automatic_hybrid.limits.routed`
+with the pinned encoder, replay-v2 trace and its own bound preparation revision.
+Explicit `owned-hybrid-index --routed-stage` maintenance separates raw catch-up,
+the partial base, immutable intervals and complete router construction:
+
+```text
+contextdb owned-hybrid-index <archive> --config <host.json> --bootstrap --routed-stage raw
+contextdb owned-hybrid-index <archive> --config <host.json> --continue --routed-stage base
+contextdb owned-hybrid-index <archive> --config <host.json> --continue --routed-stage seal
+contextdb owned-hybrid-index <archive> --config <host.json> --continue --routed-stage router
+```
+
+Repeat raw/seal stages explicitly when their accepted progress remains partial.
+Only these explicit routed stages use the declared offline allowance of 250M
+work, 8 GiB logical bytes and 180 seconds, bound into the routed configuration.
+Each stage shares one parent through all projections and publications; normal
+reader steps retain their existing 2M/512MiB allowance.
+Both owned CLI commands run on a joined worker with an explicit 8 MiB physical
+stack; native IO, token accounting, logical budgets and configuration bytes are
+unchanged. A worker failure requires inspection of retained operation state.
+On Windows 10+, the pinned encoder starts atomically inside an unnamed
+kill-on-close job. Owner exit closes the job, including on an abrupt process
+failure. The small `contextdb-windows-job` crate contains the Win32 boundary;
+the runtime keeps its unsafe-code prohibition. Job setup failures refuse launch
+without an unmanaged fallback. Only explicit OS environment paths and null
+standard handles pass to the child; normal shutdown keeps its caller budget.
+Raw and router stages need no encoder. Seal first recovers the actual pending
+Dense target; otherwise it projects at most four whole sources. Each exact
+publication request is emitted before native acceptance and can be retained for
+an exact native retry. A later error preserves earlier synchronized progress.
+The administrative status API returns genuine accepted targets, including stale
+router coverage, without reading source documents or vectors; it grants no
+serving permission or source-availability claim.
+
+Before each reader step, the routed hook advances raw work and checks current
+coverage/profile plus a conservative raw-to-covered cutoff capacity bound. It
+projects at most eight batches of up to four CaptureWork items under the same
+parent. Work includes controls that produce no vectors. Each batch rechecks the
+accepted roots/profile and reserves 64 possible spans per remaining source slot;
+actual new spans reduce the next batch's capacity. Routed v2 binds this cadence
+and cannot silently replace a retained v1 run. Remaining lag, exhausted capacity,
+nonprogress or a stale router
+requires explicit maintenance. The hook never seals intervals or rebuilds the
+router. Pause the owner, seal, rebuild the router explicitly, then resume the same
+bound configuration; maintenance does not clear an unknown model outcome. Legacy
+absent settings retain the earlier behavior and allowance. This text-only CLI
+does not accept tool-result protocols; embedded hosts retain that separate path.
+
+The native routed host combines this maintenance with context preparation. Its
+first admission fully checks the current targets; after projection, it rereads
+every witnessed immutable control page and independently authenticates the new
+world, Dense publication and complete suffix. Serving then consumes that same
+snapshot, adding query permissions and signed policy controls. This private
+admission expires with the attempt; callback fences remain fresh, and capture
+and dispatch retain their independent checks after the model-request append.
+
+Preparation unions matching ranges across routes before materializing one
+immutable source. Conflicting versions or equal-range digests refuse; the bounded
+rendering frontier cannot silently discard additional ranges. Protected routing
+retains inspected raw origins alongside generic discovery.
+
+`RuntimeSettings::automatic_hybrid` optionally supplies a trusted query encoder
+before every model step, including after tools. The owner authenticates the
+current planned call, postrotation messages and exact sampled original bytes.
+Ordered token preflights admit one final forward; current checkpoint, workspace
+head, permissions and encoder profile are rechecked around callbacks. BM25,
+immutable ANN plus tail, and bounded one-hop causal search share the parent
+budget. Fixed source RRF combines ranks, preserves complementary spans and
+retains the complete inspected frontier before the 20..100-source selection.
+Its prior is not calibrated utility. The protected replay-v2 observation binds
+all preflights, vector receipts, route ranks and graph/tail commitments;
+`continuous-owned-hybrid-query-v1` also survives in capture recovery metadata.
+This initial profile excludes legacy extra routes and historical preparation.
+None remains the default. Whole-archive scaling, retrieval quality, useful Kev
+and paired main-reader benefit remain separate acceptance gates.
+
 Scope eligibility precedes domain labels and content search. Each domain includes
 the original's policy and every source dependency's policy. Ranking uses match
 spread, source length and stable ID, with no cross-domain document-frequency
@@ -222,6 +1071,10 @@ The initial index profile admits 1,024 eligible domains, 128 pending raw events,
 64 concurrent read views (30-second lifetime), three retained generations and
 15-minute encrypted cursors. Source lexical projections cover up to 1 MiB and
 16,384 unique terms; larger sources remain on an explicit unindexed route.
+Projection publishes at most 32,752 index rows per transaction, reserving keys for
+commit metadata. A batch stops between whole originals when those rows would
+exceed the bound. Its receipt reports the consumed prefix and remains incomplete;
+reopening resumes the next original without truncating its terms or payload.
 Exact phrases use a safe interior-word anchor when available, otherwise bounded
 metadata/range traversal. Exhaustive pages freeze generation coverage and tail;
 top-k reports incomplete work separately. Shared work/byte/deadline/cancellation
@@ -405,8 +1258,40 @@ Completed captured groups alone may be evicted. Active obligations occupy an
 attributed working-data zone and unpin on completion/cancellation. Checkpoints
 hold at most 64 groups, 256 messages, 32 active obligations and 8 MiB of referenced
 active text. Terminal runs cannot advance; source permissions are rechecked on
-publication and rehydration. The initial text adapter accepts bounded 1 MiB
-messages; larger current groups need an explicit range/media adapter.
+publication and rehydration. Ordinary text messages retain the 1 MiB bound.
+
+### Original tool-result pages
+
+Tool results above 4 KiB use an explicit original-page view: the full capture
+remains immutable, while the checkpoint retains a complete source locator and
+an authenticated UTF-8 range. The reader sees the original call/result binding,
+partial visibility, full length and next cursor. The complete encoded request
+still has to fit its configured budget.
+
+The reserved pure operation `contextdb.original.page` accepts that locator,
+a byte cursor and at most 4 KiB. Native reads validate current source policy,
+inherited custody, database/version/length and processing grants. A later page
+keeps both its captured tool-result metadata and its original source range;
+it does not become independent evidence. Page reads, checkpoint validation and
+rehydration charge authenticated storage IO to the parent budget. Ports without
+this adapter return `Unsupported`; binary and opaque media require separate
+profiles.
+
+Automatic raw discovery can also disclose an evicted tool original as bounded
+UTF-8 pages, with its full locator and the page-operation definition included in
+the request budget. Paging that original requires the actual current captured
+model request to contain its authenticated source range. The native preparation
+seal binds the identities of the sources actually rendered; equal bytes from a
+different original cannot substitute for them. A guessed locator or an omitted
+retrieval hit grants no access. The captured proposal and current policy/custody
+checks survive owner restart; a current result anchor can reference an original
+from an earlier owned run.
+
+Persisted page views require `continuous-owned-tool-pages-v1`; captured recalled
+page requests additionally require `continuous-owned-original-page-recall-v1`,
+including retained recovery metadata and deep verification. Older profiles omit
+the new fields. Binary/media adapters and measured retrieval/reader quality
+remain separate work.
 
 A planned model call reserves its request identity before preparation. Its exact
 request is captured before handoff. After a crash, a captured request with no
@@ -431,7 +1316,7 @@ executable actions. Recovery cannot claim the request was never accepted after
 output was observed. Malformed or unsupported proposals are also retained without
 dispatch. An historical capture gap remains explicit until a supported coverage
 repair proves closure; a later answer alone cannot erase it. Live streaming and
-oversized/non-text protocol groups require explicit adapter profiles. The initial
+non-text protocol groups require explicit adapter profiles. The initial
 hot-message profile is 1 MiB per source and 32 messages per interaction group;
 captured overflow remains durable and returns a typed error. The
 `continuous-model-protocol-v1` feature fences these new provenance contracts.
@@ -458,6 +1343,11 @@ and operational checkpoints from new input, semantics or tool results requiring
 replanning. External effects require established current interpretation; the
 host-selected built-in memory expansion can read originals while interpretation
 is still explicitly incomplete. Operation text cannot choose the effect class.
+
+A restarted `contextdb.original.page` read authenticates the captured
+model/request/action chain and its retained or actually disclosed locator, under the parent
+budget and current source, custody and processing grants. It does not depend on
+the historical process lease. External effects retain the live decision checks.
 
 The initial profile retains at most 64 leases / 16 MiB of dependency metadata,
 checks at most 64 intervening commits, and caps validity at 30 seconds or the next

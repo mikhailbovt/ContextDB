@@ -4,19 +4,100 @@ use super::*;
 use contextdb_recall::IndexedHit;
 use contextdb_service::OriginalRenderOmission;
 
+pub(super) struct PreparedRawSpan {
+    pub span: OriginalSourceSpan,
+    pub page: Option<contextdb_service::OriginalPage>,
+    pub bytes: Option<Vec<u8>>,
+}
+
 impl NativeService {
     pub(super) fn prepare_raw_spans(
         &self,
         snapshot: &impl ReadSnapshot,
         context: &AuthenticatedRequestContext,
         hit: &IndexedHit,
+        external_processing: bool,
+        budgeted: bool,
         budget: &mut QueryBudget,
-    ) -> ServiceResult<std::result::Result<Vec<OriginalSourceSpan>, OriginalRenderOmission>> {
+    ) -> ServiceResult<std::result::Result<Vec<PreparedRawSpan>, OriginalRenderOmission>> {
         const WHOLE_LIMIT: u64 = 32 * 1024;
         const CONTEXT: u64 = 1024;
+        if hit.matches.len() > 64 {
+            return Err(super::super::exhausted(
+                "raw matched range inventory exceeds its bound",
+            ));
+        }
+        budget
+            .charge(hit.matches.len() as u64 + 1, hit.matches.len() as u64 * 256)
+            .map_err(budget_error)?;
         let Some(length) = hit.source.byte_length.filter(|length| *length > 0) else {
             return Ok(Err(OriginalRenderOmission::Unavailable));
         };
+        if hit.source.role == EventRole::Tool
+            && matches!(
+                hit.source.kind,
+                EventKind::ToolCompleted | EventKind::ToolFailed
+            )
+            && length > u64::from(contextdb_continuity::TOOL_RESULT_PAGE_BYTES)
+        {
+            let handle = contextdb_continuity::OriginalPageHandle {
+                database_id: self.database_id.clone(),
+                event_id: hit.source.event_id,
+                payload_digest: hit
+                    .source
+                    .payload_digest
+                    .ok_or_else(|| super::super::integrity("tool payload digest absent"))?,
+                byte_length: length,
+            };
+            let original = self.validate_tool_page_original(snapshot, context, &handle, budget)?;
+            if RawSource::from(&original.event) != hit.source {
+                return Err(super::super::integrity(
+                    "indexed tool source differs from its captured original",
+                ));
+            }
+            if let contextdb_core::EventPayload::InlineBytes { media_type, .. }
+            | contextdb_core::EventPayload::Staged { media_type, .. } = &original.event.payload
+                && !media_type.starts_with("text/")
+                && !matches!(media_type.as_str(), "application/json" | "application/xml")
+            {
+                return Ok(Err(OriginalRenderOmission::NonText));
+            }
+            let starts = if hit.matches.is_empty() {
+                vec![0]
+            } else {
+                hit.matches
+                    .iter()
+                    .map(|span| span.start.saturating_sub(CONTEXT))
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect()
+            };
+            if starts.len() > 8 {
+                return Err(super::super::exhausted(
+                    "matched tool page cursors exceed the rendering frontier",
+                ));
+            }
+            let mut spans = Vec::new();
+            for start in starts {
+                let page = self.read_tool_original_page_at(
+                    snapshot,
+                    contextdb_service::ReadOriginalPageRequest {
+                        context: context.clone(),
+                        handle: handle.clone(),
+                        start,
+                        max_bytes: contextdb_continuity::TOOL_RESULT_PAGE_BYTES,
+                        external_processing,
+                    },
+                    budget,
+                )?;
+                spans.push(PreparedRawSpan {
+                    span: page.view.preview.clone(),
+                    page: Some(page),
+                    bytes: None,
+                });
+            }
+            return Ok(Ok(spans));
+        }
         let ranges = if length <= WHOLE_LIMIT {
             vec![(0, length)]
         } else if hit.matches.is_empty() {
@@ -25,7 +106,6 @@ impl NativeService {
             let mut ranges: Vec<(u64, u64)> = hit
                 .matches
                 .iter()
-                .take(8)
                 .map(|span| {
                     (
                         span.start.saturating_sub(CONTEXT),
@@ -44,9 +124,35 @@ impl NativeService {
                     merged.push((start, end));
                 }
             }
+            if merged.len() > 8 {
+                return Err(super::super::exhausted(
+                    "matched original ranges exceed the rendering frontier",
+                ));
+            }
             merged
         };
-        let original = self.load_captured_original(snapshot, hit.source.event_id)?;
+        let original = if budgeted {
+            self.authorized_capture_policy_with_budget(
+                snapshot,
+                context,
+                hit.source.event_id,
+                budget,
+            )?;
+            self.authorize_derived_custody_with_budget(
+                snapshot,
+                context,
+                hit.source.event_id,
+                budget,
+            )?;
+            self.load_captured_original_with_budget(snapshot, hit.source.event_id, budget)?
+        } else {
+            self.load_captured_original(snapshot, hit.source.event_id)?
+        };
+        if RawSource::from(&original.event) != hit.source {
+            return Err(super::super::integrity(
+                "raw source differs from its accepted original",
+            ));
+        }
         if let contextdb_core::EventPayload::InlineBytes { media_type, .. }
         | contextdb_core::EventPayload::Staged { media_type, .. } = &original.event.payload
             && !media_type.starts_with("text/")
@@ -64,8 +170,19 @@ impl NativeService {
                 .checked_sub(start)
                 .filter(|size| *size <= WHOLE_LIMIT)
                 .ok_or_else(|| super::super::exhausted("raw context range exceeds its limit"))?;
-            budget.charge(1, size).map_err(budget_error)?;
-            let bytes = self.original_range(snapshot, context, &original.event, start, end)?;
+            let bytes = if budgeted {
+                self.original_range_with_budget(
+                    snapshot,
+                    context,
+                    &original.event,
+                    start,
+                    end,
+                    budget,
+                )?
+            } else {
+                budget.charge(1, size).map_err(budget_error)?;
+                self.original_range(snapshot, context, &original.event, start, end)?
+            };
             // A query byte window may bisect a UTF-8 code point. Trim only its
             // incomplete boundary bytes; malformed content itself is not repaired.
             let skip = if start == 0 {
@@ -90,12 +207,21 @@ impl NativeService {
                 return Ok(Err(OriginalRenderOmission::NonText));
             }
             let start = start + skip as u64;
-            spans.push(OriginalSourceSpan {
-                event_id: hit.source.event_id,
-                payload_digest,
-                start,
-                end: start + text.len() as u64,
-                span_digest: ContentDigest::from_bytes(*blake3::hash(text.as_bytes()).as_bytes()),
+            if budgeted {
+                budget.charge(1, text.len() as u64).map_err(budget_error)?;
+            }
+            spans.push(PreparedRawSpan {
+                span: OriginalSourceSpan {
+                    event_id: hit.source.event_id,
+                    payload_digest,
+                    start,
+                    end: start + text.len() as u64,
+                    span_digest: ContentDigest::from_bytes(
+                        *blake3::hash(text.as_bytes()).as_bytes(),
+                    ),
+                },
+                page: None,
+                bytes: budgeted.then(|| text.as_bytes().to_vec()),
             });
         }
         Ok(Ok(spans))

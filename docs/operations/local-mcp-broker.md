@@ -73,6 +73,17 @@ at 4,096 entries. That replay cache is deliberately process-local and bounded;
 durable cross-restart replay custody is not claimed by this local development
 transport.
 
+An explicitly provisioned encrypted native profile additionally requires
+`CONTEXTDB_NATIVE_MASTER_KEY_HEX` in the protected host environment. The proxy
+authenticates the retained profile against the external state-head digest before
+connection. Schema 2 handshake and acknowledgement MACs bind that exact profile;
+plaintext schema 1 encoding remains unchanged. No master key enters either
+message. Missing profile/master or reference mode cannot downgrade the selected
+profile. Joining checks existing physical controls without opening locked stores;
+full custody/protocol verification occurs when the owner opens them. This is not
+a filesystem revocation lease or live journal-identity replay. See
+[native provisioning](backup-restore.md#explicit-encrypted-native-provisioning).
+
 ## Quiescence, backup, and binary updates
 
 While either native broker is running, direct operator commands cannot open the

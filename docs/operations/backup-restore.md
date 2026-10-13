@@ -44,16 +44,16 @@ Quiesce every Codex MCP owner using the state before either command. On Windows,
 load the plugin's exact token key and state-head selector, then run
 `contextdb mcp-broker-stop <state>`; a successful return includes an
 authenticated shutdown acknowledgement and proof that the exact state-head
-lock was released. On non-Windows targets, where MCP still opens the stores
-directly, stop every MCP process. See
-[Local MCP broker on Windows](local-mcp-broker.md). Then create a new bounded
+lock was released. Linux uses the same authenticated single-owner broker and
+stop command with its exact external file selectors. See
+[Local MCP broker](local-mcp-broker.md). Then create a new bounded
 canonical envelope without overwriting an existing file:
 
 ```text
 contextdb --json codex-backup ./state/codex-memory.ctxb ./backup/codex-memory.cdb-backup
 ```
 
-The envelope format is `contextdb.codex-composite-backup.v1`. It contains the
+The plaintext envelope format is `contextdb.codex-composite-backup.v1`. It contains the
 verified canonical lifecycle archive and all native Fjall logical keyspaces,
 with exact component formats, commit sequences, database identity, BLAKE3
 digests, a canonical footer, and finite 512 MiB lifecycle / 256 MiB native
@@ -61,6 +61,14 @@ component caps. It does **not** contain the token key, external state-head
 authority, production Fjall runtime ledger, signatures, or KMS custody. The CLI
 prints only a content-free receipt; the backup bytes are written to the explicit
 destination with no-clobber atomic installation.
+
+An explicitly provisioned encrypted native profile uses
+`contextdb.codex-composite-backup.v2`, containing the native v3 ciphertext archive
+and exact database, custody and suppression authority identities. The lifecycle
+component remains plaintext. Neither format contains master/token keys, wrapped
+key catalogs, host profile paths or authority snapshots. Restore requires the
+current retained profile and authorities; a backup cannot configure or replace
+them. Plaintext and encrypted envelopes cannot be interchanged implicitly.
 
 Restore is intentionally not a live replacement API. The lifecycle archive and
 database identity must still match the backup byte-for-byte, and the native
@@ -102,6 +110,47 @@ restore executor.
 Record the source binary/version manifest, archive size, SHA-256 distribution
 digest, BLAKE3 logical digest, commit sequence, destination doctor receipt, and
 operator/trace ID. Store receipts separately from sensitive content.
+
+## Explicit encrypted native provisioning
+
+With all MCP owners stopped, select the existing authenticated lifecycle archive,
+token key and external state-head authority. Supply a separate nonzero 32-byte
+master key through `CONTEXTDB_NATIVE_MASTER_KEY_HEX` from protected host custody;
+it must differ from the token key. Keep keys out of command arguments and logs.
+The custody destination must be new, absolute, unlinked and outside the database
+directory tree:
+
+```text
+contextdb --json codex-native-init D:/ContextDB/data/memory.ctxb --custody-root D:/ContextDB-custody/native-memory
+```
+
+The command refuses an existing native sidecar, profile or custody destination.
+It retains a signed `<state>.native-profile.json` descriptor, pins its immutable
+digest in the external state head, then creates `<state>.native-fjall` and the
+independent `keys/` and `suppression/` authorities. Their exact identities and
+formats are verified before activation. Ordinary lifecycle publications and
+recovery preserve the pin. Interrupted provisioning retains its descriptor and
+fails closed; automatic completion or reseeding is not implemented.
+
+Every later native CLI/MCP opening requires the same master, profile and retained
+authorities. A proxy validates its selection before joining a running broker;
+the authenticated handshake and acknowledgement bind the profile digest.
+Reference mode cannot bypass it. Losing both local native state and the profile
+still leaves the external pin, so startup refuses plaintext. Token-authorized
+`mcp-broker-stop` can quiesce an owner without the missing master/profile, but
+cannot read native bytes or start an owner.
+
+Encrypted native restore may create a missing pristine sidecar only after the
+complete envelope, exact lifecycle archive and retained custody match. Before
+creating that target, restore retains a signed local pending state and an external
+state-head fence. Only successful restore and deep verification clear the fence;
+failed or interrupted restore stays closed even if an older signed Ready profile
+is replayed. Explicit interrupted restore recovery is not yet implemented. Restore
+never creates replacement key or suppression authorities. Lifecycle-only export remains
+separate; `custody-snapshot-export` refuses this native pin even when local native
+files are missing. Existing plaintext stores require explicit migration, which
+is not yet implemented. This opt-in does not encrypt the lifecycle composition
+or complete global deletion/admission.
 
 ## Evidence boundary
 

@@ -13,6 +13,14 @@ use contextdb_storage::{
 use super::*;
 use crate::{NATIVE_ENCRYPTED_BACKUP_FORMAT, NativeService, NativeSuppressionLedger};
 
+pub(crate) fn fail_next_native_commit() {
+    storage::BEFORE_NATIVE_COMMIT.with(|hook| {
+        hook.replace(Some(Box::new(|| {
+            Err(failure("injected interrupted native publication"))
+        })));
+    });
+}
+
 fn master() -> CustodyMasterKey {
     CustodyMasterKey::from_zeroizing(Zeroizing::new([79; 32])).expect("fixture custody key")
 }
@@ -192,9 +200,13 @@ fn capture_indexes_large_payload_backup_and_rotated_restore_keep_content_encrypt
 }
 
 #[test]
-fn ciphertext_relocation_and_forbidden_corruption_do_not_expose_source_bytes() {
+fn legacy_ciphertext_relocation_and_forbidden_corruption_do_not_expose_source_bytes() {
     let root = tempfile::tempdir().expect("root");
-    let (_key_directory, keys) = authority("cipher-policy");
+    // Version 3 has address authentication without the version 4 native-use
+    // commit fence. Preserve its policy-before-body behavior under row damage.
+    let keys =
+        NativeCustodyKeys::create_version(&root.path().join("keys"), "cipher-policy", master(), 3)
+            .expect("legacy keys");
     let (_ledger_directory, ledger) = crate::suppression::tests::authority("cipher-policy");
     let service = NativeService::open_encrypted(
         root.path().join("native"),
@@ -307,9 +319,11 @@ fn ciphertext_relocation_and_forbidden_corruption_do_not_expose_source_bytes() {
 }
 
 #[test]
-fn concurrent_key_allocation_has_one_winner_and_the_loser_retries_before_native_publication() {
+fn legacy_key_allocation_has_one_winner_and_the_loser_retries_before_native_publication() {
     let root = tempfile::tempdir().expect("root");
-    let (_key_directory, keys) = authority("key-race");
+    let keys =
+        NativeCustodyKeys::create_version(&root.path().join("keys"), "key-race", master(), 2)
+            .expect("legacy version 2 key authority");
     let left = NativeStorage::open(&root.path().join("left"), Some(keys.clone())).expect("left");
     let right = NativeStorage::open(&root.path().join("right"), Some(keys)).expect("right");
     let space = Keyspace::new("fixture").expect("space");

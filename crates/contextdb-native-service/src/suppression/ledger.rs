@@ -14,6 +14,11 @@ use uuid::Uuid;
 
 use super::*;
 
+mod record_sources;
+mod removal;
+pub(crate) use record_sources::{RecordSourceControl, RecordSourcesCheckpoint};
+pub(crate) use removal::{RemovalCheckpoint, RemovalIntent};
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Identity {
@@ -73,19 +78,44 @@ impl fmt::Debug for NativeSuppressionLedger {
 impl NativeSuppressionLedger {
     /// Create a new authority in a new directory. An existing path is rejected.
     pub fn create(path: impl AsRef<Path>, database_id: &str) -> ServiceResult<Arc<Self>> {
+        Self::create_with_authority(path, database_id, ObservationId::new().as_uuid())
+    }
+
+    /// Create a fresh format-3 authority with an identity pinned by the host.
+    /// The identity does not restore the history of a lost ledger.
+    pub fn create_with_authority(
+        path: impl AsRef<Path>,
+        database_id: &str,
+        authority: Uuid,
+    ) -> ServiceResult<Arc<Self>> {
         validate_identifier(database_id, "suppression database ID")?;
+        if authority.is_nil() {
+            return Err(invalid("suppression authority must not be nil"));
+        }
         std::fs::create_dir(path.as_ref())
             .map_err(|_| integrity("suppression authority requires a new directory"))?;
         let engine = FjallStorage::open(path.as_ref()).map_err(storage_error)?;
         let rows = keyspace("contextdb_suppression")?;
         let identity = Identity {
-            version: 1,
-            authority: ObservationId::new().as_uuid(),
+            version: 3,
+            authority,
             database: digest_bytes(database_id.as_bytes()),
         };
         let mut tx = engine.begin_write().map_err(storage_error)?;
         tx.put(&rows, b"identity".to_vec(), encode(&identity)?)
             .map_err(storage_error)?;
+        tx.put(
+            &rows,
+            removal::HEAD.to_vec(),
+            encode(&removal::genesis(&identity)?)?,
+        )
+        .map_err(storage_error)?;
+        tx.put(
+            &rows,
+            record_sources::HEAD.to_vec(),
+            encode(&record_sources::genesis(&identity)?)?,
+        )
+        .map_err(storage_error)?;
         require_sync(
             tx.commit(Durability::Sync)
                 .map_err(storage_error)?
@@ -104,7 +134,9 @@ impl NativeSuppressionLedger {
         if !path.as_ref().is_dir() {
             return Err(integrity("current suppression authority is unavailable"));
         }
-        let engine = FjallStorage::open(path.as_ref()).map_err(storage_error)?;
+        let engine = FjallStorage::try_open_existing(path.as_ref())
+            .map_err(storage_error)?
+            .ok_or_else(|| integrity("current suppression authority is already open"))?;
         let rows = keyspace("contextdb_suppression")?;
         let snapshot = engine
             .begin_read(SnapshotSelector::Latest)
@@ -116,7 +148,7 @@ impl NativeSuppressionLedger {
                 .ok_or_else(|| integrity("suppression identity is missing"))?,
             "suppression identity",
         )?;
-        if identity.version != 1
+        if !matches!(identity.version, 1..=3)
             || identity.authority != authority
             || identity.database != digest_bytes(database_id.as_bytes())
         {
@@ -149,6 +181,12 @@ impl NativeSuppressionLedger {
     #[must_use]
     pub fn authority_id(&self) -> Uuid {
         self.identity.authority
+    }
+
+    /// Actual retained authority format, including legacy reopened ledgers.
+    #[must_use]
+    pub fn format_version(&self) -> u16 {
+        self.identity.version
     }
 
     pub(crate) fn require_database(&self, database: &str) -> ServiceResult<()> {
@@ -224,7 +262,8 @@ impl NativeSuppressionLedger {
         Ok(snapshot
             .get(&self.rows, &denied_key(workspace, id))
             .map_err(storage_error)?
-            .is_some())
+            .is_some()
+            || self.removal_denies(&snapshot, workspace, id)?)
     }
 
     pub(super) fn deny(
@@ -346,6 +385,8 @@ impl NativeSuppressionLedger {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         let mut expected = BTreeMap::from([(b"identity".to_vec(), encode(&self.identity)?)]);
+        self.verify_removal_ledger(&snapshot, &mut expected)?;
+        self.verify_record_source_ledger(&snapshot, &mut expected)?;
         for row in snapshot
             .scan_prefix(&self.rows, b"head/")
             .map_err(storage_error)?

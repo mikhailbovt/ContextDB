@@ -2,7 +2,9 @@
 //! a model or external target; target CAS/idempotency remains a separate contract.
 
 use contextdb_continuity::OwnedRunCheckpoint;
-use contextdb_core::{EventKind, EventPayload, EventProvenance};
+use contextdb_core::{
+    EventKind, EventPayload, EventProvenance, EventRole, ModelOutputFormat, ToolCallId,
+};
 
 use super::*;
 
@@ -34,7 +36,7 @@ impl NativeService {
             return Err(changed("decision context changed before model handoff"));
         }
         budget.charge(2, 0).map_err(budget_error)?;
-        let state = self.current_owned_checkpoint(&snapshot, context, checkpoint)?;
+        let state = self.current_owned_checkpoint(&snapshot, context, checkpoint, budget)?;
         self.authorized_capture_policy(&snapshot, context, request.event_id)?;
         self.authorize_capture_dependencies(&snapshot, context, request.event_id)?;
         let original = self.load_captured_original(&snapshot, request.event_id)?;
@@ -42,7 +44,31 @@ impl NativeService {
             .pending_model
             .as_ref()
             .ok_or_else(|| invalid("run has no planned model attempt"))?;
+        let trace_matches = match &original.event.payload {
+            EventPayload::Assembly { manifest } => match (
+                &manifest.router_trace,
+                record.seal.trace_digest,
+                record.seal.origin_digest,
+                record.seal.trace_version,
+            ) {
+                (None, None, None, None) => true,
+                (Some(trace), Some(digest), Some(origins), version) => {
+                    trace.header.trace_digest == digest
+                        && trace.header.origin_closure_digest == origins
+                        && match version {
+                            None => trace.header.version == contextdb_core::ROUTER_TRACE_VERSION,
+                            Some(contextdb_core::ROUTER_REPLAY_TRACE_VERSION) => {
+                                trace.header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                            }
+                            Some(_) => false,
+                        }
+                }
+                _ => false,
+            },
+            _ => false,
+        };
         if original.receipt != *request
+            || !trace_matches
             || original.event.kind != EventKind::ModelRequested
             || original.event.run_id != Some(state.identity.run_id)
             || pending.call_id != call
@@ -50,13 +76,46 @@ impl NativeService {
             || pending.wire_digest.is_some()
             || pending.interrupted_output.is_some()
             || original.event.producer_sequence != state.next_sequence
+            || original.event.producer_id != state.producer_id
             || !matches!(&original.event.payload, EventPayload::Assembly { manifest }
                 if manifest.model_call_id == call && manifest.wire_digest == record.seal.wire_digest
-                    && manifest.byte_length == record.seal.wire_bytes)
+                    && manifest.byte_length == record.seal.wire_bytes
+                    && manifest.original_page_recall == record.seal.original_page_recall)
         {
             return Err(invalid(
                 "model dispatch differs from the checkpoint and sealed request",
             ));
+        }
+        if let Some(routed) = &record.routed {
+            if checkpoint != &routed.checkpoint
+                || call != routed.intent.call_id
+                || request.event_id != routed.intent.request_event
+                || routed.known_at.checked_add(1) != Some(request.workspace_commit)
+                || state
+                    .groups
+                    .last()
+                    .filter(|group| !group.complete)
+                    .map(|group| group.sequence)
+                    != Some(routed.intent.interaction_sequence)
+            {
+                return Err(changed(
+                    "routed model handoff differs from its sealed current query",
+                ));
+            }
+            self.check_routed_query_binding(&snapshot, context, &routed.roots, budget)?;
+            budgeted::metadata(&snapshot, budget, |reader| {
+                if self
+                    .workspace_state(reader, &context.request.workspace_id)?
+                    .watermarks
+                    .journal
+                    != request.workspace_commit
+                {
+                    return Err(changed(
+                        "routed workspace advanced after its model request capture",
+                    ));
+                }
+                Ok(())
+            })?;
         }
         if registry.entries.values().any(|entry| {
             entry
@@ -111,17 +170,31 @@ impl NativeService {
                 planned.proposal.end.saturating_sub(planned.proposal.start),
             )
             .map_err(budget_error)?;
-        let state = self.current_owned_checkpoint(&snapshot, context, checkpoint)?;
+        let state = self.current_owned_checkpoint(&snapshot, context, checkpoint, budget)?;
         if state.pending_tool.as_ref() != Some(planned) || planned.action_digest != action_digest {
             return Err(invalid("tool action differs from the current owned intent"));
         }
-        self.source_span(&snapshot, Some(context), &planned.proposal, true)?;
-        let proposal = self.load_captured_original(&snapshot, planned.proposal.event_id)?;
+        let proposal_bytes = if class == ToolAdmissionClass::OriginalPage {
+            self.source_span_inner(
+                &snapshot,
+                Some(context),
+                &planned.proposal,
+                true,
+                Some(budget),
+            )?
+        } else {
+            self.source_span(&snapshot, Some(context), &planned.proposal, true)?
+        };
+        let proposal = if class == ToolAdmissionClass::OriginalPage {
+            self.load_captured_original_with_budget(&snapshot, planned.proposal.event_id, budget)?
+        } else {
+            self.load_captured_original(&snapshot, planned.proposal.event_id)?
+        };
         let Some(EventProvenance::ModelOutput {
             model_call_id,
             request_event_id,
             tool_calls,
-            ..
+            format,
         }) = &proposal.event.provenance
         else {
             return Err(invalid("tool proposal has no model origin"));
@@ -133,6 +206,158 @@ impl NativeService {
             return Err(invalid(
                 "tool proposal differs from its admitted model origin",
             ));
+        }
+        if class == ToolAdmissionClass::OriginalPage {
+            // Pure reads can continue after restart, when the old process-local
+            // decision lease is gone. Their source authorization is current;
+            // this branch never reaches an external target or grants an effect.
+            if proposal.event.role != EventRole::Assistant
+                || proposal.event.session_id != Some(state.identity.session_id)
+                || proposal.event.producer_id != state.producer_id
+                || !proposal.event.parent_event_ids.contains(request_event_id)
+                || *format != ModelOutputFormat::ProtocolJson
+                || planned.proposal.start != 0
+                || planned.proposal.end
+                    != contextdb_core::RawSource::from(&proposal.event)
+                        .byte_length
+                        .unwrap_or(0)
+            {
+                return Err(invalid(
+                    "original page proposal differs from its captured protocol",
+                ));
+            }
+            self.authorized_capture_policy_with_budget(
+                &snapshot,
+                context,
+                *request_event_id,
+                budget,
+            )?;
+            self.authorize_derived_custody_with_budget(
+                &snapshot,
+                context,
+                *request_event_id,
+                budget,
+            )?;
+            let request =
+                self.load_captured_original_with_budget(&snapshot, *request_event_id, budget)?;
+            if request.event.kind != EventKind::ModelRequested
+                || request.event.role != EventRole::Host
+                || request.event.run_id != Some(state.identity.run_id)
+                || request.event.session_id != Some(state.identity.session_id)
+                || request.event.producer_id != state.producer_id
+                || !matches!(request.event.provenance, Some(EventProvenance::ModelRequest { model_call_id: call }) if call == *model_call_id)
+                || !matches!(&request.event.payload, EventPayload::Assembly { manifest } if manifest.model_call_id == *model_call_id)
+            {
+                return Err(invalid(
+                    "original page proposal lacks its actual captured model request",
+                ));
+            }
+            self.authorized_capture_policy_with_budget(
+                &snapshot,
+                context,
+                planned.request_event,
+                budget,
+            )?;
+            self.authorize_derived_custody_with_budget(
+                &snapshot,
+                context,
+                planned.request_event,
+                budget,
+            )?;
+            let intent =
+                self.load_captured_original_with_budget(&snapshot, planned.request_event, budget)?;
+            if intent.event.kind != EventKind::ToolRequested
+                || intent.event.role != EventRole::Host
+                || intent.event.run_id != Some(state.identity.run_id)
+                || intent.event.session_id != Some(state.identity.session_id)
+                || intent.event.producer_id != state.producer_id
+                || intent.event.producer_sequence != planned.request_sequence
+                || !intent
+                    .event
+                    .parent_event_ids
+                    .contains(&planned.proposal.event_id)
+                || !matches!(intent.event.provenance, Some(EventProvenance::Tool { call_id, request_event_id, action_digest: digest })
+                    if call_id == planned.call_id && request_event_id == planned.request_event && digest == action_digest)
+            {
+                return Err(invalid(
+                    "original page intent differs from the captured action",
+                ));
+            }
+            let bytes = intent
+                .event
+                .payload
+                .original_bytes()
+                .ok_or_else(|| invalid("original page action requires bounded inline JSON"))?;
+            budget.charge(1, bytes.len() as u64).map_err(budget_error)?;
+            let selector = owned::captured_original_page_arguments(bytes, action_digest)?;
+            let reply: PageProposal = serde_json::from_slice(&proposal_bytes)
+                .map_err(|_| invalid("original page proposal JSON is invalid"))?;
+            if reply
+                .tool_calls
+                .iter()
+                .map(|call| call.call_id)
+                .collect::<Vec<_>>()
+                != *tool_calls
+                || reply.text.len() > 1024 * 1024
+            {
+                return Err(invalid(
+                    "original page proposal call identities differ from its provenance",
+                ));
+            }
+            let action: serde_json::Value = serde_json::from_slice(bytes)
+                .map_err(|_| invalid("original page action JSON is invalid"))?;
+            if reply
+                .tool_calls
+                .iter()
+                .filter(|call| call.call_id == planned.call_id)
+                .count()
+                != 1
+                || !reply
+                    .tool_calls
+                    .iter()
+                    .any(|call| call.call_id == planned.call_id && call.action == action)
+                || !intent
+                    .event
+                    .parent_event_ids
+                    .contains(&selector.handle.event_id)
+            {
+                return Err(invalid(
+                    "original page selector differs from the source proposal or owned locator",
+                ));
+            }
+            if !state
+                .groups
+                .iter()
+                .flat_map(|group| &group.messages)
+                .any(|message| {
+                    message
+                        .tool_page
+                        .as_ref()
+                        .is_some_and(|page| page.handle == selector.handle)
+                })
+            {
+                self.validate_original_page_disclosure_at(
+                    &snapshot,
+                    context,
+                    &state,
+                    &planned.proposal,
+                    planned.call_id,
+                    &selector,
+                    budget,
+                )?;
+            }
+            self.read_tool_original_page_at(
+                &snapshot,
+                contextdb_service::ReadOriginalPageRequest {
+                    context: context.clone(),
+                    handle: selector.handle,
+                    start: selector.start,
+                    max_bytes: selector.max_bytes,
+                    external_processing: state.model_profile.external_processing,
+                },
+                budget,
+            )?;
+            return Ok(());
         }
         let registry = self.lease_registry()?;
         let record = registry
@@ -291,6 +516,20 @@ impl NativeService {
         }
         Ok(())
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageProposal {
+    text: String,
+    #[serde(default)]
+    tool_calls: Vec<PageProposalCall>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageProposalCall {
+    call_id: ToolCallId,
+    action: serde_json::Value,
 }
 
 fn decision_working_digest(

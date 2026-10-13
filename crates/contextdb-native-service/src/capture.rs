@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use contextdb_core::{
-    ContentDigest, EventEnvelope, EventPayload, EventProvenance, ObservationId, OriginalPayloadRef,
-    RequestPart, ResponseStream, StreamId, Validate,
+    ContentDigest, EventEnvelope, EventKind, EventPayload, EventProvenance, ObservationId,
+    OriginalPayloadRef, RequestPart, ResponseStream, StreamId, Validate,
 };
 use contextdb_service::{
     AuthenticatedRequestContext, Capability, CaptureAcceptance, CaptureDurability, CaptureGapRange,
@@ -27,7 +27,7 @@ use super::{
 
 pub(super) const CAPTURE_FEATURE: &str = "continuous-capture-v1";
 pub(super) const IMPACT_FEATURE: &str = "continuous-capture-impact-v1";
-use recovery::CaptureRecovery;
+pub(super) use recovery::CaptureRecovery;
 pub(super) use recovery::RECOVERY_FEATURE;
 mod recovery;
 /// Maximum original payload in one synchronized capture transaction.
@@ -35,6 +35,17 @@ pub const CAPTURE_MAX_INLINE_BYTES: usize = 256 * 1024;
 /// Maximum disjoint producer gaps before strict capture applies backpressure.
 pub const CAPTURE_MAX_PRODUCER_GAPS: usize = 128;
 const MAX_CAPTURE_RETRIES: usize = 4;
+
+struct PreparedCapture<'a> {
+    prepared: &'a contextdb_service::PreparedContext,
+    checkpoint: Option<&'a CaptureReceipt>,
+    budget: &'a mut contextdb_recall::QueryBudget,
+}
+
+struct CheckpointCapture<'a> {
+    request: &'a SaveRunCheckpointRequest,
+    budget: &'a mut contextdb_recall::QueryBudget,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -99,7 +110,7 @@ impl CapturePort for NativeService {
         &self,
         request: CaptureRequest,
     ) -> ServiceResult<CaptureAcceptance> {
-        self.append_owned_capture(request, None)
+        self.append_owned_capture(request, None, None)
     }
 
     fn read_original(&self, request: ReadOriginalRequest) -> ServiceResult<CapturedOriginal> {
@@ -175,6 +186,32 @@ impl CapturePort for NativeService {
 }
 
 impl NativeService {
+    // Called only after a retained request and the complete local source history
+    // have been verified. Missing journal membership cannot hide orphan controls.
+    pub(crate) fn require_absent_capture<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<()> {
+        let original = digest_bytes(id.to_string().as_bytes()).into_bytes();
+        for (space, key) in [
+            (&self.keyspaces.continuous, record_key(id)),
+            (&self.keyspaces.observations_content, original.clone()),
+            (&self.keyspaces.observations_policy, original),
+        ] {
+            budget
+                .charge(1, 0)
+                .map_err(super::raw_index::budget_error)?;
+            if snapshot.get(space, &key).map_err(storage_error)?.is_some() {
+                return Err(integrity(
+                    "selected source has rows outside its accepted local history",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn captured_receipt_metadata<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -229,7 +266,47 @@ impl NativeService {
         &self,
         request: CaptureRequest,
         checkpoint: Option<&SaveRunCheckpointRequest>,
+        budget: Option<&mut contextdb_recall::QueryBudget>,
     ) -> ServiceResult<CaptureAcceptance> {
+        let checkpoint = match (checkpoint, budget) {
+            (None, None) => None,
+            (Some(request), Some(budget)) => Some(CheckpointCapture { request, budget }),
+            _ => return Err(invalid("checkpoint capture requires its parent budget")),
+        };
+        self.append_capture(request, checkpoint, None)
+    }
+
+    pub(super) fn append_prepared_capture(
+        &self,
+        request: CaptureRequest,
+        prepared: &contextdb_service::PreparedContext,
+        checkpoint: Option<&CaptureReceipt>,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<CaptureAcceptance> {
+        self.append_capture(
+            request,
+            None,
+            Some(PreparedCapture {
+                prepared,
+                checkpoint,
+                budget,
+            }),
+        )
+    }
+
+    fn append_capture(
+        &self,
+        request: CaptureRequest,
+        mut checkpoint: Option<CheckpointCapture<'_>>,
+        mut prepared: Option<PreparedCapture<'_>>,
+    ) -> ServiceResult<CaptureAcceptance> {
+        let protected = matches!(&request.event.payload, EventPayload::Assembly { manifest }
+            if manifest.router_trace.is_some() || manifest.original_page_recall);
+        if protected != prepared.is_some() {
+            return Err(invalid(
+                "trace-bearing model requests require prepared owner capture",
+            ));
+        }
         require_capability(&request.context, Capability::Observe)?;
         if host_request_echo(&request.event)
             || checkpoint.is_some()
@@ -240,7 +317,10 @@ impl NativeService {
         {
             require_capability(&request.context, Capability::Runtime)?;
         }
-        match (&request.event.provenance, checkpoint) {
+        match (
+            &request.event.provenance,
+            checkpoint.as_ref().map(|checkpoint| checkpoint.request),
+        ) {
             (
                 Some(EventProvenance::OwnedCheckpoint {
                     expected_revision,
@@ -279,6 +359,16 @@ impl NativeService {
             return Err(permission_denied());
         }
         validate_payload(&request.event)?;
+        if protected {
+            bounded_event_size(&request.event)?;
+            let row_bytes = bounded_capture_row(&request)?;
+            if let Some(admission) = prepared.as_mut() {
+                admission
+                    .budget
+                    .charge(1, row_bytes as u64)
+                    .map_err(super::raw_index::budget_error)?;
+            }
+        }
         let producer = producer_key(&request.context, request.event.producer_id)?;
         let idempotency =
             canonical_digest(&(NATIVE_CAPTURE_DOMAIN, &producer, &request.idempotency_key))?;
@@ -288,14 +378,19 @@ impl NativeService {
             &request.context.actor_id,
             &request.context.agent_id,
         ))?;
-        let _guard = self.lock_writes()?;
+        let _guard = if let Some(admission) = prepared.as_mut() {
+            self.lock_index_publication(admission.budget)?
+        } else {
+            self.lock_writes()?
+        };
         for _ in 0..MAX_CAPTURE_RETRIES {
             if let Some(receipt) = self.append_capture_attempt(
                 &request,
                 &producer,
                 &idempotency,
                 &request_digest,
-                checkpoint,
+                checkpoint.as_mut(),
+                prepared.as_mut(),
             )? {
                 return Ok(receipt);
             }
@@ -364,7 +459,8 @@ impl NativeService {
         producer: &str,
         idempotency: &str,
         request_digest: &str,
-        checkpoint: Option<&SaveRunCheckpointRequest>,
+        mut checkpoint: Option<&mut CheckpointCapture<'_>>,
+        mut prepared: Option<&mut PreparedCapture<'_>>,
     ) -> ServiceResult<Option<CaptureAcceptance>> {
         let mut transaction = self.engine.begin_write().map_err(storage_error)?;
         if let Some(receipt) = self.replay::<CaptureReceipt, _>(
@@ -380,8 +476,28 @@ impl NativeService {
                 newly_accepted: false,
             }));
         }
-        if let Some(checkpoint) = checkpoint {
-            self.validate_checkpoint_publication(&transaction, checkpoint)?;
+        if let Some(checkpoint) = checkpoint.as_deref_mut() {
+            self.validate_checkpoint_publication(
+                &transaction,
+                checkpoint.request,
+                checkpoint.budget,
+            )?;
+        }
+        if let Some(admission) = prepared.as_deref_mut() {
+            if admission.prepared.router_trace.is_some() && self.engine.keys.is_none() {
+                return Err(ServiceError::new(
+                    ErrorCode::Unsupported,
+                    "protected router capture requires encrypted native custody",
+                    false,
+                ));
+            }
+            self.validate_prepared_capture(
+                &transaction,
+                request,
+                admission.prepared,
+                admission.checkpoint,
+                admission.budget,
+            )?;
         }
         let event = &request.event;
         self.require_unsuppressed_identity(
@@ -423,7 +539,28 @@ impl NativeService {
             read_optional(&transaction, self, producer_head_key.as_bytes())?.unwrap_or_default();
         let coverage = advance_coverage(old, event.producer_sequence)?;
         self.stage_response_stream(&mut transaction, request, producer)?;
-        self.validate_capture_sources(&transaction, &request.context, event)?;
+        if let EventPayload::Assembly { manifest } = &event.payload
+            && manifest.original_page_recall
+        {
+            if event.kind != EventKind::ModelRequested || event.upstream_truncated {
+                return Err(invalid(
+                    "request manifest requires a complete observed model request",
+                ));
+            }
+            let admission = prepared
+                .as_deref_mut()
+                .ok_or_else(|| invalid("original-page recall requires prepared owner capture"))?;
+            // Replaying this request authenticates actual storage chunks against
+            // the same remaining allowance; no legacy unbudgeted read precedes it.
+            self.assemble_request_with_budget(
+                &transaction,
+                &request.context,
+                manifest,
+                admission.budget,
+            )?;
+        } else {
+            self.validate_capture_sources(&transaction, &request.context, event)?;
+        }
         if event.provenance.is_some()
             || matches!(
                 event.payload,
@@ -433,6 +570,117 @@ impl NativeService {
             self.enable_source_format(&mut transaction)?;
         }
         self.enable_capture_format(&mut transaction)?;
+        if matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.original_page_recall)
+        {
+            self.enable_capture_extension(&mut transaction, super::owned::TOOL_PAGES_FEATURE)?;
+            self.enable_capture_extension(&mut transaction, super::owned::PAGE_RECALL_FEATURE)?;
+        }
+        if let EventPayload::Assembly { manifest } = &event.payload
+            && let Some(trace) = &manifest.router_trace
+        {
+            self.enable_capture_extension(&mut transaction, super::router_trace::TRACE_FEATURE)?;
+            if trace.header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION {
+                self.enable_capture_extension(
+                    &mut transaction,
+                    super::router_trace::TRACE_REPLAY_FEATURE,
+                )?;
+            }
+            if super::router_trace::hybrid::event_has_hybrid(event)? {
+                self.enable_capture_extension(
+                    &mut transaction,
+                    super::router_trace::hybrid::HYBRID_FEATURE,
+                )?;
+            }
+            if let Some(admission) = prepared.as_deref_mut() {
+                // The new streaming marker revalidates bounded protected pages
+                // and may decode its revision string; charge that extra work
+                // and scratch to the existing whole-capture parent first.
+                admission
+                    .budget
+                    .charge(
+                        u64::from(trace.header.byte_length) * 8 + trace.pages.len() as u64 + 1,
+                        u64::from(trace.header.byte_length) * 2 + 4096,
+                    )
+                    .map_err(crate::raw_index::budget_error)?;
+            }
+            let (segmented, routed) = super::router_trace::hybrid::event_hybrid_query_modes(event)?;
+            if segmented || routed {
+                if trace.header.version != contextdb_core::ROUTER_REPLAY_TRACE_VERSION {
+                    return Err(integrity(
+                        "segmented hybrid capture requires replay trace v2",
+                    ));
+                }
+                // Capturing an observation does not create an ANN directory or
+                // manufacture its projection declaration. That owner format
+                // must already exist, including after completed generation GC.
+                let format_bytes = if let Some(admission) = prepared {
+                    let bytes = crate::budgeted::read_value(
+                        &transaction,
+                        &self.keyspaces.meta,
+                        META_MANIFEST_KEY,
+                        crate::MAX_JSON_BYTES,
+                        admission.budget,
+                    )?
+                    .ok_or_else(|| integrity("segmented hybrid capture manifest absent"))?;
+                    admission
+                        .budget
+                        .charge(1, bytes.len() as u64 * 8 + 4096)
+                        .map_err(crate::raw_index::budget_error)?;
+                    bytes
+                } else {
+                    // The ordinary capture API retains its existing allowance
+                    // semantics. This new format check still bounds its row.
+                    let page = transaction
+                        .scan_prefix_page(
+                            &self.keyspaces.meta,
+                            contextdb_storage::ScanPageRequest {
+                                prefix: META_MANIFEST_KEY,
+                                start_after: None,
+                                max_entries: 1,
+                                max_bytes: crate::MAX_JSON_BYTES + META_MANIFEST_KEY.len() + 256,
+                            },
+                        )
+                        .map_err(storage_error)?;
+                    page.entries
+                        .into_iter()
+                        .next()
+                        .filter(|entry| entry.key == META_MANIFEST_KEY)
+                        .map(|entry| entry.value)
+                        .ok_or_else(|| integrity("segmented hybrid capture manifest absent"))?
+                };
+                if format_bytes.len() > crate::MAX_JSON_BYTES {
+                    return Err(integrity(
+                        "segmented hybrid capture manifest exceeds its bound",
+                    ));
+                }
+                let format: Manifest = decode(&format_bytes, "segmented hybrid capture manifest")?;
+                let required = if routed {
+                    &[
+                        super::raw_index::dense::graph::routing::types::FEATURE,
+                        super::raw_index::dense::graph::prefix_v2::types::FEATURE,
+                        super::raw_index::dense::FEATURE,
+                    ][..]
+                } else {
+                    &[super::raw_index::dense::graph::segments::types::FEATURE][..]
+                };
+                if required
+                    .iter()
+                    .any(|feature| !format.features.contains(*feature))
+                {
+                    return Err(integrity(
+                        "segmented hybrid capture lacks its native segment declaration",
+                    ));
+                }
+                self.enable_capture_extension(
+                    &mut transaction,
+                    if routed {
+                        super::router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE
+                    } else {
+                        super::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE
+                    },
+                )?;
+            }
+        }
         if matches!(event.provenance, Some(EventProvenance::ModelOutput { .. })) {
             self.enable_capture_extension(
                 &mut transaction,
@@ -484,17 +732,22 @@ impl NativeService {
                 encode(&policy)?,
             )
             .map_err(storage_error)?;
+        let stored_content = StoredObservationContent {
+            schema_version: SCHEMA_VERSION,
+            observation_id,
+            metadata,
+            content,
+            digest: content_digest,
+        };
+        if matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.router_trace.is_some() || manifest.original_page_recall)
+        {
+            bounded_event_size(&stored_content)?;
+        }
         transaction
             .put(
                 &self.keyspaces.observations_content,
                 event_digest.as_bytes().to_vec(),
-                encode(&StoredObservationContent {
-                    schema_version: SCHEMA_VERSION,
-                    observation_id,
-                    metadata,
-                    content,
-                    digest: content_digest,
-                })?,
+                encode(&stored_content)?,
             )
             .map_err(storage_error)?;
         #[cfg(test)]
@@ -521,7 +774,7 @@ impl NativeService {
             producer_key: producer.into(),
             producer_sequence: event.producer_sequence,
             idempotency_digest: idempotency.into(),
-            dependencies: capture_dependencies(&event.payload),
+            dependencies: capture_dependencies(event)?,
             affects_scope: (!affects_scope).then_some(false),
             custody_version: Some(super::custody::CUSTODY_VERSION),
             recovery: Some(CaptureRecovery::from_event(event)?),
@@ -571,7 +824,7 @@ impl NativeService {
                 .map_err(storage_error)?;
         }
         if let Some(checkpoint) = checkpoint {
-            self.publish_checkpoint_head(&mut transaction, checkpoint, &receipt)?;
+            self.publish_checkpoint_head(&mut transaction, checkpoint.request, &receipt)?;
         }
         self.finish_frame(
             &mut transaction,
@@ -673,15 +926,60 @@ impl NativeService {
         context: &AuthenticatedRequestContext,
         id: ObservationId,
     ) -> ServiceResult<StoredObservationPolicy> {
-        self.require_suppression_current(
-            snapshot,
-            &digest_bytes(context.request.workspace_id.as_bytes()),
-        )?;
+        self.authorized_capture_policy_inner(snapshot, context, id, None)
+    }
+
+    pub(crate) fn authorized_capture_policy_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<StoredObservationPolicy> {
+        self.authorized_capture_policy_inner(snapshot, context, id, Some(budget))
+    }
+
+    fn authorized_capture_policy_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        id: ObservationId,
+        mut budget: Option<&mut contextdb_recall::QueryBudget>,
+    ) -> ServiceResult<StoredObservationPolicy> {
+        if let Some(shared) = &budget {
+            shared.check().map_err(super::raw_index::budget_error)?;
+        }
+        let workspace = digest_bytes(context.request.workspace_id.as_bytes());
+        if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.require_suppression_current(reader, &workspace)
+            })?;
+        } else {
+            self.require_suppression_current(snapshot, &workspace)?;
+        }
         let digest = digest_bytes(id.to_string().as_bytes());
-        let bytes = snapshot
-            .get(&self.keyspaces.observations_policy, digest.as_bytes())
-            .map_err(storage_error)?
-            .ok_or_else(not_found)?;
+        let bytes = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::read_value(
+                snapshot,
+                &self.keyspaces.observations_policy,
+                digest.as_bytes(),
+                1024 * 1024,
+                shared,
+            )?
+        } else {
+            snapshot
+                .get(&self.keyspaces.observations_policy, digest.as_bytes())
+                .map_err(storage_error)?
+        }
+        .ok_or_else(not_found)?;
+        if let Some(shared) = budget {
+            if bytes.len() > 1024 * 1024 {
+                return Err(integrity("capture policy exceeds its metadata byte bound"));
+            }
+            shared
+                .charge(1, bytes.len() as u64)
+                .map_err(super::raw_index::budget_error)?;
+        }
         let policy: StoredObservationPolicy = decode(&bytes, "observation policy")?;
         if !policy_allows(&context.request, &policy.access) {
             return Err(permission_denied());
@@ -697,22 +995,79 @@ impl NativeService {
         snapshot: &S,
         id: ObservationId,
     ) -> ServiceResult<CapturedOriginal> {
-        let record: CaptureRecord = read_required(snapshot, self, &record_key(id))?;
+        self.load_captured_original_inner(snapshot, id, None)
+    }
+
+    pub(crate) fn load_captured_original_with_budget<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        budget: &mut contextdb_recall::QueryBudget,
+    ) -> ServiceResult<CapturedOriginal> {
+        self.load_captured_original_inner(snapshot, id, Some(budget))
+    }
+
+    fn load_captured_original_inner<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        id: ObservationId,
+        mut budget: Option<&mut contextdb_recall::QueryBudget>,
+    ) -> ServiceResult<CapturedOriginal> {
+        let record: CaptureRecord = if let Some(shared) = budget.as_deref_mut() {
+            self.capture_record_with_budget(snapshot, id, shared)?
+        } else {
+            read_required(snapshot, self, &record_key(id))?
+        };
         let digest = digest_bytes(id.to_string().as_bytes());
-        let policy: StoredObservationPolicy = decode(
-            &snapshot
+        let policy_bytes = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::read_value(
+                snapshot,
+                &self.keyspaces.observations_policy,
+                digest.as_bytes(),
+                1024 * 1024,
+                shared,
+            )?
+        } else {
+            snapshot
                 .get(&self.keyspaces.observations_policy, digest.as_bytes())
                 .map_err(storage_error)?
-                .ok_or_else(|| integrity("capture policy is absent"))?,
-            "capture policy",
-        )?;
-        let content: StoredObservationContent = decode(
-            &snapshot
+        }
+        .ok_or_else(|| integrity("capture policy is absent"))?;
+        if let Some(shared) = budget.as_deref_mut() {
+            if policy_bytes.len() > 1024 * 1024 {
+                return Err(integrity("capture policy exceeds its metadata byte bound"));
+            }
+            shared
+                .charge(1, policy_bytes.len() as u64)
+                .map_err(super::raw_index::budget_error)?;
+        }
+        let policy: StoredObservationPolicy = decode(&policy_bytes, "capture policy")?;
+        if let Some(shared) = budget.as_deref_mut() {
+            shared.check().map_err(super::raw_index::budget_error)?;
+        }
+        let content_bytes = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::read_value(
+                snapshot,
+                &self.keyspaces.observations_content,
+                digest.as_bytes(),
+                8 * 1024 * 1024,
+                shared,
+            )?
+        } else {
+            snapshot
                 .get(&self.keyspaces.observations_content, digest.as_bytes())
                 .map_err(storage_error)?
-                .ok_or_else(|| integrity("capture original is absent"))?,
-            "capture original",
-        )?;
+        }
+        .ok_or_else(|| integrity("capture original is absent"))?;
+        if let Some(shared) = budget.as_deref_mut() {
+            if content_bytes.len() > 8 * 1024 * 1024 {
+                return Err(integrity("captured original exceeds its native row bound"));
+            }
+            shared
+                .charge(1, content_bytes.len() as u64)
+                .map_err(super::raw_index::budget_error)?;
+        }
+        let content: StoredObservationContent = decode(&content_bytes, "capture original")?;
         if content.digest != policy.content_digest
             || content.digest
                 != canonical_digest(&(
@@ -729,7 +1084,14 @@ impl NativeService {
             .validate()
             .map_err(|_| integrity("captured envelope invariant failed"))?;
         validate_payload(&event).map_err(|_| integrity("captured original digest is invalid"))?;
-        if record.dependencies != capture_dependencies(&event.payload) {
+        let controls = if let Some(shared) = budget.as_deref_mut() {
+            super::router_trace::decode_envelope(&event, shared)?.map(|envelope| envelope.origins)
+        } else {
+            super::router_trace::trace_controls(&event)?
+        };
+        if record.dependencies
+            != capture_dependencies_with_trace_controls(&event, controls.as_ref())?
+        {
             return Err(integrity(
                 "capture source dependencies differ from its original",
             ));
@@ -740,11 +1102,21 @@ impl NativeService {
             ));
         }
         let receipt = &record.receipt;
-        let (global, _) = self.select_snapshot(
-            snapshot,
-            &event.workspace_id.to_string(),
-            Some(receipt.workspace_commit),
-        )?;
+        let (global, _) = if let Some(shared) = budget.as_deref_mut() {
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.select_snapshot(
+                    reader,
+                    &event.workspace_id.to_string(),
+                    Some(receipt.workspace_commit),
+                )
+            })?
+        } else {
+            self.select_snapshot(
+                snapshot,
+                &event.workspace_id.to_string(),
+                Some(receipt.workspace_commit),
+            )?
+        };
         if event.event_id != id
             || receipt.event_id != id
             || receipt.database_id != self.database_id
@@ -757,7 +1129,20 @@ impl NativeService {
         {
             return Err(integrity("capture receipt and original disagree"));
         }
-        self.validate_capture_recovery(snapshot, &record, &event, global)?;
+        if let Some(shared) = budget {
+            let inputs = super::custody::inputs_with_trace_controls(&event, controls)?;
+            crate::budgeted::metadata(snapshot, shared, |reader| {
+                self.validate_capture_recovery_with_inputs(
+                    reader,
+                    &record,
+                    &event,
+                    global,
+                    Some(inputs),
+                )
+            })?;
+        } else {
+            self.validate_capture_recovery(snapshot, &record, &event, global)?;
+        }
         Ok(CapturedOriginal {
             event,
             receipt: record.receipt,
@@ -778,18 +1163,18 @@ impl NativeService {
                     && !entry.key.starts_with(b"raw/")
                     && !entry.key.starts_with(b"state/")
                     && !entry.key.starts_with(b"semantic/")
+                    && !entry.key.starts_with(b"record-source-applied/")
+                    && !entry.key.starts_with(b"record-write/")
+                    && !entry.key.starts_with(b"record-control/")
+                    && !entry.key.starts_with(b"record-prepared/")
+                    && !entry.key.starts_with(b"record-pruned/")
                     && !entry.key.starts_with(b"catalog/")
                     && !entry.key.starts_with(b"custody/")
                     && !entry.key.starts_with(b"suppression/")
                     && !entry.key.starts_with(b"recovery/")
+                    && !entry.key.starts_with(b"removal/")
             })
             .collect::<Vec<_>>();
-        if entries.is_empty() {
-            if recovery_activation.is_some() {
-                return Err(integrity("capture recovery format lacks accepted captures"));
-            }
-            return Ok(());
-        }
         let manifest: Manifest = decode(
             &snapshot
                 .get(&self.keyspaces.meta, META_MANIFEST_KEY)
@@ -797,6 +1182,32 @@ impl NativeService {
                 .ok_or_else(|| integrity("native manifest is absent"))?,
             "native manifest",
         )?;
+        if entries.is_empty() {
+            if manifest
+                .features
+                .contains(super::router_trace::TRACE_FEATURE)
+                || manifest
+                    .features
+                    .contains(super::router_trace::TRACE_REPLAY_FEATURE)
+                || manifest
+                    .features
+                    .contains(super::router_trace::hybrid::HYBRID_FEATURE)
+                || manifest
+                    .features
+                    .contains(super::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE)
+                || manifest
+                    .features
+                    .contains(super::router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE)
+            {
+                return Err(integrity(
+                    "router trace format lacks an accepted protected capture",
+                ));
+            }
+            if recovery_activation.is_some() {
+                return Err(integrity("capture recovery format lacks accepted captures"));
+            }
+            return Ok(());
+        }
         if !manifest.features.contains(CAPTURE_FEATURE)
             && !manifest
                 .features
@@ -807,10 +1218,17 @@ impl NativeService {
             ));
         }
         let mut accepted = Vec::new();
+        let mut budget = super::retention::audit_budget();
         for entry in &entries {
             if entry.key.starts_with(b"receipt/") {
                 let record: CaptureRecord = decode(&entry.value, "capture record")?;
-                let original = self.load_captured_original(snapshot, record.receipt.event_id)?;
+                let control =
+                    self.verified_capture_control(snapshot, record.receipt.event_id, &mut budget)?;
+                if control.recovery.router_trace.is_some() && record.custody_version.is_none() {
+                    return Err(integrity(
+                        "protected router capture requires its custody marker",
+                    ));
+                }
                 if let Some(version) = record.custody_version {
                     if version != super::custody::CUSTODY_VERSION
                         || !manifest.features.contains(super::custody::CUSTODY_FEATURE)
@@ -819,49 +1237,42 @@ impl NativeService {
                             "capture custody format is absent or incompatible",
                         ));
                     }
-                    self.require_capture_custody_metadata(snapshot, &original.event)?;
+                    self.require_capture_custody_metadata(snapshot, &record.receipt)?;
                 }
-                if matches!(
-                    original.event.provenance,
-                    Some(EventProvenance::ModelOutput { .. })
-                ) && !manifest
-                    .features
-                    .contains(super::payload::MODEL_PROTOCOL_FEATURE)
-                {
-                    return Err(integrity("model protocol format feature is absent"));
-                }
+                control.recovery.verify_features(&manifest)?;
                 if record.affects_scope.is_some() && !manifest.features.contains(IMPACT_FEATURE) {
                     return Err(integrity("capture scope-impact format feature is absent"));
                 }
-                if matches!(
-                    original.event.provenance,
-                    Some(EventProvenance::OwnedCheckpoint { .. })
-                ) && !manifest.features.contains(super::owned::OWNED_FEATURE)
-                {
-                    return Err(integrity("owned checkpoint format feature is absent"));
+                if let Some(event) = &control.original {
+                    let workspace =
+                        digest_bytes(record.receipt.workspace_id.to_string().as_bytes());
+                    if !self.source_prepared_at(
+                        snapshot,
+                        &workspace,
+                        record.receipt.event_id,
+                        Some(u64::MAX),
+                        &mut budget,
+                    )? {
+                        self.verify_capture_source_integrity(snapshot, event)
+                            .map_err(|_| {
+                                integrity("captured original source closure is invalid")
+                            })?;
+                    }
+                    if entry.key != record_key(event.event_id)
+                        || record.producer_sequence != event.producer_sequence
+                    {
+                        return Err(integrity("capture record identity is invalid"));
+                    }
                 }
-                if (original.event.provenance.is_some()
-                    || matches!(
-                        original.event.payload,
-                        EventPayload::Staged { .. } | EventPayload::Assembly { .. }
-                    ))
-                    && !manifest.features.contains(super::payload::SOURCE_FEATURE)
-                {
-                    return Err(integrity("capture source format feature is absent"));
-                }
-                self.verify_capture_source_integrity(snapshot, &original.event)
-                    .map_err(|_| integrity("captured original source closure is invalid"))?;
-                if entry.key != record_key(original.event.event_id)
-                    || record.producer_sequence != original.event.producer_sequence
-                {
-                    return Err(integrity("capture record identity is invalid"));
+                if entry.key != record_key(record.receipt.event_id) {
+                    return Err(integrity("capture record key differs from its identity"));
                 }
                 let positioned: ObservationId = read_required(
                     snapshot,
                     self,
                     &position_key(&record.producer_key, record.producer_sequence),
                 )?;
-                if positioned != original.event.event_id {
+                if positioned != record.receipt.event_id {
                     return Err(integrity(
                         "capture producer position differs from its original",
                     ));
@@ -881,11 +1292,7 @@ impl NativeService {
                 {
                     return Err(integrity("capture retry binding is invalid"));
                 }
-                let recovery = match &record.recovery {
-                    Some(recovery) => recovery.clone(),
-                    None => CaptureRecovery::from_event(&original.event)?,
-                };
-                accepted.push((record, recovery));
+                accepted.push((record, control.recovery));
             } else if entry.key.starts_with(b"producer/") {
                 validate_coverage(&decode(&entry.value, "producer coverage")?)?;
             } else if entry.key.starts_with(b"position/") {
@@ -911,8 +1318,63 @@ impl NativeService {
                 return Err(integrity("unknown continuous capture record family"));
             }
         }
+        if manifest
+            .features
+            .contains(super::router_trace::TRACE_FEATURE)
+            && !accepted
+                .iter()
+                .any(|(_, recovery)| recovery.router_trace.is_some())
+        {
+            return Err(integrity(
+                "router trace format lacks an accepted protected capture",
+            ));
+        }
+        if manifest
+            .features
+            .contains(super::router_trace::TRACE_REPLAY_FEATURE)
+            && !accepted.iter().any(|(_, recovery)| {
+                recovery.router_trace.as_ref().is_some_and(|header| {
+                    header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                })
+            })
+        {
+            return Err(integrity(
+                "router replay format lacks an accepted v2 capture",
+            ));
+        }
         // Deep verification reconstructs every derived capture row from accepted
         // originals. It is deliberately separate from the bounded append/read path.
+        if manifest
+            .features
+            .contains(super::router_trace::hybrid::HYBRID_FEATURE)
+            && !accepted.iter().any(|(_, recovery)| recovery.owned_hybrid)
+        {
+            return Err(integrity(
+                "owned hybrid format lacks an accepted protected query capture",
+            ));
+        }
+        if manifest
+            .features
+            .contains(super::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE)
+            && !accepted
+                .iter()
+                .any(|(_, recovery)| recovery.owned_hybrid_segments)
+        {
+            return Err(integrity(
+                "segmented hybrid format lacks an accepted protected query capture",
+            ));
+        }
+        if manifest
+            .features
+            .contains(super::router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE)
+            && !accepted
+                .iter()
+                .any(|(_, recovery)| recovery.owned_hybrid_routed)
+        {
+            return Err(integrity(
+                "routed hybrid format lacks an accepted protected query capture",
+            ));
+        }
         accepted.sort_by_key(|(record, _)| record.receipt.workspace_commit);
         let mut expected = BTreeMap::new();
         let mut producers = BTreeMap::<String, ProducerCoverage>::new();
@@ -930,6 +1392,12 @@ impl NativeService {
                 &record.receipt.workspace_id.to_string(),
                 Some(work.workspace_commit),
             )?;
+            if record.recovery.is_some() != recovery_activation.is_some_and(|first| global >= first)
+            {
+                return Err(integrity(
+                    "capture recovery activation differs from accepted control",
+                ));
+            }
             let journal: super::StoredEvent = decode(
                 &snapshot
                     .get(&self.keyspaces.events, &global.to_be_bytes())
@@ -1018,15 +1486,6 @@ impl NativeService {
         self.authorize_derived_custody(snapshot, context, event_id)
     }
 
-    /// Materialized intersection of every input's disclosure restrictions.
-    pub(super) fn capture_index_policies<S: ReadSnapshot>(
-        &self,
-        snapshot: &S,
-        event_id: ObservationId,
-    ) -> ServiceResult<Vec<contextdb_service::AccessPolicy>> {
-        self.derived_custody_policies(snapshot, event_id)
-    }
-
     pub(super) fn verify_capture_journal_reference<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -1051,8 +1510,18 @@ impl NativeService {
     }
 }
 
-fn capture_dependencies(payload: &EventPayload) -> Vec<CaptureDependency> {
-    match payload {
+fn capture_dependencies(event: &EventEnvelope) -> ServiceResult<Vec<CaptureDependency>> {
+    capture_dependencies_with_trace_controls(
+        event,
+        super::router_trace::trace_controls(event)?.as_ref(),
+    )
+}
+
+fn capture_dependencies_with_trace_controls(
+    event: &EventEnvelope,
+    controls: Option<&super::router_trace::controls::RouterTraceControls>,
+) -> ServiceResult<Vec<CaptureDependency>> {
+    let mut dependencies = match &event.payload {
         EventPayload::Staged { reference, .. } => vec![CaptureDependency::Payload {
             reference: reference.clone(),
         }],
@@ -1072,11 +1541,81 @@ fn capture_dependencies(payload: &EventPayload) -> Vec<CaptureDependency> {
             })
             .collect(),
         _ => Vec::new(),
+    };
+    if let Some(controls) = controls {
+        for event_id in &controls.originals {
+            if !dependencies.contains(&CaptureDependency::Source {
+                event_id: *event_id,
+            }) {
+                dependencies.push(CaptureDependency::Source {
+                    event_id: *event_id,
+                });
+            }
+        }
+    }
+    Ok(dependencies)
+}
+
+fn bounded_event_size(value: &impl Serialize) -> ServiceResult<()> {
+    let mut counter = CaptureSize(0);
+    serde_json::to_writer(&mut counter, value)
+        .map_err(|_| exhausted("protected captured row exceeds eight MiB"))
+}
+
+// This borrowed shape has the exact serialized size of StoredObservationContent;
+// every actual content digest is a 64-byte lowercase hexadecimal string. Check
+// it before any format/key/value write, then check the actual row again below.
+fn bounded_capture_row(request: &CaptureRequest) -> ServiceResult<usize> {
+    #[derive(Serialize)]
+    struct Row<'a> {
+        schema_version: u16,
+        observation_id: String,
+        metadata: BTreeMap<String, serde_json::Value>,
+        content: &'a EventEnvelope,
+        digest: &'static str,
+    }
+    let row = Row {
+        schema_version: SCHEMA_VERSION,
+        observation_id: request.event.event_id.to_string(),
+        metadata: BTreeMap::from([
+            (
+                "capture_format".into(),
+                serde_json::json!(NATIVE_CAPTURE_DOMAIN),
+            ),
+            (
+                "actor_id".into(),
+                serde_json::json!(request.context.actor_id),
+            ),
+            (
+                "agent_id".into(),
+                serde_json::json!(request.context.agent_id),
+            ),
+        ]),
+        content: &request.event,
+        digest: "0000000000000000000000000000000000000000000000000000000000000000",
+    };
+    let mut counter = CaptureSize(0);
+    serde_json::to_writer(&mut counter, &row)
+        .map_err(|_| exhausted("protected captured row exceeds eight MiB"))?;
+    Ok(counter.0)
+}
+
+struct CaptureSize(usize);
+impl std::io::Write for CaptureSize {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self.0.saturating_add(bytes.len());
+        if self.0 > 8 * 1024 * 1024 {
+            return Err(std::io::Error::other("captured row ceiling"));
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
 fn host_request_echo(event: &EventEnvelope) -> bool {
-    event.kind == contextdb_core::EventKind::ModelRequested
+    event.kind == EventKind::ModelRequested
         && event.role == contextdb_core::EventRole::Host
         && matches!(event.payload, EventPayload::Assembly { .. })
         && matches!(event.provenance, Some(EventProvenance::ModelRequest { .. }))

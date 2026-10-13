@@ -8,7 +8,10 @@ use contextdb_service::CaptureReceipt;
 
 use super::*;
 
-const DOMAIN: &str = "contextdb/native-source-deletion-lineage/v1";
+mod local;
+pub use local::NativeRemovalLocalInventory;
+
+const DOMAIN: &str = "contextdb/native-source-deletion-lineage/v2";
 const PAGE_ENTRIES: usize = 256;
 const PAGE_BYTES: usize = 1024 * 1024;
 const MAX_TARGETS: usize = 65_536;
@@ -21,6 +24,8 @@ pub struct NativeDeletionSource {
     pub receipt: CaptureReceipt,
     /// Digest of the accepted content-free recovery metadata.
     pub recovery_digest: ContentDigest,
+    /// Commitment to the complete validated immutable capture-control record.
+    pub control_digest: ContentDigest,
 }
 
 /// Exact captured descendants and shared payload owners at one workspace commit.
@@ -51,9 +56,23 @@ pub struct NativeDeletionLineage {
     pub digest: ContentDigest,
 }
 
+impl NativeDeletionLineage {
+    pub(super) fn verify_commitment(&self) -> ServiceResult<()> {
+        let mut unsigned = self.clone();
+        unsigned.digest = ContentDigest::from_bytes([0; 32]);
+        if ContentDigest::from_bytes(*blake3::hash(&encode(&(DOMAIN, unsigned))?).as_bytes())
+            != self.digest
+        {
+            return Err(integrity("source deletion inventory commitment differs"));
+        }
+        Ok(())
+    }
+}
+
 struct SourceNode {
     receipt: CaptureReceipt,
     recovery_digest: Option<ContentDigest>,
+    control_digest: ContentDigest,
     inputs: custody::Inputs,
     owned_payload: Option<ContentBlockId>,
 }
@@ -221,20 +240,18 @@ impl NativeService {
                     }
                 }
                 if let Some(work) = &journal.accepted_original {
-                    let original = self.load_captured_original(snapshot, work.event_id)?;
-                    budget
-                        .charge(1, encode(&original.event)?.len() as u64)
-                        .map_err(budget_error)?;
-                    if work != &self.capture_work_for_receipt(snapshot, &original.receipt)?
-                        || original.receipt.workspace_commit != next
-                        || digest_bytes(original.receipt.workspace_id.to_string().as_bytes())
+                    let control = self.verified_capture_control(snapshot, work.event_id, budget)?;
+                    if work != &self.capture_work_for_receipt(snapshot, &control.receipt)?
+                        || control.receipt.workspace_commit != next
+                        || digest_bytes(control.receipt.workspace_id.to_string().as_bytes())
                             != world.workspace_digest
                     {
                         return Err(integrity(
                             "source deletion capture differs from accepted history",
                         ));
                     }
-                    let inputs = custody::inputs(&original.event)?;
+                    let owned_payload = control.recovery.owned_payload();
+                    let inputs = control.recovery.inputs;
                     // Account retained graph metadata as well as materialized bodies.
                     budget
                         .charge(
@@ -242,14 +259,9 @@ impl NativeService {
                             2 * encode(&inputs)?.len() as u64 + 512,
                         )
                         .map_err(budget_error)?;
-                    let owned_payload = match &original.event.payload {
-                        contextdb_core::EventPayload::Staged { reference, .. } => {
-                            Some(reference.block_id)
-                        }
-                        _ => None,
-                    };
                     graph.insert(SourceNode {
-                        receipt: original.receipt,
+                        control_digest: control.control_digest,
+                        receipt: control.receipt,
                         recovery_digest: work.recovery_digest,
                         inputs,
                         owned_payload,
@@ -390,6 +402,7 @@ impl SourceGraph {
             sources.push(NativeDeletionSource {
                 receipt: node.receipt.clone(),
                 recovery_digest,
+                control_digest: node.control_digest,
             });
             let mut add = |child: ObservationId| -> ServiceResult<()> {
                 budget.charge(1, 32).map_err(budget_error)?;

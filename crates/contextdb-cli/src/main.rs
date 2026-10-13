@@ -6,6 +6,10 @@
 mod codex_service;
 #[cfg(feature = "mcp")]
 mod mcp_broker;
+#[cfg(feature = "mcp")]
+mod native_profile;
+#[cfg(feature = "mcp")]
+mod owned_conversation;
 mod production;
 mod state_head;
 
@@ -61,9 +65,7 @@ use serde::Serialize;
 use zeroize::Zeroizing;
 
 #[cfg(feature = "mcp")]
-use crate::codex_service::{
-    CODEX_BACKUP_FORMAT, CODEX_BACKUP_RESTORE_POLICY, CodexService, MAX_CODEX_BACKUP_BYTES,
-};
+use crate::codex_service::{CODEX_BACKUP_RESTORE_POLICY, CodexService, MAX_CODEX_BACKUP_BYTES};
 use crate::production::ProductionService;
 use crate::state_head::StateHeadStore;
 
@@ -146,6 +148,56 @@ enum Command {
         /// Request JSON path, or `-` for stdin.
         #[arg(long)]
         request: PathBuf,
+    },
+    #[cfg(feature = "mcp")]
+    /// Provision encrypted native memory with independently retained authorities.
+    CodexNativeInit {
+        /// Existing authenticated portable lifecycle archive.
+        path: PathBuf,
+        /// New absolute custody root outside the database directory.
+        #[arg(long)]
+        custody_root: PathBuf,
+    },
+    #[cfg(feature = "mcp")]
+    /// Run the bounded owned-conversation reference host over JSON Lines.
+    OwnedConversation {
+        /// Existing authenticated encrypted-native lifecycle archive.
+        path: PathBuf,
+        /// Trusted host configuration, never selected by conversation input.
+        #[arg(long)]
+        config: PathBuf,
+        /// Explicitly create the configured run.
+        #[arg(long, conflicts_with = "resume", required_unless_present = "resume")]
+        start: bool,
+        /// Explicitly rehydrate the configured run without repeating unknown calls.
+        #[arg(long, conflicts_with = "start", required_unless_present = "start")]
+        resume: bool,
+    },
+    #[cfg(feature = "mcp")]
+    /// Explicitly maintain the owned hybrid index.
+    OwnedHybridIndex {
+        /// Existing authenticated encrypted-native lifecycle archive.
+        path: PathBuf,
+        /// Trusted owned-conversation configuration with automatic_hybrid enabled.
+        #[arg(long)]
+        config: PathBuf,
+        /// Start a fresh raw generation; never replaces an accepted graph implicitly.
+        #[arg(
+            long,
+            conflicts_with = "continue",
+            required_unless_present = "continue"
+        )]
+        bootstrap: bool,
+        /// Continue accepted index work or retry an exact graph publication.
+        #[arg(
+            long = "continue",
+            conflicts_with = "bootstrap",
+            required_unless_present = "bootstrap"
+        )]
+        r#continue: bool,
+        /// Separate prefix-v2 maintenance; absence retains the original graph mode.
+        #[arg(long, value_enum)]
+        routed_stage: Option<owned_conversation::RoutedStage>,
     },
     #[cfg(feature = "mcp")]
     /// Create a bounded composite backup for the local Codex authorities.
@@ -896,6 +948,43 @@ fn run(cli: Cli) -> CliResult<()> {
             dispatch_api(service.as_ref(), operation, &request, format)?;
         }
         #[cfg(feature = "mcp")]
+        Command::CodexNativeInit { path, custody_root } => {
+            require_codex_operator_output(format)?;
+            let state = load_state(&path)?;
+            let lifecycle = ProductionService::open(&path, state.clone())?;
+            lifecycle.verify(VerifyRequest {
+                context: codex_operator_authority(&state.key, "codex-native-init")?.request,
+                deep: true,
+            })?;
+            let receipt = native_profile::initialize(&path, &custody_root, &state)?;
+            emit_json(&receipt, format)?;
+        }
+        #[cfg(feature = "mcp")]
+        Command::OwnedConversation {
+            path,
+            config,
+            start,
+            resume: _,
+        } => {
+            require_codex_operator_output(format)?;
+            owned_conversation::run_on_owned_stack(move || {
+                owned_conversation::run(&path, &config, start)
+            })?;
+        }
+        #[cfg(feature = "mcp")]
+        Command::OwnedHybridIndex {
+            path,
+            config,
+            bootstrap,
+            r#continue: _,
+            routed_stage,
+        } => {
+            require_codex_operator_output(format)?;
+            owned_conversation::run_on_owned_stack(move || {
+                owned_conversation::index(&path, &config, bootstrap, routed_stage)
+            })?;
+        }
+        #[cfg(feature = "mcp")]
         Command::CodexBackup { path, output } => {
             create_codex_backup(&path, &output, format)?;
         }
@@ -1267,6 +1356,17 @@ fn custody_snapshot_export(path: &Path, output: &Path, format: OutputFormat) -> 
     // supported ContextDB writer. It remains held until the detached snapshot
     // has been verified, exported, and atomically installed.
     let source_authority = StateHeadStore::open(path).map_err(CliError::from)?;
+    if source_authority
+        .native_profile_digest(&key.expose_copy())
+        .map_err(CliError::from)?
+        .is_some()
+    {
+        return Err(
+            "encrypted native custody cannot be omitted from a lifecycle-only custody snapshot"
+                .to_owned()
+                .into(),
+        );
+    }
     let source_archive = source_authority.archive_path().to_path_buf();
     let source_fjall = production::store_path(&source_archive);
     let canonical_source_fjall = canonical_custody_directory(&source_fjall, "production Fjall")?;
@@ -2139,21 +2239,25 @@ fn restore_codex_backup(path: &Path, input: &Path, format: OutputFormat) -> CliR
     // before the untrusted backup file becomes an input or format oracle.
     let state = load_state(path)?;
     let context = codex_operator_authority(&state.key, "codex-restore")?;
-    let service = CodexService::open(path, state)?;
     let bytes = read_codex_backup(input)?;
     let digest = blake3::hash(&bytes).to_hex().to_string();
-    let response = service.restore_backup(RestoreBackupRequest {
-        context,
-        format: CODEX_BACKUP_FORMAT.to_owned(),
-        bytes,
-        digest: digest.clone(),
-    })?;
+    let backup_format = codex_service::backup_format(&bytes)?;
+    let response = CodexService::restore_operator(
+        path,
+        state,
+        RestoreBackupRequest {
+            context,
+            format: backup_format.to_owned(),
+            bytes,
+            digest: digest.clone(),
+        },
+    )?;
     emit_json(
         &CodexRestoreReceipt {
             operation: "codex_backup_restored",
             state_path: path.display().to_string(),
             backup_path: input.display().to_string(),
-            format: CODEX_BACKUP_FORMAT,
+            format: backup_format,
             digest: &digest,
             restore_policy: CODEX_BACKUP_RESTORE_POLICY,
             response,
@@ -2359,6 +2463,60 @@ mod tests {
 
     const TEST_TOKEN_KEY_HEX: &str =
         "0707070707070707070707070707070707070707070707070707070707070707";
+
+    #[cfg(feature = "mcp")]
+    #[test]
+    fn owned_hybrid_index_retains_absent_stage_and_parses_explicit_routed_stages() {
+        let old = Cli::try_parse_from([
+            "contextdb",
+            "owned-hybrid-index",
+            "archive.json",
+            "--config",
+            "host.json",
+            "--continue",
+        ])
+        .expect("legacy maintenance command");
+        assert!(matches!(
+            old.command,
+            Command::OwnedHybridIndex {
+                routed_stage: None,
+                ..
+            }
+        ));
+        for stage in ["raw", "base", "seal", "router"] {
+            let cli = Cli::try_parse_from([
+                "contextdb",
+                "owned-hybrid-index",
+                "archive.json",
+                "--config",
+                "host.json",
+                "--continue",
+                "--routed-stage",
+                stage,
+            ])
+            .expect("explicit routed stage");
+            assert!(matches!(
+                cli.command,
+                Command::OwnedHybridIndex {
+                    routed_stage: Some(_),
+                    ..
+                }
+            ));
+        }
+        assert!(
+            Cli::try_parse_from([
+                "contextdb",
+                "owned-hybrid-index",
+                "archive.json",
+                "--config",
+                "host.json",
+                "--continue",
+                "--routed-stage",
+                "implicit-rebuild",
+            ])
+            .is_err()
+        );
+    }
 
     fn test_token_key() -> TokenKey {
         parse_token_key_hex(TEST_TOKEN_KEY_HEX.as_bytes(), "test token key").expect("test key")

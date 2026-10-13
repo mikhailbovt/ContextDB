@@ -826,6 +826,56 @@
     },
     {
       "author": "Mikhail Bovt and ContextDB contributors",
+      "bom-ref": "pkg:cargo/contextdb-agent-runtime@0.2.0-alpha.3",
+      "description": "Owned conversational lifecycle and captured rolling context",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "contextdb-agent-runtime",
+      "purl": "pkg:cargo/contextdb-agent-runtime@0.2.0-alpha.3",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.0-alpha.3"
+    },
+    {
+      "author": "Mikhail Bovt and ContextDB contributors",
+      "bom-ref": "pkg:cargo/contextdb-capture@0.2.0-alpha.3",
+      "description": "Native original capture adapters for tools, artifacts and model requests",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "contextdb-capture",
+      "purl": "pkg:cargo/contextdb-capture@0.2.0-alpha.3",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.0-alpha.3"
+    },
+    {
+      "author": "Mikhail Bovt and ContextDB contributors",
       "bom-ref": "pkg:cargo/contextdb-context@0.2.0-alpha.3",
       "description": "Deterministic model-neutral ContextPack compiler and renderers for ContextDB",
       "externalReferences": [
@@ -1175,6 +1225,31 @@
       "version": "0.2.0-alpha.3"
     },
     {
+      "author": "Mikhail Bovt and ContextDB contributors",
+      "bom-ref": "pkg:cargo/contextdb-windows-job@0.2.0-alpha.3",
+      "description": "Isolated Windows owned-process job lifetime boundary",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "contextdb-windows-job",
+      "purl": "pkg:cargo/contextdb-windows-job@0.2.0-alpha.3",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.0-alpha.3"
+    },
+    {
       "author": "RustCrypto Developers",
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#cpufeatures@0.3.0",
       "description": "Lightweight runtime CPU feature detection for aarch64, loongarch64, and x86/x86_64 targets, with no_std support and support for mobile targets including Android and iOS ",
@@ -1391,6 +1466,37 @@
       "scope": "required",
       "type": "library",
       "version": "6.2.1"
+    },
+    {
+      "author": "RustCrypto Developers",
+      "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#digest@0.11.3",
+      "description": "Traits for cryptographic hash functions and message authentication codes",
+      "externalReferences": [
+        {
+          "type": "documentation",
+          "url": "https://docs.rs/digest"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/traits"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "digest",
+      "purl": "pkg:cargo/digest@0.11.3",
+      "scope": "required",
+      "type": "library",
+      "version": "0.11.3"
     },
     {
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#either@1.17.0",
@@ -3418,6 +3524,37 @@
       "version": "1.0.0"
     },
     {
+      "author": "RustCrypto Developers",
+      "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#sha2@0.11.0",
+      "description": "Pure Rust implementation of the SHA-2 hash function family including SHA-224, SHA-256, SHA-384, and SHA-512. ",
+      "externalReferences": [
+        {
+          "type": "documentation",
+          "url": "https://docs.rs/sha2"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/RustCrypto/hashes"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "sha2",
+      "purl": "pkg:cargo/sha2@0.11.0",
+      "scope": "required",
+      "type": "library",
+      "version": "0.11.0"
+    },
+    {
       "author": "comex <comexk@gmail.com>, Fenhl <fenhl@fenhl.net>, Adrian Taylor <adetaylor@chromium.org>, Alex Touchet <alextouchet@outlook.com>, Daniel Parks <dp+git@oxidized.org>, Garrett Berg <googberg@gmail.com>",
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#shlex@2.0.1",
       "description": "Split a string into shell words, like Python's shlex.",
@@ -4535,14 +4672,45 @@
     {
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
+        "pkg:cargo/contextdb-capture@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-context@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-continuity@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-service@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-windows-job@0.2.0-alpha.3",
+        "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
+        "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
+        "registry+https://github.com/rust-lang/crates.io-index#sha2@0.11.0"
+      ],
+      "ref": "pkg:cargo/contextdb-agent-runtime@0.2.0-alpha.3"
+    },
+    {
+      "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
+        "pkg:cargo/contextdb-core@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-service@0.2.0-alpha.3",
+        "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
+        "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
+        "registry+https://github.com/rust-lang/crates.io-index#uuid@1.24.0"
+      ],
+      "ref": "pkg:cargo/contextdb-capture@0.2.0-alpha.3"
+    },
+    {
+      "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
         "registry+https://github.com/rust-lang/crates.io-index#chacha20poly1305@0.11.0",
         "registry+https://github.com/rust-lang/crates.io-index#clap@4.6.6",
+        "pkg:cargo/contextdb-agent-runtime@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-capture@0.2.0-alpha.3",
         "pkg:cargo/contextdb-context@0.2.0-alpha.3",
         "pkg:cargo/contextdb-continuity@0.2.0-alpha.3",
         "pkg:cargo/contextdb-core@0.2.0-alpha.3",
         "pkg:cargo/contextdb-mcp@0.2.0-alpha.3",
         "pkg:cargo/contextdb-native-service@0.2.0-alpha.3",
         "pkg:cargo/contextdb-proto@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
         "pkg:cargo/contextdb-server@0.2.0-alpha.3",
         "pkg:cargo/contextdb-service@0.2.0-alpha.3",
         "pkg:cargo/contextdb-storage@0.2.0-alpha.3",
@@ -4551,6 +4719,7 @@
         "registry+https://github.com/rust-lang/crates.io-index#prost@0.14.4",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
+        "registry+https://github.com/rust-lang/crates.io-index#sha2@0.11.0",
         "registry+https://github.com/rust-lang/crates.io-index#tempfile@3.27.0",
         "registry+https://github.com/rust-lang/crates.io-index#tokio@1.53.1",
         "registry+https://github.com/rust-lang/crates.io-index#winreg@0.56.0",
@@ -4585,6 +4754,7 @@
     },
     {
       "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#blake3@1.8.6",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.20",
@@ -4688,6 +4858,7 @@
         "pkg:cargo/contextdb-context@0.2.0-alpha.3",
         "pkg:cargo/contextdb-continuity@0.2.0-alpha.3",
         "pkg:cargo/contextdb-core@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-model@0.2.0-alpha.3",
         "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
         "pkg:cargo/contextdb-reference@0.2.0-alpha.3",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
@@ -4711,6 +4882,12 @@
         "registry+https://github.com/rust-lang/crates.io-index#fjall@3.1.8"
       ],
       "ref": "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.3"
+    },
+    {
+      "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.61.2"
+      ],
+      "ref": "pkg:cargo/contextdb-windows-job@0.2.0-alpha.3"
     },
     {
       "dependsOn": [],
@@ -4757,6 +4934,13 @@
         "registry+https://github.com/rust-lang/crates.io-index#parking_lot_core@0.9.12"
       ],
       "ref": "registry+https://github.com/rust-lang/crates.io-index#dashmap@6.2.1"
+    },
+    {
+      "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#block-buffer@0.12.1",
+        "registry+https://github.com/rust-lang/crates.io-index#crypto-common@0.2.2"
+      ],
+      "ref": "registry+https://github.com/rust-lang/crates.io-index#digest@0.11.3"
     },
     {
       "dependsOn": [],
@@ -5165,6 +5349,14 @@
       "ref": "registry+https://github.com/rust-lang/crates.io-index#sfa@1.0.0"
     },
     {
+      "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#cfg-if@1.0.4",
+        "registry+https://github.com/rust-lang/crates.io-index#cpufeatures@0.3.0",
+        "registry+https://github.com/rust-lang/crates.io-index#digest@0.11.3"
+      ],
+      "ref": "registry+https://github.com/rust-lang/crates.io-index#sha2@0.11.0"
+    },
+    {
       "dependsOn": [],
       "ref": "registry+https://github.com/rust-lang/crates.io-index#shlex@2.0.1"
     },
@@ -5405,7 +5597,7 @@
         },
         {
           "name": "contextdb:dependency-graph-sha256",
-          "value": "14e896c31c6fa75e1113a3a9eaa1b6364fce17cfa4d24ef6a5002e867af14d7a"
+          "value": "e470b7bf169c994c86fc0f9eeb56a31f609fc158934dabbce9db398bd2c99b60"
         }
       ],
       "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.3",

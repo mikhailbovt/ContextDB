@@ -1,14 +1,14 @@
 {
   "artifacts": [
     {
-      "bytes": 219078,
+      "bytes": 219518,
       "path": "release/THIRD_PARTY_NOTICES.txt",
-      "sha256": "b17b7d82a996fdb2ebb6a51bc6548f1ecbf5b8d90af1ca2bac12d6a21eacc8f6"
+      "sha256": "185b3f0f23e6823ce44d3d753d7cae13b61c96fb3fc0f6ff2b7a7989a1e73ae1"
     },
     {
-      "bytes": 175146,
+      "bytes": 180772,
       "path": "release/contextdb-local-mcp.cdx.json",
-      "sha256": "ec1957760a129edd74e62b5fc83f3082a91dbf3096515cd5502fc0dc2f7f1480"
+      "sha256": "9e91065a69b90ec3807387995c36f87ec1b622f42e45a7c9e3efb1dba62c5ff0"
     },
     {
       "bytes": 279302,
@@ -28,7 +28,7 @@
   ],
   "canonical_repository": "https://github.com/mikhailbovt/ContextDB",
   "cargo": {
-    "cargo_lock_sha256": "f27755c8c8a60e06b5c57c7c71d275dfbdc2294bca8aec9cde8bb950d6a2612f",
+    "cargo_lock_sha256": "2c2a0dd28c20aef4cc0360c611286fde9d49c5ac6c1d5cbf592d104f3d4b9a50",
     "default_features": false,
     "dependency_kinds": [
       "normal",
@@ -388,6 +388,16 @@
       ],
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "version": "6.2.1"
+    },
+    {
+      "declared_license": "MIT OR Apache-2.0",
+      "name": "digest",
+      "repository": "https://github.com/RustCrypto/traits",
+      "selected_licenses": [
+        "Apache-2.0"
+      ],
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "0.11.3"
     },
     {
       "declared_license": "MIT OR Apache-2.0",
@@ -1091,6 +1101,16 @@
     },
     {
       "declared_license": "MIT OR Apache-2.0",
+      "name": "sha2",
+      "repository": "https://github.com/RustCrypto/hashes",
+      "selected_licenses": [
+        "Apache-2.0"
+      ],
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "version": "0.11.0"
+    },
+    {
+      "declared_license": "MIT OR Apache-2.0",
       "name": "shlex",
       "repository": "https://github.com/comex/rust-shlex",
       "selected_licenses": [
@@ -1382,9 +1402,9 @@
     }
   ],
   "graph": {
-    "component_count": 148,
-    "sha256": "5bb6a1b44b1bb926ed9c5ea1e295790b0154277d8986f6e25177445486f0e813",
-    "third_party_component_count": 133
+    "component_count": 152,
+    "sha256": "9c584a8d8cd2446e4caeeef99c30520a0b9314d4a4705be3c168579ace642aff",
+    "third_party_component_count": 135
   },
   "profile_id": "contextdb-local-mcp-linux-x86_64",
   "release_class": "developer-preview",

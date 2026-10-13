@@ -16,9 +16,12 @@ use contextdb_service::{Capability, *};
 
 use super::*;
 
+mod capacity;
 mod economy;
 mod fences;
+mod hybrid;
 mod partial;
+mod recall;
 mod tools;
 
 fn budget() -> QueryBudget {
@@ -79,6 +82,9 @@ fn settings() -> RuntimeSettings {
         },
         cache_residency: None,
         automatic_recall_filter: RawFilter::default(),
+        automatic_bm25: None,
+        automatic_hybrid: None,
+        router_trace_profile: RouterTraceProfile::Off,
     }
 }
 fn identity() -> (AuthenticatedRequestContext, OwnedRunIdentity) {
@@ -633,6 +639,14 @@ impl PayloadPort for LostOutputAcknowledgement {
     }
 }
 impl OwnedRunPort for LostOutputAcknowledgement {
+    fn recover_record_writes(
+        &self,
+        context: &AuthenticatedRequestContext,
+        budget: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        self.owner.recover_record_writes(context, budget)
+    }
+
     fn save_run_checkpoint(
         &self,
         request: SaveRunCheckpointRequest,

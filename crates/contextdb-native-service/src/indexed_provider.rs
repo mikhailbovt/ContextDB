@@ -3,6 +3,10 @@
 #[cfg(test)]
 mod tests;
 
+mod bm25;
+mod causal;
+pub(crate) use causal::CausalCompletion;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
@@ -50,6 +54,8 @@ pub struct NativeIndexedView {
     domains: BTreeMap<String, PolicyDomain>,
     principal: String,
     opened: Instant,
+    current_snapshot: bool,
+    budgeted_for_bm25: bool,
 }
 
 #[derive(Debug)]
@@ -238,6 +244,14 @@ impl IndexedRecallProvider for NativeIndexedRecallProvider<'_> {
                 through: 0,
                 authorization_epoch: auth,
                 projected_sources: 0,
+                removal_through: None,
+                bm25: None,
+                dense: None,
+                dense_graph: None,
+                dense_segments: None,
+                dense_prefix_base: None,
+                dense_prefix_segments: None,
+                dense_directory_router: None,
             }
         };
         if generation.authorization_epoch != auth
@@ -318,6 +332,8 @@ impl IndexedRecallProvider for NativeIndexedRecallProvider<'_> {
             domains,
             principal: self.context.authorization_binding_digest()?,
             opened: Instant::now(),
+            current_snapshot: false,
+            budgeted_for_bm25: false,
         })
     }
 

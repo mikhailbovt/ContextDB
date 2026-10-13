@@ -1,6 +1,6 @@
 //! Deterministic original-text analyzer shared by raw recall and its projections.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 
 use contextdb_core::{ContentDigest, ObservationId, OriginalSourceSpan, RawTextQuery};
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,92 @@ pub struct RawLexicalDocument {
     pub payload_digest: ContentDigest,
     pub byte_length: u64,
     pub first_terms: BTreeMap<String, RawTokenSpan>,
+}
+
+/// Exact analyzer output for an optional BM25 projection. The legacy lexical
+/// document keeps its original encoding; frequency statistics are separate.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RawBm25Analysis {
+    /// Original identity and first spans produced by the same token walk.
+    pub lexical: RawLexicalDocument,
+    /// Number of normalized token occurrences, including repeated terms.
+    pub token_count: u64,
+    /// Exact frequency of each normalized term.
+    pub term_frequencies: BTreeMap<String, u64>,
+}
+
+/// Analyze accepted bytes with caller-owned work/allocation admission. Charge
+/// callbacks run before hashing, normalization, map allocation and each bounded
+/// scan fragment, so cancellation/deadlines do not wait for the whole source.
+pub fn analyze_raw_bm25_original(
+    event_id: ObservationId,
+    payload_digest: ContentDigest,
+    bytes: &[u8],
+    mut charge: impl FnMut(u64, u64) -> Result<()>,
+) -> Result<Option<RawBm25Analysis>> {
+    charge(bytes.len() as u64, 0)?;
+    if ContentDigest::from_bytes(*blake3::hash(bytes).as_bytes()) != payload_digest {
+        return Err(IndexError::Invalid("raw original digest mismatch"));
+    }
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return Ok(None);
+    };
+    charge(1, 256)?;
+    let mut first_terms = BTreeMap::new();
+    let mut term_frequencies = BTreeMap::<String, u64>::new();
+    let mut token_count = 0_u64;
+    let mut start = None;
+    let mut inspected = 0_usize;
+    for (offset, ch) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), '\0')))
+    {
+        if offset - inspected >= 1024 {
+            charge((offset - inspected) as u64, 0)?;
+            inspected = offset;
+        }
+        if ch.is_alphanumeric() || ch == '_' {
+            start.get_or_insert(offset);
+        } else if let Some(from) = start.take() {
+            // Repeated terms allocate only a temporary normalized string.
+            // Reserve map keys/nodes separately, only before a new entry.
+            let allocation = (offset - from)
+                .checked_mul(3)
+                .ok_or(IndexError::InvalidBudget)?;
+            charge(1, allocation as u64)?;
+            let term = text[from..offset].to_lowercase();
+            token_count = token_count
+                .checked_add(1)
+                .ok_or(IndexError::InvalidBudget)?;
+            if let Some(frequency) = term_frequencies.get_mut(&term) {
+                *frequency = frequency.checked_add(1).ok_or(IndexError::InvalidBudget)?;
+            } else {
+                // Conservative reservation includes a full map node, rather
+                // than treating a first insertion as a fractional node.
+                charge(1, term.len() as u64 + 1024)?;
+                term_frequencies.insert(term.clone(), 1);
+            }
+            if let Entry::Vacant(entry) = first_terms.entry(term) {
+                charge(1, 1024)?;
+                entry.insert(RawTokenSpan {
+                    start: from as u64,
+                    end: offset as u64,
+                });
+            }
+        }
+    }
+    charge((text.len() - inspected) as u64, 0)?;
+    Ok(Some(RawBm25Analysis {
+        lexical: RawLexicalDocument {
+            analyzer: RAW_ANALYZER.into(),
+            event_id,
+            payload_digest,
+            byte_length: bytes.len() as u64,
+            first_terms,
+        },
+        token_count,
+        term_frequencies,
+    }))
 }
 
 impl RawLexicalDocument {
@@ -240,3 +326,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "raw_bm25_tests.rs"]
+mod bm25_tests;

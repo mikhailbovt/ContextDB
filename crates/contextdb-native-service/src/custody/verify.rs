@@ -6,12 +6,12 @@ impl NativeService {
     pub(crate) fn require_capture_custody_metadata<S: ReadSnapshot>(
         &self,
         snapshot: &S,
-        event: &EventEnvelope,
+        receipt: &contextdb_service::CaptureReceipt,
     ) -> ServiceResult<()> {
         let record = self
-            .custody_record(snapshot, event.event_id)
+            .custody_record(snapshot, receipt.event_id)
             .map_err(|_| integrity("accepted capture custody is missing"))?;
-        let workspace = digest_bytes(event.workspace_id.to_string().as_bytes());
+        let workspace = digest_bytes(receipt.workspace_id.to_string().as_bytes());
         if record.workspace != workspace || self.custody_state(snapshot, &workspace)?.is_none() {
             return Err(integrity("accepted capture custody workspace is absent"));
         }
@@ -39,6 +39,7 @@ impl NativeService {
             return Err(integrity("custody format feature missing"));
         }
         let mut expected = BTreeSet::new();
+        let mut budget = super::super::retention::audit_budget();
         for entry in snapshot
             .scan_prefix(&self.keyspaces.continuous, b"custody/state/")
             .map_err(storage_error)?
@@ -70,21 +71,24 @@ impl NativeService {
             {
                 let work: super::super::capture::CaptureWork =
                     decode(&entry.value, "custody outbox")?;
-                let original = self.load_captured_original(snapshot, work.event_id)?;
+                let control =
+                    self.verified_capture_control(snapshot, work.event_id, &mut budget)?;
                 let key = record_key(work.event_id);
                 if work.workspace_commit <= last
-                    || original.receipt.workspace_commit != work.workspace_commit
-                    || original.receipt.event_digest != work.event_digest
-                    || digest_bytes(original.event.workspace_id.to_string().as_bytes()) != workspace
+                    || self.capture_work_for_receipt(snapshot, &control.receipt)? != work
+                    || entry.key
+                        != super::super::capture::work_key(workspace, work.workspace_commit)
+                    || digest_bytes(control.receipt.workspace_id.to_string().as_bytes())
+                        != workspace
                 {
                     return Err(integrity("custody capture order or workspace differs"));
                 }
                 last = work.workspace_commit;
                 if work.workspace_commit <= state.through {
-                    let record = self.build_custody_record(
+                    let record = self.build_control_custody_record(
                         snapshot,
-                        &original.event,
-                        work.workspace_commit,
+                        &control.receipt,
+                        control.recovery.inputs,
                         &reconstructed,
                         None,
                     )?;
@@ -106,7 +110,7 @@ impl NativeService {
                     let record = self.custody_record(snapshot, work.event_id)?;
                     if record.event_digest != work.event_digest
                         || record.commit != work.workspace_commit
-                        || record.inputs != inputs(&original.event)?
+                        || record.inputs != control.recovery.inputs
                         || record.workspace != workspace
                     {
                         return Err(integrity(

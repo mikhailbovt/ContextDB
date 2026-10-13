@@ -38,6 +38,32 @@ pub(super) struct PublicationGuard<'a> {
 }
 
 impl PublicationQueue {
+    /// Opportunistic recovery must not wait behind or overtake a publisher.
+    pub(super) fn try_enter(&self) -> ServiceResult<Option<PublicationGuard<'_>>> {
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(poisoned()),
+        };
+        if state.poisoned {
+            return Err(poisoned());
+        }
+        if state.active.is_some() || !state.waiting.is_empty() {
+            return Ok(None);
+        }
+        let ticket = state.next;
+        state.next = state
+            .next
+            .checked_add(1)
+            .ok_or_else(|| pressure("publication ticket exhausted"))?;
+        state.active = Some(ticket);
+        Ok(Some(PublicationGuard {
+            queue: self,
+            ticket,
+            _thread: PhantomData,
+        }))
+    }
+
     /// Capacity includes the active publisher. A rejected/cancelled waiter owns
     /// no publication slot and has performed no native transaction.
     pub(super) fn enter(

@@ -506,7 +506,7 @@ fn validate_plan(request: &CompileContextRequest) -> ServiceResult<()> {
     Ok(())
 }
 
-fn deterministic_request(
+pub(crate) fn deterministic_request(
     request: &CompileContextRequest,
     continuation: Option<RecallContinuationToken>,
 ) -> ServiceResult<DeterministicRecallRequest> {
@@ -1114,7 +1114,9 @@ fn map_recall_error(error: RecallError) -> ServiceError {
 
 fn map_context_error(error: ContextError) -> ServiceError {
     match error {
-        ContextError::InvalidRequest(_) => invalid_request(),
+        ContextError::InvalidRequest(_)
+        | ContextError::RouterScore(_)
+        | ContextError::RouterProposal(_) => invalid_request(),
         ContextError::Provider(_) => ServiceError::new(
             ErrorCode::ProviderUnavailable,
             "ContextPack provider failed",
@@ -1125,11 +1127,13 @@ fn map_context_error(error: ContextError) -> ServiceError {
             "ContextPack authorization binding failed",
             false,
         ),
-        ContextError::BudgetExceeded(_) => ServiceError::new(
-            ErrorCode::BudgetExhausted,
-            "ContextPack could not satisfy its hard budget",
-            false,
-        ),
+        ContextError::BudgetExceeded(_) | ContextError::OutgoingCapacityExceeded { .. } => {
+            ServiceError::new(
+                ErrorCode::BudgetExhausted,
+                "ContextPack could not satisfy its hard budget",
+                false,
+            )
+        }
         ContextError::InvalidContinuation(_) => invalid_continuation(),
         ContextError::Tokenizer(_) | ContextError::Serialization(_) => ServiceError::new(
             ErrorCode::IntegrityFailure,

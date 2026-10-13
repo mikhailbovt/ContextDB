@@ -2,6 +2,66 @@ use super::*;
 use contextdb_service::{ContextLeasePort, ContextLeaseStatus};
 
 #[test]
+fn controlled_instance_clock_preserves_real_prepared_lease_wall_and_monotonic_expiry() {
+    for monotonic in [false, true] {
+        let directory = tempfile::tempdir().expect("controlled lease fixture");
+        let service = NativeService::open(directory.path(), "lease-clock", [7; 32]).expect("open");
+        let input = setup(&service);
+        service
+            .initialize_state_catalog(&input.context, &mut allowance())
+            .expect("catalog");
+        let wall = TimestampMicros(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("wall clock")
+                .as_micros() as i64,
+        );
+        service
+            .set_lease_test_clock(wall, 0)
+            .expect("instance clock");
+        let context = request(&input).context;
+        let prepared = prepare(&service, request(&input)).expect("real preparation");
+        let lease = service
+            .register_context_lease(&context, &prepared, &mut allowance())
+            .expect("real lease");
+        assert_eq!(lease.valid_until, TimestampMicros(wall.0 + 30_000_000));
+        let before_wall = if monotonic {
+            wall
+        } else {
+            TimestampMicros(wall.0 + 29_999_999)
+        };
+        service
+            .set_lease_test_clock(before_wall, if monotonic { 29_999_999 } else { 0 })
+            .expect("before deadline");
+        assert_eq!(
+            service
+                .context_lease_status(&context, &lease, &mut allowance())
+                .expect("current"),
+            ContextLeaseStatus::Current
+        );
+        service
+            .set_lease_test_clock(
+                if monotonic { wall } else { lease.valid_until },
+                if monotonic { 30_000_000 } else { 0 },
+            )
+            .expect("exact deadline");
+        assert_eq!(
+            service
+                .context_lease_status(&context, &lease, &mut allowance())
+                .expect("expired"),
+            ContextLeaseStatus::Expired
+        );
+        assert_eq!(
+            service
+                .register_context_lease(&context, &prepared, &mut allowance())
+                .expect_err("expired registration")
+                .code,
+            ErrorCode::ContinuationExpired
+        );
+    }
+}
+
+#[test]
 fn native_lease_rejects_changed_scope_before_registration_and_notices_new_negative_state() {
     let directory = tempfile::tempdir().expect("fixture");
     let service = NativeService::open(directory.path(), "lease", [7; 32]).expect("open");

@@ -1,0 +1,171 @@
+# Router contracts
+
+`contextdb_context::router` exposes an opt-in record of the continuous compiler's
+authorized inventory, scorer evaluations and final selection. The archive still
+retains permitted originals independently of their routing score. These records
+are observations and proposals; a digest or deserialized request grants no access.
+
+## Compiler entry points
+
+- `compile_assembly_with_router` runs the existing assembly pipeline and records
+  actual scorer calls. It returns the assembly, request, plan, manifest and actual
+  prepared candidate/evidence material, including unselected alternatives.
+- `compile_assembly_with_router_replay` also retains versioned prepared selector
+  inputs and separate attempt observations. `replay_router_r0` executes pinned R0
+  through the same selection and rendering path over those frozen inputs.
+- `compile_router_plan` rebuilds the current authorized inventory and validates a
+  proposed score/selection path through the same closure, support selection,
+  complete protocol encoding and publication-owner read-set check. It does not
+  call the scorer; its manifest labels the scores `untrusted_proposal`.
+- `compile_router_plan_or_r0` lets a host explicitly choose one fresh R0 attempt
+  after a malformed or stale proposal. Authorization, provider failures and
+  exhausted shared budgets propagate as errors.
+
+Live entries receive the host's provider, tokenizer, outgoing encoder and
+`QueryBudget`. The existing `compile_assembly` path remains available.
+
+## Records
+
+| Type | Contents |
+| --- | --- |
+| `AuthorizedRouterRequest` | Query-time context, working state, prospective hot window, current turn, authorized units and mandatory closure. |
+| `RoutingDescriptor` | Authorized compact features, explicit missing-feature mask and separate confidence and prior utility. |
+| `MemoryUnit` | Existing block identity, scope, temporal and epistemic roles, source references, dependencies and representations. |
+| `SupportAlternative` | One verified sufficient support bundle, original spans and material/representation commitments. |
+| `RouterScore` | Actual selected-base and trial commitments, marginal protocol estimate, utility and fit result. |
+| `RouterSelectionPlan` | Proposed seeds, complete selected closure, support choices, score path and reported final wire/counts. |
+| `RouterManifest` | Accepted assembly and record commitments, score provenance, measured compilation work and timing. |
+
+Bindings cover the opaque owner snapshot, current authorization and scope state;
+the complete compile request; working/hot/current/control material; reader,
+tokenizer, encoder and scorer revisions; feature schemas; budgets; and candidate
+and mandatory inventories. Applying a plan rebuilds these commitments from the
+provider. Current source permission remains required even when an earlier plan
+was valid.
+
+Candidate data retains its interpretation role. Proposed or historical material
+cannot become current state through a score, and original text cannot become host
+control. Unknown coverage and STOP do not establish that an event never occurred.
+
+## Selection and limits
+
+STOP has no discretionary seeds and preserves the entire mandatory closure,
+including required unknown/conflict state. Optional units must pay for their hard
+dependencies and a sufficient support alternative. Shared source ranges and
+support are accounted for by the existing union renderer; actual complete
+protocol encoding determines token/byte fit.
+
+The router profile allows at most 512 units, 4096 evaluations, 32 scopes and a
+2 MiB combined request/plan/manifest/material envelope; replay also includes its
+frozen base and observations in that ceiling. Identity lists are ordered and
+unique, support choices are explicit, and hard dependency cycles or unavailable
+members are rejected. This stricter opt-in graph validation can reject malformed
+optional graphs that the legacy entry point leaves unselected.
+
+Scorer work is charged to the shared allowance. Its aggregate cooperative
+latency limit defaults to one second and may be configured up to ten seconds;
+the complete router preparation has a shared 30-second ceiling across fallback
+attempts. A scorer must cooperate with the budget: this synchronous port cannot
+preempt an arbitrary blocking implementation. Invalid finite scores or a scorer
+subdeadline may trigger one fresh R0 attempt using the remaining allowance.
+Global exhaustion or an impossible mandatory assembly cannot start another loop.
+
+R0 utility remains an exact `u64`; it is not confidence or a probability.
+`FiniteScoreAdapter` provides an explicit finite floating-point utility scale
+for other backends and preserves their revision. R0 behavior propensity remains
+absent, so these deterministic records do not support propensity-based estimates.
+
+Manifest `compilation_*` fields measure compilation before the final envelope
+integrity check. That check also consumes the same budget. Caller-replayed scores
+have zero observed scorer timing; observed R0 fallback is marked separately.
+Nullable training/model fields remain empty in this profile.
+
+## Semantic scorer input
+
+An embedded scorer can opt in to `RenderedClosureV1` through `semantic_profile`.
+The compiler then calls `score_semantic` at the existing selection boundary, after
+dependency closure, support/representation choice, source union and complete
+protocol encoding. Its borrowed view contains the actual current/control/working/
+hot base, the already selected assembly and the proposed trial, including chosen
+variants and remaining shared allowances. Mandatory state survives a STOP score.
+
+`model_input_json` streams an explicit text/semantic allowlist under the same
+budget and a joint 2 MiB ceiling. Host correspondence IDs, digests, prior utility,
+compilation reports and scorer outcomes stay outside the projection; support and
+tool associations use local slots. Text remains attributed data. The scorer must
+apply its own token admission and cooperate with cancellation and deadlines.
+`exact_marginal_input_tokens` is a signed trial-minus-selected delta, present only
+when both whole-request counts are exact; subtracting conservative upper bounds
+does not establish a marginal bound.
+
+The opt-in binds `contextdb.routing_features.semantic.v1` and its evaluation
+ceiling. Scalar scorers retain the existing feature binding, callback and variant
+retention cost. `FiniteScoreAdapter` forwards either profile. Opting in without a
+semantic implementation fails explicitly. This ABI does not enable a native
+learned scorer, run Kev, admit private training or authorize model processing.
+
+## Current boundary
+
+The compiler records use versioned canonical JSON commitments. Their
+`from_json` methods bound and charge input bytes before strict deserialization and
+structural validation. A host must invoke compiler validation before use.
+Structural validation alone is not authorization or a durable custody receipt.
+
+The [owned host](../../tools/owned-conversation/README.md) can require protected
+native traces. Canonical pages live inside the encrypted model-request occurrence,
+outside the reader wire. Native seals, the pending owned call and atomic capture
+bind them; current source, generic-record and state controls restrict both the
+trace and its outputs/checkpoints. Recovery retains headers and controls after
+authorized body pruning. Legacy omitted traces remain unavailable.
+
+The service's optional generic query uses the existing resolver and recall engine.
+Its initial complete inspection profile permits at most 100 authorized records;
+larger frontiers refuse before the next candidate record body is read. Inherited
+source controls can require earlier authorized reads. This is a bounded native
+integration, not a scalable indexed route or automatic generic cue in the host.
+The embedded `AcceptedRouterTracePort` reads the exact accepted material under
+current capabilities, purpose and whole-custody controls in one latest snapshot.
+It uses the caller's shared allowance and performs no model call or write. Its
+result grants neither export nor training permission; ordinary transports do not
+acquire the port implicitly.
+
+Compiler validation separately reports support material, unit semantics and the
+complete candidate commitment. The explicit `compile_assembly_with_router_policy`
+entry retains versioned prepared actions/reasons for the last column; the default
+entry and native v1 traces omit it. Native v1 refuses this extension. The explicit
+`required_replay_v2` native profile retains the complete preparation and separate
+attempt observation in encrypted pages with header version 2. Its feature marker,
+owner seal, accepted receipt and retained recovery header bind the same version;
+neither legacy Required nor Off silently upgrades. Cold reads validate retained
+material and observation metadata; they do not execute historical selection.
+
+The replay entry captures actual variant costs, generated markers, support order,
+ordered omissions and the remaining selector-entry work/bytes. Replay reserves that
+allowance from the enclosing job, keeping its absolute deadline and cancellation.
+It recomputes every R0 evaluation and trial, then compares attempts, exact integer
+scores, seed ties, closure/support choices, STOP, canonical pack, ordered wire and
+token counts. Recorded timing remains an observation; replay timing is measured
+separately. A reproduced conservative token bound keeps exact count unavailable.
+Missing preparation/observations or unsupported runtime/scorer profiles
+return unavailable. Changed material or behavior fails integrity verification.
+
+Detached replay performs no provider authorization, source read or dispatch, and
+does not grant current rights. The embedded `AcceptedRouterSourceWirePort`
+authorizes the exact receipt and whole retained custody, then reconstructs the
+accepted request from its actual source spans, JSON transforms and stored parts
+in that same latest snapshot and shared budget. It returns commitments and
+separate current-custody, source-wire, historical-selection and exact-count
+columns, without request plaintext, a dispatch lease or training/export rights.
+Discarded origins are authorized; their bytes are not all rematerialized.
+
+An optional trusted tokenizer/encoder requires `ModelProcessing` before protected
+reads and runs the existing v2 R0 replay. Its complete output must equal the newly
+reconstructed native wire. Missing runtime or v1 preparation leaves historical
+selection/count unavailable while source-byte verification can succeed. A
+conservative count remains unavailable as an exact count. Off and legitimately
+pruned traces remain distinct unavailable results; current denial, stale custody,
+corruption and budget exhaustion remain errors.
+
+The [synthetic corpus](../../learning/context-router/README.md) keeps query-time
+features, R0 behavior, labels and lineage distinct. Production scoring remains R0;
+private training admission and a learned runtime remain later work.

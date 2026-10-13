@@ -61,6 +61,24 @@ the same ordered row framing carries authenticated ciphertext and an exact key
 authority ID. It requires the retained external key inventory, master key and
 current suppression ledger; none is imported from the backup. Logical closure
 is verified through a decoding view before restoring a pristine encrypted target.
+Version 4 key authorities separately retain native-use preparations and outcomes.
+Their sealed native commit marker belongs to local protocol metadata, outside the
+archive's application-row set and deep digest. A restored target keeps its own
+registered instance and records authenticated imports; the archive never replaces
+the independent use journal. Earlier key profiles need explicit tracking migration.
+Explicit source, assertion and payload pruning have separate manifest features
+and accepted journal records. Assertion pruning retains independent mutations in
+a distinct representation, bound to the original receipt and accepted control
+hashes; it never claims rewritten bytes have the old full-batch digest. Tombstones
+and chunk progress permit only declared missing bodies. The deep digest still
+hashes every actual remaining row. A partial
+cleanup archive is not a completion receipt or evidence of physical erasure.
+The `continuous-record-sources-v1` feature binds native applied provenance to
+an independently retained version 3 suppression authority. Its global genesis,
+workspace chains and revision indexes are mandatory; record bodies and origin
+controls keep their original commitments. Native restore never replaces this
+registry. An older archive must catch up before disclosure, and unclassified
+records remain unavailable. Older authority versions require explicit migration.
 The header and record addresses are visible; the format does not claim signatures,
 physical erasure or production host key custody. See the
 [native encryption and restore contract](architecture/continuous-context.md).

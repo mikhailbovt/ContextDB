@@ -14,6 +14,8 @@ use thiserror::Error;
 pub const ANN_V2_FORMAT_VERSION: u16 = 2;
 /// Maximum HNSW level admitted by the initial v2 format.
 pub const ANN_V2_MAX_LEVEL: u8 = 4;
+/// Maximum full-precision dimensions admitted by one bounded ANN point read.
+pub const ANN_V2_MAX_VECTOR_DIMENSIONS: usize = 65_536;
 /// Maximum neighbours stored in one node level.
 pub const ANN_V2_MAX_NEIGHBOURS_PER_LEVEL: usize = 64;
 /// Minimum deterministic construction-search budget.

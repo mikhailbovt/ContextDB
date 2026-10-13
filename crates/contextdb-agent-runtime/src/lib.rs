@@ -5,6 +5,7 @@
 #![warn(missing_docs)]
 
 mod economy;
+mod embedding;
 mod fence;
 mod model;
 mod rolling;
@@ -15,6 +16,7 @@ mod telemetry;
 mod tests;
 
 pub use economy::*;
+pub use embedding::*;
 pub use fence::*;
 pub use model::*;
 pub use rolling::*;
@@ -31,7 +33,8 @@ fn exhausted(message: &'static str) -> ServiceError {
 }
 fn context_error(error: contextdb_context::ContextError) -> ServiceError {
     match error {
-        contextdb_context::ContextError::BudgetExceeded(_) => {
+        contextdb_context::ContextError::BudgetExceeded(_)
+        | contextdb_context::ContextError::OutgoingCapacityExceeded { .. } => {
             exhausted("whole-request budget exhausted")
         }
         _ => invalid("reader protocol or source layout is invalid"),

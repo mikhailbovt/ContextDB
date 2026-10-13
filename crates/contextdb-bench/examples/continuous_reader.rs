@@ -222,6 +222,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             role: outgoing_role,
             tool_calls: vec![],
             tool_result: None,
+            tool_page: None,
         });
     }
     project(&owner, &context)?;
@@ -276,6 +277,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             max_prepare_attempts: 3,
         },
         cache_residency: None,
+        automatic_bm25: None,
+        automatic_hybrid: None,
+        router_trace_profile: RouterTraceProfile::Off,
         // Original query-time history only: prior replay answers are retained for
         // audit but must never leak into another independent evaluation question.
         automatic_recall_filter: RawFilter {

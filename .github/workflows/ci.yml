@@ -46,21 +46,26 @@ jobs:
             target: x86_64-unknown-linux-gnu
             tier: required
             experimental: false
+            timeout_minutes: 45
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             tier: required
             experimental: false
+            timeout_minutes: 45
           - os: macos-14
             target: aarch64-apple-darwin
             tier: required
             experimental: false
+            timeout_minutes: 60
           - os: windows-2025
             target: x86_64-pc-windows-msvc
             tier: best-effort
             experimental: true
+            timeout_minutes: 90
     runs-on: "${{ matrix.os }}"
     continue-on-error: "${{ matrix.experimental }}"
-    timeout-minutes: 45
+    # Hosted macOS ARM and Windows need room for clean docs/wheel rebuilds.
+    timeout-minutes: "${{ matrix.timeout_minutes }}"
     env:
       CARGO_INCREMENTAL: "0"
       PYO3_PYTHON: python

@@ -18,7 +18,7 @@ fn budget() -> QueryBudget {
         Default::default(),
     )
 }
-fn capture(sequence: u64, text: &str) -> CaptureRequest {
+pub(crate) fn capture(sequence: u64, text: &str) -> CaptureRequest {
     let mut request = crate::capture::tests::request(sequence, text);
     request.context.request.subject_id = MemorySubjectId::from_uuid(uuid::Uuid::from_u128(10))
         .expect("native assertion fixture")
@@ -27,7 +27,7 @@ fn capture(sequence: u64, text: &str) -> CaptureRequest {
         BTreeSet::from([request.context.request.subject_id.clone()]);
     request
 }
-fn key(input: &CaptureRequest) -> StateKey {
+pub(crate) fn key(input: &CaptureRequest) -> StateKey {
     StateKey {
         subject: NodeId::from_uuid(uuid::Uuid::from_u128(20)).expect("native assertion fixture"),
         predicate: PredicateId::from_uuid(uuid::Uuid::from_u128(21))
@@ -46,7 +46,7 @@ fn authority(input: &CaptureRequest) -> SourceAuthority {
         role: input.event.role,
     }
 }
-fn policy(input: &CaptureRequest) -> AuthorityPolicy {
+pub(crate) fn policy(input: &CaptureRequest) -> AuthorityPolicy {
     AuthorityPolicy {
         key: key(input),
         version: RevisionNumber::FIRST,
@@ -63,7 +63,7 @@ fn pipeline() -> PipelineIdentity {
         schema_version: "1".into(),
     }
 }
-fn assertion(
+pub(crate) fn assertion(
     input: &CaptureRequest,
     value: &str,
     start: i64,
@@ -183,12 +183,12 @@ fn assertion(
         original_evidence: vec![span],
     }
 }
-fn change(assertion: SourceAssertion) -> AssertionMutation {
+pub(super) fn change(assertion: SourceAssertion) -> AssertionMutation {
     AssertionMutation::Assert {
         assertion: Box::new(assertion),
     }
 }
-fn publication(
+pub(crate) fn publication(
     service: &NativeService,
     input: &CaptureRequest,
     retry: &str,
@@ -228,7 +228,7 @@ fn publication(
         after_receipt: None,
     }
 }
-fn publish(
+pub(crate) fn publish(
     service: &NativeService,
     input: &CaptureRequest,
     retry: &str,
@@ -483,6 +483,20 @@ fn branches_conflicts_and_scoped_freshness_do_not_choose_a_similarity_winner() {
     );
     assert_eq!(value(&query(&service, &input, 0, None)), Some("local-only"));
     assert_eq!(value(&query(&service, &branch, 0, None)), Some("cloud"));
+    let scoped_request = ResolveStateRequest {
+        context: input.context.clone(),
+        key: key(&input),
+        known_at: None,
+        valid_at: TimestampMicros(0),
+        after_receipt: None,
+    };
+    let mut baseline =
+        QueryBudget::new(128, 128 * 1024, Duration::from_secs(5), Default::default());
+    let before_noise = service
+        .resolve_state(scoped_request.clone(), &mut baseline)
+        .expect("bounded scoped resolution before unrelated events");
+    assert_eq!(value(&before_noise), Some("local-only"));
+    let baseline_work = 128 - baseline.remaining_work();
     for sequence in 2..=145 {
         let mut noise = branch.clone();
         noise.event.event_id = ObservationId::new();
@@ -492,20 +506,25 @@ fn branches_conflicts_and_scoped_freshness_do_not_choose_a_similarity_winner() {
             .append_event(noise)
             .expect("native assertion fixture");
     }
-    let mut bounded = QueryBudget::new(12, 128 * 1024, Duration::from_secs(5), Default::default());
+    let mut bounded = QueryBudget::new(128, 128 * 1024, Duration::from_secs(5), Default::default());
     let view = service
-        .resolve_state(
-            ResolveStateRequest {
-                context: input.context.clone(),
-                key: key(&input),
-                known_at: None,
-                valid_at: TimestampMicros(0),
-                after_receipt: None,
-            },
-            &mut bounded,
-        )
+        .resolve_state(scoped_request.clone(), &mut bounded)
         .expect("native assertion fixture");
     assert_eq!(value(&view), Some("local-only"));
+    assert_eq!(
+        128 - bounded.remaining_work(),
+        baseline_work,
+        "144 unrelated branch events must not increase scoped resolution work"
+    );
+    let mut insufficient =
+        QueryBudget::new(12, 128 * 1024, Duration::from_secs(5), Default::default());
+    assert_eq!(
+        service
+            .resolve_state(scoped_request, &mut insufficient)
+            .expect_err("nested authorization reads share the insufficient parent")
+            .code,
+        ErrorCode::BudgetExhausted
+    );
     let contradictory = capture(2, "Можно облако.");
     service
         .append_event(contradictory.clone())

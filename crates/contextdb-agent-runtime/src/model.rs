@@ -5,7 +5,8 @@ use contextdb_context::{
 use contextdb_core::{ContentDigest, ModelCallId, ModelRequestManifest, ToolCallId};
 use contextdb_recall::QueryBudget;
 use contextdb_service::{
-    AuthenticatedRequestContext, CaptureReceipt, PreparedContext, ServiceResult,
+    AuthenticatedRequestContext, CaptureReceipt, OwnedHybridIntent, PrepareContextRequest,
+    PreparedContext, ServiceResult, TextEmbeddingAdapter,
 };
 use serde::{Deserialize, Serialize};
 
@@ -183,9 +184,47 @@ pub trait ToolDispatchFence: std::fmt::Debug + Send + Sync {
     ) -> ServiceResult<()>;
 }
 
+/// Elapsed host observations for one composite preparation attempt.
+/// These values grant no source authority and do not replace budget accounting.
+#[derive(Debug, Default)]
+pub struct PreparationPhaseTimings {
+    /// Bounded interpretation and source projection elapsed time.
+    pub hook_micros: u64,
+    /// Context preparation elapsed time after source maintenance.
+    pub prepare_micros: u64,
+}
+
+/// Optional trusted host operation combining maintenance and owned preparation.
+/// Its owner admits every callback; no serializable request carries that proof.
+pub trait OwnedHybridPreparer: std::fmt::Debug + Send + Sync {
+    /// Prepare this exact owned attempt on the existing shared parent allowance.
+    /// Populate elapsed observations even when preparation refuses.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "An owned step binds its exact request, trusted adapters, parent and phase timings"
+    )]
+    fn prepare_owned_hybrid(
+        &self,
+        request: PrepareContextRequest,
+        intent: OwnedHybridIntent,
+        tokenizer: &dyn TokenCounter,
+        outgoing: &dyn OutgoingEncoder,
+        query_encoder: &dyn TextEmbeddingAdapter,
+        parent: &mut QueryBudget,
+        timings: &mut PreparationPhaseTimings,
+    ) -> ServiceResult<PreparedContext>;
+}
+
 /// Optional host interpreter/index maintenance before preparation, outside the
 /// publication lock. A pipeline must report unresolved input honestly.
 pub trait PreparationHook: std::fmt::Debug + Send + Sync {
+    /// Explicit host composite for routed owned preparation, when installed.
+    /// Selecting it runs the composite instead of a separate maintenance hook.
+    /// Default hosts retain their existing hook and preparation port ordering.
+    fn owned_hybrid_preparer(&self) -> Option<&dyn OwnedHybridPreparer> {
+        None
+    }
+
     /// Run bounded shared-budget host work; do not infer semantic authority.
     fn before_prepare(
         &self,

@@ -14,6 +14,7 @@ blake3.workspace = true
 contextdb-continuity.workspace = true
 contextdb-context.workspace = true
 contextdb-core.workspace = true
+contextdb-model.workspace = true
 contextdb-recall.workspace = true
 contextdb-reference.workspace = true
 serde.workspace = true

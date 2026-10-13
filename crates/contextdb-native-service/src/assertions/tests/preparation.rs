@@ -4,6 +4,7 @@ use contextdb_recall::{IndexedQuery, IndexedSelection};
 use contextdb_service::{Capability, PrepareContextPort, PrepareContextRequest};
 
 mod leases;
+mod multi_route;
 
 fn allowance() -> QueryBudget {
     QueryBudget::new(
@@ -43,6 +44,9 @@ fn request(input: &CaptureRequest) -> PrepareContextRequest {
         Capability::ReadConflict,
     ]);
     PrepareContextRequest {
+        router_trace_profile: contextdb_service::RouterTraceProfile::Off,
+        memory_query: None,
+        bm25_query: None,
         context,
         pack_id: ContextPackId::new(),
         purpose: PackPurpose::Conversation,
