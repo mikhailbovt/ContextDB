@@ -6,7 +6,8 @@ use contextdb_agent_runtime::{KeepUninterpreted, PreparationHook};
 use contextdb_native_service::NativeService;
 use contextdb_recall::QueryBudget;
 use contextdb_service::{
-    AuthenticatedRequestContext, ErrorCode, ServiceError, ServiceResult, TextEmbeddingAdapter,
+    AuthenticatedRequestContext, ErrorCode, OwnedHybridLimits, ServiceError, ServiceResult,
+    TextEmbeddingAdapter,
 };
 
 pub(super) const PROFILE: &str = "keep-uninterpreted+native-raw-outbox-advance.v1";
@@ -15,6 +16,11 @@ pub(super) const BATCH_EVENTS: u32 = 256;
 pub(super) const HYBRID_PROFILE: &str = "keep-uninterpreted+native-bm25-dense-tail-advance.v1";
 pub(super) const HYBRID_MAX_BATCHES: u8 = 8;
 pub(super) const HYBRID_BATCH_EVENTS: u32 = 64;
+pub(super) const ROUTED_PROFILE: &str = "keep-uninterpreted+native-bm25-routed-tail-once.v1";
+pub(super) const ROUTED_BATCH_EVENTS: u32 = 4;
+pub(super) const ROUTED_MAX_BATCHES: u8 = 1;
+
+mod routed;
 
 #[cfg(test)]
 mod tests;
@@ -23,6 +29,7 @@ mod tests;
 pub(super) struct NativePreparation {
     owner: Arc<NativeService>,
     hybrid: Option<Arc<dyn TextEmbeddingAdapter>>,
+    routed: Option<OwnedHybridLimits>,
 }
 
 impl NativePreparation {
@@ -30,6 +37,7 @@ impl NativePreparation {
         Self {
             owner,
             hybrid: None,
+            routed: None,
         }
     }
 
@@ -40,6 +48,19 @@ impl NativePreparation {
         Self {
             owner,
             hybrid: Some(encoder),
+            routed: None,
+        }
+    }
+
+    pub(super) fn with_routed(
+        owner: Arc<NativeService>,
+        encoder: Arc<dyn TextEmbeddingAdapter>,
+        limits: OwnedHybridLimits,
+    ) -> Self {
+        Self {
+            owner,
+            hybrid: Some(encoder),
+            routed: Some(limits),
         }
     }
 }
@@ -51,6 +72,16 @@ impl PreparationHook for NativePreparation {
         budget: &mut QueryBudget,
     ) -> ServiceResult<()> {
         KeepUninterpreted.before_prepare(context, budget)?;
+        if let Some(limits) = self.routed {
+            let encoder = self.hybrid.as_ref().ok_or_else(|| {
+                ServiceError::new(
+                    ErrorCode::InvalidArgument,
+                    "routed preparation requires its configured encoder",
+                    false,
+                )
+            })?;
+            return routed::advance(&self.owner, context, encoder.as_ref(), limits, budget);
+        }
         if let Some(encoder) = &self.hybrid {
             // A fresh raw generation is not active until its complete bounded
             // catch-up finishes. Dense publication requires that accepted base.

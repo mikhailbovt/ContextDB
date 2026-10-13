@@ -17,7 +17,7 @@ use contextdb_recall::{QueryBudget, QueryCancellation};
 use contextdb_service::{
     AuthenticatedRequestContext, AuthenticationEvidence, Capability, CapturePort,
     CognitiveMemoryService, ErrorCode, OwnedRunPort, RequestContext, SavedRunCheckpoint,
-    Sensitivity, ServiceError, VerifyRequest,
+    Sensitivity, ServiceError, TextEmbeddingAdapter, VerifyRequest,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -35,6 +35,7 @@ mod preparation;
 mod reader;
 
 use config::HostConfig;
+pub(crate) use hybrid_index::RoutedStage;
 use preparation::NativePreparation;
 use reader::LocalReader;
 
@@ -48,6 +49,9 @@ const HYBRID_STARTUP_MAX_WORK: u64 = 1_000_000;
 const HYBRID_SHUTDOWN_TIME_MS: u64 = 10_000;
 const HYBRID_SHUTDOWN_MAX_BYTES: u64 = 1024 * 1024;
 const HYBRID_SHUTDOWN_MAX_WORK: u64 = 100_000;
+const ROUTED_MAINTENANCE_MAX_WORK: u64 = 250_000_000;
+const ROUTED_MAINTENANCE_MAX_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const ROUTED_MAINTENANCE_TIME_MS: u64 = 180_000;
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -126,11 +130,16 @@ pub(crate) fn run(path: &Path, config_path: &Path, start: bool) -> CliResult<()>
         let mut settings = settings;
         let preparation = match encoder {
             Some(encoder) => {
+                let limits = hybrid.as_ref().expect("declared hybrid encoder").limits;
                 settings.automatic_hybrid = Some(OwnedHybridSettings {
                     query_encoder: encoder.clone(),
-                    limits: hybrid.as_ref().expect("declared hybrid encoder").limits,
+                    limits,
                 });
-                NativePreparation::with_hybrid(owner.clone(), encoder)
+                if limits.routed.is_some() {
+                    NativePreparation::with_routed(owner.clone(), encoder, limits)
+                } else {
+                    NativePreparation::with_hybrid(owner.clone(), encoder)
+                }
             }
             None => NativePreparation::new(owner.clone()),
         };
@@ -263,12 +272,25 @@ fn drive(
     }))
 }
 
-pub(crate) fn index(path: &Path, config_path: &Path, bootstrap: bool) -> CliResult<()> {
+pub(crate) fn index(
+    path: &Path,
+    config_path: &Path,
+    bootstrap: bool,
+    routed_stage: Option<RoutedStage>,
+) -> CliResult<()> {
     let config = HostConfig::read(config_path)?;
     let hybrid = config
         .automatic_hybrid
         .as_ref()
         .ok_or_else(|| invalid("owned hybrid indexing requires automatic_hybrid configuration"))?;
+    if hybrid.limits.routed.is_some() != routed_stage.is_some() {
+        return Err(invalid(
+            "routed indexing requires matching routed configuration and an explicit stage",
+        ));
+    }
+    if bootstrap && routed_stage.is_some_and(|stage| stage != RoutedStage::Raw) {
+        return Err(invalid("routed bootstrap requires the raw stage"));
+    }
     let identity = config.identity();
     let digest = config.digest()?;
     let timeout = Duration::from_millis(config.reader.timeout_millis) + Duration::from_secs(30);
@@ -284,6 +306,55 @@ pub(crate) fn index(path: &Path, config_path: &Path, bootstrap: bool) -> CliResu
         .capability_grants
         .insert(Capability::ModelProcessing);
     owner.recover_record_writes(&context, &mut budget(timeout))?;
+    if let Some(stage) = routed_stage {
+        let mode = if bootstrap {
+            hybrid_index::Mode::Bootstrap
+        } else {
+            hybrid_index::Mode::Continue
+        };
+        let mut allowance = routed_maintenance_budget();
+        let needs_encoder = match stage {
+            RoutedStage::Raw | RoutedStage::Router => false,
+            RoutedStage::Base | RoutedStage::Seal => {
+                let target =
+                    owner.original_span_routed_maintenance_target(&context, &mut allowance)?;
+                match stage {
+                    RoutedStage::Base => {
+                        target.base.is_none()
+                            && target.dense.as_ref().is_none_or(|dense| dense.spans == 0)
+                    }
+                    RoutedStage::Seal => target
+                        .dense
+                        .as_ref()
+                        .zip(target.covered.as_ref())
+                        .is_some_and(|(dense, covered)| {
+                            dense.sources == covered.sources
+                                && dense.commitment == covered.commitment
+                                && (!dense.caught_up || !target.dense_matches_raw)
+                        }),
+                    _ => unreachable!("source stage matched"),
+                }
+            }
+        };
+        return hybrid_encoder::with_encoder(needs_encoder.then_some(hybrid), |encoder| {
+            let progress = hybrid_index::advance_routed(
+                &owner,
+                &context,
+                encoder
+                    .as_deref()
+                    .map(|encoder| encoder as &dyn TextEmbeddingAdapter),
+                mode,
+                stage,
+                &mut allowance,
+                |request| {
+                    emit(&json!({
+                        "type": "routed_index_request", "stage": stage, "request": request
+                    }))
+                },
+            )?;
+            emit(&json!({ "type": "routed_hybrid_index", "progress": progress }))
+        });
+    }
     hybrid_encoder::with_encoder(Some(hybrid), |encoder| {
         let encoder = encoder.ok_or_else(|| invalid("owned hybrid encoder was not launched"))?;
         let mode = if bootstrap {
@@ -411,6 +482,15 @@ fn budget(timeout: Duration) -> QueryBudget {
         2_000_000,
         512 * 1024 * 1024,
         timeout,
+        QueryCancellation::default(),
+    )
+}
+
+fn routed_maintenance_budget() -> QueryBudget {
+    QueryBudget::new(
+        ROUTED_MAINTENANCE_MAX_WORK,
+        ROUTED_MAINTENANCE_MAX_BYTES,
+        Duration::from_millis(ROUTED_MAINTENANCE_TIME_MS),
         QueryCancellation::default(),
     )
 }

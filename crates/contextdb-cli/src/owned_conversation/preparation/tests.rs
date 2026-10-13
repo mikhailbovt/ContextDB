@@ -17,6 +17,8 @@ use std::{
     time::Duration,
 };
 
+mod routed;
+
 fn digest(bytes: &[u8]) -> ContentDigest {
     ContentDigest::from_bytes(*blake3::hash(bytes).as_bytes())
 }

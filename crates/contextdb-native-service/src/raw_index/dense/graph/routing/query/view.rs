@@ -200,6 +200,15 @@ impl NativeService {
         let (accepted_current, current_manifest) =
             self.prefix_dense_target_binding(snapshot, &workspace, &current_ref, parent)?;
         let latest = generation.dense.as_ref().ok_or_else(stale_index)?;
+        self.check_routed_projection_recency(
+            snapshot,
+            &workspace,
+            &generation,
+            &current,
+            &current_ref,
+            &world,
+            parent,
+        )?;
         let raw = &router.manifest.raw;
         if accepted_current != current
             || &current_manifest != latest
@@ -321,7 +330,7 @@ impl NativeService {
         Ok(view)
     }
 
-    fn routed_point_router<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph::routing) fn routed_point_router<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,

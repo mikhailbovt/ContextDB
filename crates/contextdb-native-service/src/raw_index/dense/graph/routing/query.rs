@@ -19,6 +19,7 @@ mod fine;
 mod fresh;
 mod ledger;
 mod reader;
+mod recency;
 mod selection;
 mod traverse;
 mod view;

@@ -95,6 +95,7 @@ pub use raw_index::dense::graph::prefix_segments_v2::types::{
 pub use raw_index::dense::graph::prefix_v2::types::{
     DensePrefixBaseManifestV2, DensePrefixBaseReceiptV2, DensePrefixBaseRequestV2,
 };
+pub use raw_index::dense::graph::routing::NativeRoutedMaintenanceTarget;
 pub use raw_index::dense::graph::routing::query::{
     DenseRoutedQueryCompletion, DenseRoutedQueryLimits, DenseRoutedQueryResult,
 };

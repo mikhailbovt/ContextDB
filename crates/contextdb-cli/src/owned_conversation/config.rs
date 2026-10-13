@@ -89,11 +89,6 @@ impl HybridConfig {
                 "segmented queries require an embedded maintenance host; CLI segment maintenance is not available yet",
             ));
         }
-        if self.limits.routed.is_some() {
-            return Err(invalid(
-                "routed queries require an embedded maintenance host; CLI directory-router maintenance is not available yet",
-            ));
-        }
         self.embedding_profile()?.validate()?;
         Ok(())
     }
@@ -101,17 +96,33 @@ impl HybridConfig {
     fn binding(&self) -> CliResult<HybridSettingsBinding<'_>> {
         let embedding_profile = self.embedding_profile()?;
         let embedding_profile_digest = embedding_profile.digest()?;
+        let routed = self.limits.routed.is_some();
         Ok(HybridSettingsBinding {
-            profile: "contextdb.cli-owned-hybrid-settings.v1",
+            profile: if routed {
+                "contextdb.cli-owned-routed-hybrid-settings.v1"
+            } else {
+                "contextdb.cli-owned-hybrid-settings.v1"
+            },
             encoder: &self.encoder,
             embedding_profile,
             embedding_profile_digest,
             limits: self.limits,
-            preparation: preparation::HYBRID_PROFILE,
-            projection_limits: (
-                preparation::HYBRID_BATCH_EVENTS,
-                preparation::HYBRID_MAX_BATCHES,
-            ),
+            preparation: if routed {
+                preparation::ROUTED_PROFILE
+            } else {
+                preparation::HYBRID_PROFILE
+            },
+            projection_limits: if routed {
+                (
+                    preparation::ROUTED_BATCH_EVENTS,
+                    preparation::ROUTED_MAX_BATCHES,
+                )
+            } else {
+                (
+                    preparation::HYBRID_BATCH_EVENTS,
+                    preparation::HYBRID_MAX_BATCHES,
+                )
+            },
             startup: HybridAllowanceBinding {
                 max_work: super::HYBRID_STARTUP_MAX_WORK,
                 max_bytes: super::HYBRID_STARTUP_MAX_BYTES,
@@ -122,6 +133,11 @@ impl HybridConfig {
                 max_bytes: super::HYBRID_SHUTDOWN_MAX_BYTES,
                 timeout_millis: super::HYBRID_SHUTDOWN_TIME_MS,
             },
+            maintenance: routed.then_some(HybridAllowanceBinding {
+                max_work: super::ROUTED_MAINTENANCE_MAX_WORK,
+                max_bytes: super::ROUTED_MAINTENANCE_MAX_BYTES,
+                timeout_millis: super::ROUTED_MAINTENANCE_TIME_MS,
+            }),
         })
     }
 }
@@ -137,6 +153,8 @@ struct HybridSettingsBinding<'a> {
     projection_limits: (u32, u8),
     startup: HybridAllowanceBinding,
     shutdown: HybridAllowanceBinding,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    maintenance: Option<HybridAllowanceBinding>,
 }
 
 #[derive(Serialize)]

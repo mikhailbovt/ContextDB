@@ -16,6 +16,10 @@ use serde::Serialize;
 use super::invalid;
 use crate::CliResult;
 
+mod routed;
+pub(crate) use routed::Stage as RoutedStage;
+pub(super) use routed::advance as advance_routed;
+
 const PROFILE: &str = "contextdb.cli-owned-hybrid-index.v1";
 const BATCH_EVENTS: u32 = 64;
 const MAX_BATCHES: u8 = 8;

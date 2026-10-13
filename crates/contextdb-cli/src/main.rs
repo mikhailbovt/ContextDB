@@ -174,7 +174,7 @@ enum Command {
         resume: bool,
     },
     #[cfg(feature = "mcp")]
-    /// Explicitly advance the owned hybrid index and publish its first bounded graph.
+    /// Explicitly maintain the owned hybrid index.
     OwnedHybridIndex {
         /// Existing authenticated encrypted-native lifecycle archive.
         path: PathBuf,
@@ -195,6 +195,9 @@ enum Command {
             required_unless_present = "bootstrap"
         )]
         r#continue: bool,
+        /// Separate prefix-v2 maintenance; absence retains the original graph mode.
+        #[arg(long, value_enum)]
+        routed_stage: Option<owned_conversation::RoutedStage>,
     },
     #[cfg(feature = "mcp")]
     /// Create a bounded composite backup for the local Codex authorities.
@@ -972,9 +975,10 @@ fn run(cli: Cli) -> CliResult<()> {
             config,
             bootstrap,
             r#continue: _,
+            routed_stage,
         } => {
             require_codex_operator_output(format)?;
-            owned_conversation::index(&path, &config, bootstrap)?;
+            owned_conversation::index(&path, &config, bootstrap, routed_stage)?;
         }
         #[cfg(feature = "mcp")]
         Command::CodexBackup { path, output } => {
@@ -2455,6 +2459,60 @@ mod tests {
 
     const TEST_TOKEN_KEY_HEX: &str =
         "0707070707070707070707070707070707070707070707070707070707070707";
+
+    #[cfg(feature = "mcp")]
+    #[test]
+    fn owned_hybrid_index_retains_absent_stage_and_parses_explicit_routed_stages() {
+        let old = Cli::try_parse_from([
+            "contextdb",
+            "owned-hybrid-index",
+            "archive.json",
+            "--config",
+            "host.json",
+            "--continue",
+        ])
+        .expect("legacy maintenance command");
+        assert!(matches!(
+            old.command,
+            Command::OwnedHybridIndex {
+                routed_stage: None,
+                ..
+            }
+        ));
+        for stage in ["raw", "base", "seal", "router"] {
+            let cli = Cli::try_parse_from([
+                "contextdb",
+                "owned-hybrid-index",
+                "archive.json",
+                "--config",
+                "host.json",
+                "--continue",
+                "--routed-stage",
+                stage,
+            ])
+            .expect("explicit routed stage");
+            assert!(matches!(
+                cli.command,
+                Command::OwnedHybridIndex {
+                    routed_stage: Some(_),
+                    ..
+                }
+            ));
+        }
+        assert!(
+            Cli::try_parse_from([
+                "contextdb",
+                "owned-hybrid-index",
+                "archive.json",
+                "--config",
+                "host.json",
+                "--continue",
+                "--routed-stage",
+                "implicit-rebuild",
+            ])
+            .is_err()
+        );
+    }
 
     fn test_token_key() -> TokenKey {
         parse_token_key_hex(TEST_TOKEN_KEY_HEX.as_bytes(), "test token key").expect("test key")

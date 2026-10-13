@@ -170,6 +170,68 @@ fn hybrid_config() -> HostConfig {
 }
 
 #[test]
+fn routed_binding_is_distinct_and_absent_routing_keeps_hybrid_bytes() {
+    let legacy = hybrid_config();
+    let legacy_bytes = legacy.binding_bytes().expect("existing hybrid binding");
+    let mut absent = serde_json::to_value(&legacy).expect("old hybrid config");
+    absent["automatic_hybrid"]["limits"]["routed"] = Value::Null;
+    let absent: HostConfig = serde_json::from_value(absent).expect("explicit absent route");
+    absent.validate().expect("existing hybrid remains valid");
+    assert_eq!(
+        absent.binding_bytes().expect("old canonical bytes"),
+        legacy_bytes
+    );
+    let mut value = serde_json::to_value(&legacy).expect("original hybrid config");
+    value["automatic_hybrid"]["limits"]["routed"] = json!({
+        "max_fine_paths":8,"coarse_node_reads":64,"coarse_vector_reads":64,
+        "coarse_discovered":64,"coarse_ef_search":32
+    });
+    let routed: HostConfig = serde_json::from_value(value.clone()).expect("parsed routed config");
+    routed
+        .validate()
+        .expect("explicit routed profile with replay v2");
+    let bound: Value = serde_json::from_slice(&routed.binding_bytes().expect("routed binding"))
+        .expect("canonical routed JSON");
+    assert_eq!(
+        bound[1]["automatic_hybrid"]["profile"],
+        "contextdb.cli-owned-routed-hybrid-settings.v1"
+    );
+    assert_eq!(
+        bound[1]["automatic_hybrid"]["preparation"],
+        preparation::ROUTED_PROFILE
+    );
+    assert_eq!(
+        bound[1]["automatic_hybrid"]["projection_limits"],
+        json!([4, 1])
+    );
+    assert_eq!(
+        bound[1]["automatic_hybrid"]["maintenance"],
+        json!({
+            "max_work": 250_000_000_u64, "max_bytes": 8_u64 * 1024 * 1024 * 1024,
+            "timeout_millis": 180_000_u64,
+        })
+    );
+    assert_ne!(
+        routed.digest().expect("routed digest"),
+        legacy.digest().expect("old hybrid digest")
+    );
+    assert!(
+        routed
+            .settings()
+            .expect("inert parsed settings")
+            .automatic_hybrid
+            .is_none()
+    );
+    value["automatic_hybrid"]["limits"]["segments"] = json!({"max_segments":1});
+    let conflicting: HostConfig =
+        serde_json::from_value(value).expect("parsed conflicting profile");
+    assert!(
+        conflicting.validate().is_err(),
+        "the CLI does not activate old segmented queries"
+    );
+}
+
+#[test]
 fn hybrid_binds_full_pinned_profile_without_starting_or_reading_encoder_assets() {
     let host = hybrid_config();
     let hybrid = host.automatic_hybrid.as_ref().expect("explicit hybrid");

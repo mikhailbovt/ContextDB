@@ -10,8 +10,11 @@ mod proof;
 mod publication;
 pub(crate) mod query;
 mod reconstruction;
+mod status;
 pub(crate) mod types;
 mod verification;
+
+pub use status::NativeRoutedMaintenanceTarget;
 
 use super::*;
 use types::*;

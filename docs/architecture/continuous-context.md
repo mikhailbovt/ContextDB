@@ -931,8 +931,8 @@ includes prepared removals before exact outbox joins; all construction uses the
 operator's parent budget. Owner roots, retained acceptance and source/shared copy
 verification survive cold retry and paged generation GC. The base remains
 immutable after indexing advances. This family is exclusive with v1 graph bases
-per generation. The embedded routed profile below serves this family; CLI
-maintenance, larger bootstrap inputs and useful recall remain open.
+per generation. The routed profile below serves this family. Larger bootstrap
+inputs and useful recall remain open.
 
 `seal_original_span_prefix_segment` extends this independent base through the
 separate `continuous-raw-span-ann-prefix-segments-v2` maintenance family. Each
@@ -944,8 +944,8 @@ Signed before/after states and exact outbox joins include omission-only interval
 without inventing vectors. Current owner stamps, immutable ordinal locators,
 cold reconstruction and source/shared copy proofs remain valid through paged GC.
 An exact old request returns its historical receipt without replacing the current
-directory. Full scans can exhaust the operator budget. CLI maintenance and
-high-recall discovery remain gates.
+directory. Full scans can exhaust the operator budget. High-recall discovery
+remains a gate.
 
 `publish_original_span_directory_router` adds complete, separate offline routing
 maintenance over the prefix base and every accepted interval. Streamed coverage
@@ -957,13 +957,16 @@ for an exactly zero mean. Routing rows have shared ownership and cannot become
 original evidence. A fourth owner map, immutable revision locators, cold replay
 and paged GC bind the full final topology. Fine append makes existing coverage
 stale; replacement is explicit maintenance. Full rebuilds can exhaust the parent.
-CLI activation, useful recall and physical per-source key closure for shared
-derived rows remain open.
+Useful recall and physical per-source key closure for shared derived rows
+remain open.
 
 `OwnedHybridLimits::routed` enables separate embedded serving over these real
-prefix-v2 paths. Point admission requires exact current router/base/directory
-coverage before tokenization, without rebuilding or replaying all history per
-step. Signed cohort control rows physically include opaque partition bytes;
+prefix-v2 paths. Admission requires exact current router/base/directory coverage
+and a complete native projection-successor proof before tokenization. The proof
+walks from the accepted Dense event to the certified current head, including
+foreign frames, under the same parent; exhaustion refuses. It does not rebuild
+the router or restart at archive genesis. Signed cohort control rows physically
+include opaque partition bytes;
 permission checks precede partition decoding and all ANN traversal/vector reads.
 Coarse selection may choose any covered ordinal. Coarse, fine and fresh work use
 one total allowance, with reserved fine/fresh opportunities and one dense source
@@ -974,6 +977,41 @@ prepared capture and model dispatch; automatic preparation repeats after tools.
 Ranked path selection and locally
 complete ANN work do not establish exhaustive semantic recall. None preserves
 earlier profiles, and routed and segmented settings are mutually exclusive.
+
+The local text CLI accepts this opt-in profile in `automatic_hybrid.limits.routed`
+with the pinned encoder, replay-v2 trace and its own bound preparation revision.
+Explicit `owned-hybrid-index --routed-stage` maintenance separates raw catch-up,
+the partial base, immutable intervals and complete router construction:
+
+```text
+contextdb owned-hybrid-index <archive> --config <host.json> --bootstrap --routed-stage raw
+contextdb owned-hybrid-index <archive> --config <host.json> --continue --routed-stage base
+contextdb owned-hybrid-index <archive> --config <host.json> --continue --routed-stage seal
+contextdb owned-hybrid-index <archive> --config <host.json> --continue --routed-stage router
+```
+
+Repeat raw/seal stages explicitly when their accepted progress remains partial.
+Only these explicit routed stages use the declared offline allowance of 250M
+work, 8 GiB logical bytes and 180 seconds, bound into the routed configuration.
+Each stage shares one parent through all projections and publications; normal
+reader steps retain their existing 2M/512MiB allowance.
+Raw and router stages need no encoder. Seal first recovers the actual pending
+Dense target; otherwise it projects at most four whole sources. Each exact
+publication request is emitted before native acceptance and can be retained for
+an exact native retry. A later error preserves earlier synchronized progress.
+The administrative status API returns genuine accepted targets, including stale
+router coverage, without reading source documents or vectors; it grants no
+serving permission or source-availability claim.
+
+Before each reader step, the routed hook advances raw work and checks current
+coverage/profile plus a conservative raw-to-covered cutoff capacity bound. It
+projects at most one batch of four whole sources under the same parent, reserving
+64 possible spans per source. Remaining lag, exhausted capacity or a stale router
+requires explicit maintenance. The hook never seals intervals or rebuilds the
+router. Pause the owner, seal, rebuild the router explicitly, then resume the same
+bound configuration; maintenance does not clear an unknown model outcome. Legacy
+absent settings retain the earlier behavior and allowance. This text-only CLI
+does not accept tool-result protocols; embedded hosts retain that separate path.
 
 Preparation unions matching ranges across routes before materializing one
 immutable source. Conflicting versions or equal-range digests refuse; the bounded

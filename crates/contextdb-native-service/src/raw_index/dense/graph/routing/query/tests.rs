@@ -10,6 +10,7 @@ use contextdb_storage::{Durability, WriteTransaction};
 use std::time::Duration;
 
 mod fresh;
+mod recency;
 
 const QUERY: &str = "Find the archived sapphire orbital observation";
 #[derive(Debug)]
