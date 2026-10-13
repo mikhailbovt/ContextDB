@@ -500,7 +500,7 @@ impl NativeService {
         parent.charge(1, 32768).map_err(budget_error)
     }
 
-    fn current_prefix_segment_base<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn current_prefix_segment_base<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         context: &AuthenticatedRequestContext,
@@ -536,7 +536,9 @@ impl NativeService {
         Ok(base)
     }
 
-    fn require_no_prefix_segment_predecessor<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn require_no_prefix_segment_predecessor<
+        S: ReadSnapshot,
+    >(
         &self,
         snapshot: &S,
         workspace_id: &str,

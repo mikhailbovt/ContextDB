@@ -947,6 +947,19 @@ An exact old request returns its historical receipt without replacing the curren
 directory. Full scans can exhaust the operator budget. This family has no serving,
 runtime, CLI or coarse-routing activation; high-recall discovery remains a gate.
 
+`publish_original_span_directory_router` adds complete, separate offline routing
+maintenance over the prefix base and every accepted interval. Streamed coverage
+includes zero-node intervals without a path-count prefix; the finite build admits
+at most 4096 representatives and 64 exact policy conjunctions or refuses entirely.
+Each nonempty fine cohort contributes a centroid from its genuine accepted vectors
+in a distinct declared comparison space, with an explicit first-vector fallback
+for an exactly zero mean. Routing rows have shared ownership and cannot become
+original evidence. A fourth owner map, immutable revision locators, cold replay
+and paged GC bind the full final topology. Fine append makes existing coverage
+stale; replacement is explicit maintenance. Full rebuilds can exhaust the parent.
+Serving, runtime and CLI activation remain open, as do useful recall and physical
+per-source key closure for shared derived rows.
+
 Preparation unions matching ranges across routes before materializing one
 immutable source. Conflicting versions or equal-range digests refuse; the bounded
 rendering frontier cannot silently discard additional ranges. Protected routing

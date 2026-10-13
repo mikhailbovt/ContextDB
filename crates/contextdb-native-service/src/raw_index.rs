@@ -101,6 +101,9 @@ pub(super) struct Generation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dense_prefix_segments:
         Option<dense::graph::prefix_segments_v2::types::PrefixSegmentDirectoryRefV2>,
+    /// Latest independently accepted coarse routing revision; coverage may stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dense_directory_router: Option<dense::graph::routing::types::DirectoryRouterRefV1>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -298,6 +301,7 @@ impl NativeService {
                 dense_segments: None,
                 dense_prefix_base: None,
                 dense_prefix_segments: None,
+                dense_directory_router: None,
             }
         } else {
             let number = state

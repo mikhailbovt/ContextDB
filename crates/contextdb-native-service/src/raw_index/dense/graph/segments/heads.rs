@@ -124,6 +124,9 @@ impl NativeService {
         let prefix_segment_format = manifest
             .features
             .contains(super::super::prefix_segments_v2::types::FEATURE);
+        let router_format = manifest
+            .features
+            .contains(super::super::routing::types::FEATURE);
         if state.segment_heads.is_some() && !activated_format {
             return Err(integrity("workspace predecessor lost its segment feature"));
         }
@@ -135,6 +138,11 @@ impl NativeService {
         if state.prefix_segment_heads.is_some() && !prefix_segment_format {
             return Err(integrity(
                 "workspace predecessor lost its prefix-segment feature",
+            ));
+        }
+        if state.directory_routers.is_some() && !router_format {
+            return Err(integrity(
+                "workspace predecessor lost its directory-router feature",
             ));
         }
         let key = workspace_map_key(&state.workspace_digest, state.watermarks.journal);
@@ -149,6 +157,7 @@ impl NativeService {
                 || state.segment_heads.is_some()
                 || state.prefix_bases.is_some()
                 || state.prefix_segment_heads.is_some()
+                || state.directory_routers.is_some()
             {
                 return Err(integrity(
                     "genesis workspace has a committed segment predecessor",
@@ -185,13 +194,16 @@ impl NativeService {
             self.check_segment_head_stamp(state, &event)?;
             self.check_prefix_base_predecessor(state, &event, &manifest)?;
             self.check_prefix_segment_head_predecessor(state, &event, &manifest)?;
+            self.check_directory_router_head_predecessor(state, &event, &manifest)?;
         } else {
             if activated_format
                 || prefix_format
                 || prefix_segment_format
+                || router_format
                 || state.segment_heads.is_some()
                 || state.prefix_bases.is_some()
                 || state.prefix_segment_heads.is_some()
+                || state.directory_routers.is_some()
             {
                 return Err(integrity("activated workspace predecessor map absent"));
             }
@@ -206,8 +218,10 @@ impl NativeService {
             )? && (event.prefix_bases.is_some()
                 || event.segment_heads.is_some()
                 || event.prefix_segment_heads.is_some()
+                || event.directory_routers.is_some()
                 || event.operation == super::super::prefix_v2::types::OPERATION
                 || event.operation == super::super::prefix_segments_v2::types::OPERATION
+                || event.operation == super::super::routing::types::OPERATION
                 || event.operation == OPERATION)
             {
                 return Err(integrity(
@@ -366,6 +380,9 @@ impl NativeService {
             )?
             .unwrap_or_else(|| WorkspaceState::genesis(workspace.clone()));
         validate_workspace_state(&state, &workspace)?;
+        if state.directory_routers.is_some() {
+            return self.current_directory_router_heads(snapshot, workspace_id, budget);
+        }
         if state.prefix_segment_heads.is_some() {
             return self.current_prefix_segment_heads(snapshot, workspace_id, budget);
         }
@@ -416,6 +433,7 @@ impl NativeService {
         }
         self.check_segment_head_stamp(&state, &event)?;
         self.check_prefix_segment_head_predecessor(&state, &event, &manifest)?;
+        self.check_directory_router_head_predecessor(&state, &event, &manifest)?;
         let head = crate::budgeted::read_value(
             snapshot,
             &self.keyspaces.meta,
@@ -489,16 +507,24 @@ impl NativeService {
             .prefix_segment_heads
             .as_ref()
             .map_or(0, |roots| roots.len() + 1);
+        let router_roots = state
+            .directory_routers
+            .as_ref()
+            .map_or(0, |roots| roots.len() + 1);
         // Event digest cloning was prepaid from actual row bytes in head_read.
         // Map serialization and the keyed tuple have separate small envelopes.
         budget
             .charge(
-                8 + state.segment_heads.as_ref().map_or(0, |m| m.len() as u64) + extra_roots as u64,
+                8 + state.segment_heads.as_ref().map_or(0, |m| m.len() as u64)
+                    + extra_roots as u64
+                    + 32768 * u64::from(state.directory_routers.is_some()),
                 state
                     .segment_heads
                     .as_ref()
                     .map_or(0, |m| m.len() as u64 * 4096)
                     + extra_roots as u64 * 4096
+                    + router_roots as u64 * 4096
+                    + 8192 * u64::from(state.directory_routers.is_some())
                     + self.database_id.len() as u64 * 12
                     + 4096,
             )

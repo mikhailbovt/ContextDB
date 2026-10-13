@@ -152,7 +152,7 @@ impl NativeService {
         Ok(())
     }
 
-    fn check_prefix_interval_predecessor<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn check_prefix_interval_predecessor<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         previous: &PrefixSegmentPublicationV2,
@@ -283,6 +283,7 @@ impl NativeService {
             dense_segments: None,
             dense_prefix_base: Some(base_reference),
             dense_prefix_segments: None,
+            dense_directory_router: None,
         };
         let input = self.prefix_segment_build_input(
             snapshot,

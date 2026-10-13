@@ -168,11 +168,20 @@ impl NativeService {
         let roots = state.prefix_bases.as_ref().map_or(0, BTreeMap::len)
             + state.segment_heads.as_ref().map_or(0, BTreeMap::len)
             + state.prefix_segment_heads.as_ref().map_or(0, BTreeMap::len);
+        let router_roots = state
+            .directory_routers
+            .as_ref()
+            .map_or(0, |roots| roots.len() + 1);
         let extra_stamp = u64::from(state.prefix_segment_heads.is_some());
         parent
             .charge(
-                8 + roots as u64 + extra_stamp,
-                (roots as u64 + extra_stamp) * 4096 + self.database_id.len() as u64 * 12 + 4096,
+                8 + roots as u64
+                    + extra_stamp
+                    + 32768 * u64::from(state.directory_routers.is_some()),
+                (roots as u64 + extra_stamp + router_roots as u64) * 4096
+                    + 8192 * u64::from(state.directory_routers.is_some())
+                    + self.database_id.len() as u64 * 12
+                    + 4096,
             )
             .map_err(crate::raw_index::budget_error)
     }
@@ -230,6 +239,7 @@ impl NativeService {
                 || state.prefix_bases.is_some()
                 || state.segment_heads.is_some()
                 || state.prefix_segment_heads.is_some()
+                || state.directory_routers.is_some()
             {
                 return Err(integrity("genesis workspace has committed derived roots"));
             }
@@ -264,6 +274,7 @@ impl NativeService {
             }
             self.check_prefix_base_predecessor(&state, &event, &manifest)?;
             self.check_prefix_segment_head_predecessor(&state, &event, &manifest)?;
+            self.check_directory_router_head_predecessor(&state, &event, &manifest)?;
             if (state.segment_heads.is_some() || event.segment_heads.is_some())
                 && !manifest
                     .features

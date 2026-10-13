@@ -28,10 +28,10 @@ mod tests;
 
 const RAW_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 
-pub(super) struct PrefixSegmentBuildInput {
-    pub(super) documents: Vec<DenseDocument>,
-    pub(super) inputs: Vec<GraphInput>,
-    pub(super) interval: PrefixIntervalV2,
+pub(in crate::raw_index::dense::graph) struct PrefixSegmentBuildInput {
+    pub(in crate::raw_index::dense::graph) documents: Vec<DenseDocument>,
+    pub(in crate::raw_index::dense::graph) inputs: Vec<GraphInput>,
+    pub(in crate::raw_index::dense::graph) interval: PrefixIntervalV2,
 }
 
 #[derive(Serialize)]
@@ -168,7 +168,7 @@ impl NativeService {
         clippy::too_many_arguments,
         reason = "raw admission, opaque interval and parent stay distinct"
     )]
-    pub(super) fn prefix_segment_build_input<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn prefix_segment_build_input<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         context: Option<&AuthenticatedRequestContext>,

@@ -193,6 +193,8 @@ impl NativeService {
             self.accepted_dense_segment_generations(snapshot, &mut segment_budget)?;
         let prefix_generations = self.prefix_base_declarations(snapshot, &mut segment_budget)?;
         let prefix_segments = self.prefix_segment_declarations(snapshot, &mut segment_budget)?;
+        let directory_routers =
+            self.directory_router_declarations(snapshot, &mut segment_budget)?;
         let actual = snapshot
             .scan_prefix(&self.keyspaces.continuous, b"raw/")
             .map_err(storage_error)?;
@@ -331,6 +333,21 @@ impl NativeService {
                     &intervals,
                     &mut segment_budget,
                 )?;
+                segment_budget.charge(1, 4096).map_err(budget_error)?;
+                let mut routers = Vec::new();
+                for (_, receipt) in directory_routers.range(
+                    (workspace.to_owned(), number, 0)..=(workspace.to_owned(), number, u64::MAX),
+                ) {
+                    segment_budget.charge(1, 1024).map_err(budget_error)?;
+                    routers.push(receipt);
+                }
+                self.validate_directory_router_declarations(
+                    snapshot,
+                    workspace,
+                    &generation,
+                    &routers,
+                    &mut segment_budget,
+                )?;
                 expected.insert(generation_key(workspace, number), encode(&generation)?);
                 if state
                     .reclaiming
@@ -350,6 +367,14 @@ impl NativeService {
                         .map_err(storage_error)?
                     {
                         let suffix = &row.key[generation_prefix(workspace, number).len()..];
+                        if (suffix.starts_with(b"dense/directory-router-v1/")
+                            || suffix == b"dense/directory-routers-v1/head")
+                            && generation.dense_directory_router.is_none()
+                        {
+                            return Err(integrity(
+                                "reclaiming shared router rows lost their accepted native owner seal",
+                            ));
+                        }
                         if (suffix.starts_with(b"dense/prefix-segment-v2/")
                             || suffix == b"dense/prefix-segments-v2/head")
                             && generation.dense_prefix_segments.is_none()
@@ -443,6 +468,34 @@ impl NativeService {
                     if expected.insert(key, value).is_some() {
                         return Err(integrity(
                             "prefix directory reconstruction overlaps another family",
+                        ));
+                    }
+                }
+                for receipt in &routers {
+                    for (key, value) in self.reconstruct_directory_router_rows(
+                        snapshot,
+                        workspace,
+                        receipt,
+                        &mut segment_budget,
+                    )? {
+                        if expected.insert(key, value).is_some() {
+                            return Err(integrity(
+                                "directory router reconstruction overlaps another family",
+                            ));
+                        }
+                    }
+                }
+                if let Some(last) = routers.last() {
+                    segment_budget.charge(1, 2048).map_err(budget_error)?;
+                    let key = dense::graph::routing::types::head_key(workspace, number)?;
+                    let value = dense::graph::segments::crypto::metered_encode(
+                        *last,
+                        &mut segment_budget,
+                        dense::graph::routing::types::ROW_BYTES,
+                    )?;
+                    if expected.insert(key, value).is_some() {
+                        return Err(integrity(
+                            "mutable directory router head overlaps another family",
                         ));
                     }
                 }

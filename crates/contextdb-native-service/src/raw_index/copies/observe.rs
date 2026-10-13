@@ -92,6 +92,38 @@ impl NativeService {
                         || key == "dense/prefix-segments-v2/head"
                 })
         });
+        let router_rows = entries.iter().any(|entry| {
+            std::str::from_utf8(&entry.key)
+                .ok()
+                .and_then(|key| key.strip_prefix(&prefix))
+                .is_some_and(|key| {
+                    key.starts_with("dense/directory-router-v1/")
+                        || key == "dense/directory-routers-v1/head"
+                })
+        });
+        if generation.dense_directory_router.is_some() || router_rows {
+            let current = self.current_directory_router_heads(snapshot, workspace_id, budget)?;
+            if current
+                .directory_routers
+                .as_ref()
+                .and_then(|heads| heads.get(&generation.number))
+                != generation.dense_directory_router.as_ref()
+                || current
+                    .prefix_bases
+                    .as_ref()
+                    .and_then(|heads| heads.get(&generation.number))
+                    != generation.dense_prefix_base.as_ref()
+                || current
+                    .prefix_segment_heads
+                    .as_ref()
+                    .and_then(|heads| heads.get(&generation.number))
+                    != generation.dense_prefix_segments.as_ref()
+            {
+                return Err(integrity(
+                    "live router copy differs from certified native generation roots",
+                ));
+            }
+        }
         if generation.dense_prefix_base.is_some()
             || generation.dense_prefix_segments.is_some()
             || prefix_interval_rows
@@ -120,8 +152,22 @@ impl NativeService {
                     || key.starts_with("dense/prefix-base-v2/")
                     || key.starts_with("dense/prefix-segment-v2/")
                     || key == "dense/prefix-segments-v2/head"
+                    || key.starts_with("dense/directory-router-v1/")
+                    || key == "dense/directory-routers-v1/head"
             }) {
                 let owner = if relative.is_some_and(|key| {
+                    key.starts_with("dense/directory-router-v1/")
+                        || key == "dense/directory-routers-v1/head"
+                }) {
+                    self.verify_dense_directory_router_copy(
+                        snapshot,
+                        generation,
+                        &entry.key,
+                        &entry.value,
+                        budget,
+                    )?;
+                    None
+                } else if relative.is_some_and(|key| {
                     key.starts_with("dense/prefix-segment-v2/")
                         || key == "dense/prefix-segments-v2/head"
                 }) {

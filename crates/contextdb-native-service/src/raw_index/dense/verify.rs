@@ -251,6 +251,35 @@ impl NativeService {
                 return Ok(true);
             }
         }
+        budget
+            .charge(2, graph::routing::types::KEY_BYTES * 2)
+            .map_err(budget_error)?;
+        let family = format!(
+            "{}dense/directory-router-v1/",
+            generation_prefix(workspace, generation)
+        )
+        .into_bytes();
+        let head = graph::routing::types::head_key(workspace, generation)?;
+        for prefix in [family, head] {
+            let present = crate::budgeted::metadata(snapshot, budget, |reader| {
+                reader
+                    .scan_prefix_page(
+                        &self.keyspaces.continuous,
+                        ScanPageRequest {
+                            prefix: &prefix,
+                            start_after: None,
+                            max_entries: 1,
+                            max_bytes: graph::routing::types::ROW_BYTES
+                                + graph::routing::types::KEY_BYTES as usize,
+                        },
+                    )
+                    .map(|page| !page.entries.is_empty() || page.continuation.is_some())
+                    .map_err(storage_error)
+            })?;
+            if present {
+                return Ok(true);
+            }
+        }
         Ok(false)
     }
     pub(in crate::raw_index) fn verify_dense_receipt_copy<S: ReadSnapshot>(

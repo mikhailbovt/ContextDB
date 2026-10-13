@@ -13,7 +13,7 @@ pub(super) fn seal_request_digest(
 }
 
 impl NativeService {
-    pub(super) fn require_prefix_segment_feature<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn require_prefix_segment_feature<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         parent: &mut QueryBudget,
@@ -36,7 +36,7 @@ impl NativeService {
         Ok(())
     }
 
-    pub(super) fn prefix_segment_base_reference<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn prefix_segment_base_reference<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -246,7 +246,7 @@ impl NativeService {
         Ok(publication)
     }
 
-    pub(super) fn accepted_current_prefix_segment<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn accepted_current_prefix_segment<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace_id: &str,

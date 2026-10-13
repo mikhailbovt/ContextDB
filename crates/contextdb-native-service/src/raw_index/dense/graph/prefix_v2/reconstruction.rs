@@ -99,6 +99,7 @@ impl NativeService {
             dense_segments: None,
             dense_prefix_base: None,
             dense_prefix_segments: None,
+            dense_directory_router: None,
         };
         let input =
             self.prefix_build_input(snapshot, None, workspace, &admission, &target, budget)?;

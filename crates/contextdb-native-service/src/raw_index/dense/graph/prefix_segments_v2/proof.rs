@@ -14,33 +14,33 @@ use contextdb_service::ServiceResult;
 use contextdb_storage::{ReadSnapshot, ScanPageRequest};
 use std::mem::size_of;
 
-pub(super) struct VerifiedDenseState {
+pub(in crate::raw_index::dense::graph) struct VerifiedDenseState {
     reference: AcceptedPublicationRef,
     receipt: DenseProjectionReceipt,
     manifest: DenseManifest,
 }
 impl VerifiedDenseState {
-    pub(super) fn reference(&self) -> &AcceptedPublicationRef {
+    pub(in crate::raw_index::dense::graph) fn reference(&self) -> &AcceptedPublicationRef {
         &self.reference
     }
-    pub(super) fn receipt(&self) -> &DenseProjectionReceipt {
+    pub(in crate::raw_index::dense::graph) fn receipt(&self) -> &DenseProjectionReceipt {
         &self.receipt
     }
-    pub(super) fn manifest(&self) -> &DenseManifest {
+    pub(in crate::raw_index::dense::graph) fn manifest(&self) -> &DenseManifest {
         &self.manifest
     }
 }
 
-pub(super) struct VerifiedCaptureBoundary {
+pub(in crate::raw_index::dense::graph) struct VerifiedCaptureBoundary {
     reference: CaptureBoundaryRefV2,
 }
 impl VerifiedCaptureBoundary {
-    pub(super) fn reference(&self) -> &CaptureBoundaryRefV2 {
+    pub(in crate::raw_index::dense::graph) fn reference(&self) -> &CaptureBoundaryRefV2 {
         &self.reference
     }
 }
 
-pub(super) struct VerifiedPrefixSegmentInterval {
+pub(in crate::raw_index::dense::graph) struct VerifiedPrefixSegmentInterval {
     before: VerifiedDenseState,
     after: VerifiedDenseState,
     start: VerifiedCaptureBoundary,
@@ -48,19 +48,19 @@ pub(super) struct VerifiedPrefixSegmentInterval {
     work: Vec<CaptureWork>,
 }
 impl VerifiedPrefixSegmentInterval {
-    pub(super) fn before(&self) -> &VerifiedDenseState {
+    pub(in crate::raw_index::dense::graph) fn before(&self) -> &VerifiedDenseState {
         &self.before
     }
-    pub(super) fn after(&self) -> &VerifiedDenseState {
+    pub(in crate::raw_index::dense::graph) fn after(&self) -> &VerifiedDenseState {
         &self.after
     }
-    pub(super) fn start(&self) -> &VerifiedCaptureBoundary {
+    pub(in crate::raw_index::dense::graph) fn start(&self) -> &VerifiedCaptureBoundary {
         &self.start
     }
-    pub(super) fn end(&self) -> &VerifiedCaptureBoundary {
+    pub(in crate::raw_index::dense::graph) fn end(&self) -> &VerifiedCaptureBoundary {
         &self.end
     }
-    pub(super) fn work(&self) -> &[CaptureWork] {
+    pub(in crate::raw_index::dense::graph) fn work(&self) -> &[CaptureWork] {
         &self.work
     }
 }
@@ -68,7 +68,7 @@ impl VerifiedPrefixSegmentInterval {
 impl NativeService {
     /// Point acceptance alone has no total-source census cap and no current
     /// content authority. Complete <=128 interval work is proved separately.
-    pub(super) fn verify_prefix_segment_dense_state<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn verify_prefix_segment_dense_state<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -111,7 +111,9 @@ impl NativeService {
         Ok(VerifiedCaptureBoundary { reference })
     }
 
-    pub(super) fn first_prefix_segment_capture_boundary<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn first_prefix_segment_capture_boundary<
+        S: ReadSnapshot,
+    >(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -138,7 +140,9 @@ impl NativeService {
         Ok(result)
     }
 
-    pub(super) fn verify_prefix_segment_capture_boundary<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn verify_prefix_segment_capture_boundary<
+        S: ReadSnapshot,
+    >(
         &self,
         snapshot: &S,
         workspace: &str,
@@ -163,7 +167,7 @@ impl NativeService {
         clippy::too_many_arguments,
         reason = "opaque state and actual capture range stay explicit"
     )]
-    pub(super) fn verify_prefix_segment_interval<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn verify_prefix_segment_interval<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,

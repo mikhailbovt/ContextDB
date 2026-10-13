@@ -226,6 +226,12 @@ impl NativeService {
         {
             heads.remove(&number);
         }
+        if finished
+            && let Some(routers) = &mut frame.state.directory_routers
+            && let Some(number) = progress.generation
+        {
+            routers.remove(&number);
+        }
         self.finish_frame(
             &mut tx,
             &frame,

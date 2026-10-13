@@ -9,6 +9,7 @@ pub(crate) mod prefix_segments_v2;
 pub(crate) mod prefix_v2;
 mod publication;
 mod query;
+pub(crate) mod routing;
 pub(crate) mod segments;
 mod tail;
 #[cfg(test)]
