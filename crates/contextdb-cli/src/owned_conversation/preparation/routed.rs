@@ -1,4 +1,4 @@
-//! One bounded source batch; graph maintenance remains an explicit operator action.
+//! Bounded work batches; graph maintenance remains an explicit operator action.
 use super::*;
 use contextdb_native_service::{DenseProjectionReceipt, NativeRoutedMaintenanceTarget};
 
@@ -75,6 +75,40 @@ fn admit<'a>(
     Ok((dense, covered, fresh_spans))
 }
 
+/// Compare two already admitted native targets; this creates no authority.
+pub(super) fn check_progress(
+    before: &NativeRoutedMaintenanceTarget,
+    after: &NativeRoutedMaintenanceTarget,
+    parent: &mut QueryBudget,
+) -> ServiceResult<()> {
+    let dense = before.dense.as_ref().ok_or_else(stale)?;
+    let current = after.dense.as_ref().ok_or_else(stale)?;
+    allowance(parent, 64, 128 * 1024)?;
+    if after.generation != before.generation
+        || after.authorization_epoch != before.authorization_epoch
+        || after.raw_through != before.raw_through
+        || after.raw_sources != before.raw_sources
+        || after.base != before.base
+        || after.directory != before.directory
+        || after.directory_ref != before.directory_ref
+        || after.covered != before.covered
+        || after.router != before.router
+        || current.profile != dense.profile
+        || current.profile_digest != dense.profile_digest
+        || current.sources < dense.sources
+        || current.spans < dense.spans
+        || current.embedded_sources < dense.embedded_sources
+        || current.omitted_sources < dense.omitted_sources
+        || current.through < dense.through
+    {
+        return Err(integrity());
+    }
+    if current.through <= dense.through || current.global_commit <= dense.global_commit {
+        return Err(capacity());
+    }
+    Ok(())
+}
+
 pub(super) fn advance(
     owner: &NativeService,
     context: &AuthenticatedRequestContext,
@@ -102,43 +136,27 @@ pub(super) fn advance(
     if !raw_caught_up {
         return Err(capacity());
     }
-    let before = owner.original_span_routed_maintenance_target(context, parent)?;
-    let (dense, _, fresh_spans) = admit(&before, encoder, limits, parent)?;
-    if dense.caught_up && before.dense_matches_raw {
-        return Ok(());
+    let mut before = owner.original_span_routed_maintenance_target(context, parent)?;
+    for _ in 0..ROUTED_MAX_BATCHES {
+        let (dense, _, fresh_spans) = admit(&before, encoder, limits, parent)?;
+        if dense.caught_up && before.dense_matches_raw {
+            return Ok(());
+        }
+        // CaptureWork includes omitted controls, not just vectors. Charge each
+        // real batch to the same parent and recompute its worst-case capacity.
+        let batch = (u64::from(limits.tail_vectors) - fresh_spans) / 64;
+        let batch = batch.min(u64::from(ROUTED_BATCH_EVENTS)) as u32;
+        if batch == 0 {
+            return Err(capacity());
+        }
+        owner.project_original_spans(context, encoder, batch, parent)?;
+        let after = owner.original_span_routed_maintenance_target(context, parent)?;
+        let (current, _, _) = admit(&after, encoder, limits, parent)?;
+        check_progress(&before, &after, parent)?;
+        if current.caught_up && after.dense_matches_raw {
+            return Ok(());
+        }
+        before = after;
     }
-    // One source can have 64 spans. No average-size assumption may enlarge the
-    // automatic batch, and zero remaining whole-source capacity refuses first.
-    let batch = (u64::from(limits.tail_vectors) - fresh_spans) / 64;
-    let batch = batch.min(u64::from(ROUTED_BATCH_EVENTS)) as u32;
-    if batch == 0 {
-        return Err(capacity());
-    }
-    owner.project_original_spans(context, encoder, batch, parent)?;
-    let after = owner.original_span_routed_maintenance_target(context, parent)?;
-    let (current, _, _) = admit(&after, encoder, limits, parent)?;
-    allowance(parent, 64, 128 * 1024)?;
-    if after.generation != before.generation
-        || after.authorization_epoch != before.authorization_epoch
-        || after.raw_through != before.raw_through
-        || after.raw_sources != before.raw_sources
-        || after.base != before.base
-        || after.directory != before.directory
-        || after.directory_ref != before.directory_ref
-        || after.covered != before.covered
-        || after.router != before.router
-        || current.profile != dense.profile
-        || current.profile_digest != dense.profile_digest
-        || current.through < dense.through
-        || current.sources < dense.sources
-        || current.spans < dense.spans
-        || current.embedded_sources < dense.embedded_sources
-        || current.omitted_sources < dense.omitted_sources
-    {
-        return Err(integrity());
-    }
-    if !current.caught_up || !after.dense_matches_raw {
-        return Err(capacity());
-    }
-    Ok(())
+    Err(capacity())
 }

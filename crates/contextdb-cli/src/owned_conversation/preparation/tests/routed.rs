@@ -123,6 +123,16 @@ fn routed_hook_refuses_missing_base_zero_capacity_stale_router_and_changed_profi
         ErrorCode::IntegrityFailure
     );
     assert_eq!(changed.calls.load(Ordering::SeqCst), 0);
+    let earlier = f
+        .owner
+        .original_span_routed_maintenance_target(&f.context, &mut budget())
+        .expect("actual unchanged partial target");
+    assert_eq!(
+        super::super::routed::check_progress(&earlier, &earlier, &mut budget())
+            .expect_err("identical genuine target cannot count as batch progress")
+            .code,
+        ErrorCode::ResourceExhausted
+    );
     let target = f
         .owner
         .project_original_spans(&f.context, encoder.as_ref(), 64, &mut budget())
@@ -147,6 +157,12 @@ fn routed_hook_refuses_missing_base_zero_capacity_stale_router_and_changed_profi
         .original_span_routed_maintenance_target(&f.context, &mut budget())
         .expect("legitimate stale router remains observable");
     assert!(!status.router_matches_directory);
+    assert_eq!(
+        super::super::routed::check_progress(&earlier, &status, &mut budget())
+            .expect_err("genuine operator change cannot be adopted mid-hook")
+            .code,
+        ErrorCode::IntegrityFailure
+    );
     let calls = encoder.calls.load(Ordering::SeqCst);
     let stale = NativePreparation::with_routed(f.owner.clone(), encoder.clone(), limits());
     assert_eq!(
@@ -161,7 +177,7 @@ fn routed_hook_refuses_missing_base_zero_capacity_stale_router_and_changed_profi
 }
 
 #[test]
-fn routed_hook_partial_single_batch_and_cancelled_parent_do_not_reset_allowances() {
+fn routed_hook_capacity_and_cancelled_parent_do_not_reset_allowances() {
     let (f, encoder) = ready();
     for sequence in 3..=6 {
         capture(&f, &f.owner, sequence);
@@ -171,7 +187,7 @@ fn routed_hook_partial_single_batch_and_cancelled_parent_do_not_reset_allowances
     let hook = NativePreparation::with_routed(f.owner.clone(), encoder.clone(), tight);
     assert_eq!(
         hook.before_prepare(&f.context, &mut budget())
-            .expect_err("single admitted source batch leaves explicit remaining lag")
+            .expect_err("remaining capacity cannot admit another worst-case whole source")
             .code,
         ErrorCode::ResourceExhausted
     );
@@ -208,5 +224,176 @@ fn routed_hook_partial_single_batch_and_cancelled_parent_do_not_reset_allowances
         ErrorCode::BudgetExhausted
     );
     assert_eq!(encoder.calls.load(Ordering::SeqCst), calls);
+    verify(&f);
+}
+
+fn captured_work(f: &Fixture, sequence: u64, kind: EventKind, role: EventRole, text: String) {
+    f.owner
+        .append_event(CaptureRequest {
+            context: f.context.clone(),
+            idempotency_key: format!("routed/work/{sequence}"),
+            event: EventEnvelope {
+                version: EVENT_ENVELOPE_VERSION,
+                event_id: ObservationId::new(),
+                workspace_id: f.workspace,
+                scope_ids: BTreeSet::from([f.scope]),
+                producer_id: f.producer,
+                producer_sequence: sequence,
+                kind,
+                recorded_at: TimestampMicros(1_000_000 + sequence as i64),
+                observed_at: None,
+                source_id: SourceId::new(),
+                source_version: None,
+                adapter_id: "observed-routed-hook-work".into(),
+                role,
+                session_id: None,
+                run_id: None,
+                task_id: None,
+                parent_event_ids: BTreeSet::new(),
+                supersedes_event_id: None,
+                payload: EventPayload::InlineUtf8 {
+                    digest: digest(text.as_bytes()),
+                    text,
+                },
+                coverage: EventCoverage::CompleteObservation,
+                upstream_truncated: false,
+                gap_reason: None,
+                response_stream: None,
+                provenance: None,
+            },
+        })
+        .expect("actual accepted observation, without invented owned-checkpoint authority");
+}
+
+#[test]
+fn routed_hook_crosses_zero_vector_controls_with_the_actual_cli_parent() {
+    let (f, encoder) = ready();
+    for sequence in 3..=9 {
+        captured_work(
+            &f,
+            sequence,
+            EventKind::RunCancelled,
+            EventRole::Host,
+            format!("Observed cancellation control {sequence}"),
+        );
+    }
+    capture(&f, &f.owner, 10);
+    let before = f
+        .owner
+        .original_span_routed_maintenance_target(&f.context, &mut budget())
+        .expect("genuine immutable graph controls before the pending work");
+    let hook = NativePreparation::with_routed(f.owner.clone(), encoder.clone(), limits());
+    let mut parent = crate::owned_conversation::budget(Duration::from_secs(60));
+    let outcome = hook.before_prepare(&f.context, &mut parent);
+    eprintln!(
+        "routed_hook_controls_production_cost work={} bytes={} error={:?}",
+        2_000_000_u64.saturating_sub(parent.remaining_work()),
+        (512_u64 * 1024 * 1024).saturating_sub(parent.remaining_bytes()),
+        outcome.as_ref().err().map(|error| error.code)
+    );
+    outcome.expect("multiple <=4-work batches share the unchanged actual CLI allowance");
+    let after = f
+        .owner
+        .original_span_routed_maintenance_target(&f.context, &mut budget())
+        .expect("actual accepted progress after all control work");
+    let dense = after.dense.as_ref().expect("actual current projection");
+    assert!(dense.caught_up && after.dense_matches_raw);
+    assert_eq!(dense.sources, 10);
+    assert_eq!(dense.embedded_sources, 3);
+    assert_eq!(dense.omitted_sources, 7);
+    assert_eq!(encoder.calls.load(Ordering::SeqCst), 3);
+    assert!(
+        dense.global_commit
+            >= before
+                .dense
+                .as_ref()
+                .expect("earlier receipt")
+                .global_commit
+                + 3
+    );
+    assert_eq!(after.base, before.base);
+    assert_eq!(after.directory_ref, before.directory_ref);
+    assert_eq!(after.router, before.router);
+    assert_eq!(after.covered, before.covered);
+    verify(&f);
+}
+
+#[test]
+fn routed_hook_high_span_tail_and_batch_count_refuse_without_extra_source_forwards() {
+    let (f, encoder) = ready();
+    captured_work(
+        &f,
+        3,
+        EventKind::MessageCreated,
+        EventRole::User,
+        "a".repeat(32 * 1024),
+    );
+    f.owner
+        .project_originals_bm25(&f.context, false, 64, &mut budget())
+        .expect("genuine large source raw progress");
+    let dense = f
+        .owner
+        .project_original_spans(&f.context, encoder.as_ref(), 64, &mut budget())
+        .expect("explicit actual multi-span source projection");
+    assert!(dense.spans > 16);
+    capture(&f, &f.owner, 4);
+    let calls = encoder.calls.load(Ordering::SeqCst);
+    let mut tight = limits();
+    tight.tail_vectors = 32;
+    let hook = NativePreparation::with_routed(f.owner.clone(), encoder.clone(), tight);
+    assert_eq!(
+        hook.before_prepare(&f.context, &mut budget())
+            .expect_err("actual existing spans leave less than one64-span source allowance")
+            .code,
+        ErrorCode::ResourceExhausted
+    );
+    assert_eq!(encoder.calls.load(Ordering::SeqCst), calls);
+    verify(&f);
+
+    let (f, encoder) = ready();
+    for sequence in 3..=36 {
+        captured_work(
+            &f,
+            sequence,
+            EventKind::RunCancelled,
+            EventRole::Host,
+            format!("Observed bounded cancellation control {sequence}"),
+        );
+    }
+    let hook = NativePreparation::with_routed(f.owner.clone(), encoder.clone(), limits());
+    let mut parent = budget();
+    let before = f
+        .owner
+        .original_span_routed_maintenance_target(&f.context, &mut budget())
+        .expect("initial accepted projection");
+    assert_eq!(
+        hook.before_prepare(&f.context, &mut parent)
+            .expect_err(
+                "remaining control work requires explicit continuation after at most8 batches"
+            )
+            .code,
+        ErrorCode::ResourceExhausted
+    );
+    let after = f
+        .owner
+        .original_span_routed_maintenance_target(&f.context, &mut budget())
+        .expect("genuine accepted partial progress")
+        .dense
+        .expect("actual dense");
+    assert!(!after.caught_up);
+    assert_eq!(
+        after.global_commit,
+        before.known_at + 1 + u64::from(ROUTED_MAX_BATCHES),
+        "this single-workspace fixture accepts one raw frame then at most8 dense frames"
+    );
+    assert_eq!(
+        after.sources, 26,
+        "four initial work rows then seven batches of3 after one actual vector"
+    );
+    assert_eq!(
+        encoder.calls.load(Ordering::SeqCst),
+        2,
+        "no ninth batch or control-vector invention"
+    );
     verify(&f);
 }

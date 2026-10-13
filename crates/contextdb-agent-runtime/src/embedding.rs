@@ -3,11 +3,16 @@
 use std::{
     collections::BTreeMap,
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::{Mutex, MutexGuard},
     thread,
     time::Duration,
 };
+
+#[cfg(windows)]
+use contextdb_windows_job::JobChild as Child;
+#[cfg(not(windows))]
+use std::process::Child;
 
 use contextdb_core::ContentDigest;
 use contextdb_recall::QueryBudget;
@@ -58,6 +63,20 @@ pub fn embedding_backend_artifacts_digest(
 struct Backend {
     child: Option<Child>,
 }
+
+fn spawn_backend(command: &mut Command) -> std::io::Result<Child> {
+    #[cfg(windows)]
+    {
+        // Windows 10+ atomic job-list support is required. Setup failure never
+        // launches an unmanaged child or falls back to post-spawn assignment.
+        Child::spawn_null(command)
+    }
+    #[cfg(not(windows))]
+    {
+        command.spawn()
+    }
+}
+
 impl Backend {
     fn terminate(&mut self, budget: &mut QueryBudget) -> ServiceResult<()> {
         let Some(child) = self.child.as_mut() else {
@@ -216,8 +235,7 @@ impl OwnedLocalEmbedding {
             command.creation_flags(0x0800_0000);
         }
         drop(probe);
-        let child = command
-            .spawn()
+        let child = spawn_backend(&mut command)
             .map_err(|_| unavailable("embedding backend launch failed"))?;
         let adapter = Self {
             profile,

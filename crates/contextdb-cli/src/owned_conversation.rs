@@ -42,6 +42,7 @@ use reader::LocalReader;
 const MAX_COMMAND_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PROCESS_INPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_COMMANDS: usize = 256;
+const OWNED_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 const HYBRID_STARTUP_TIME_MS: u64 = 120_000;
 const HYBRID_STARTUP_MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -59,6 +60,31 @@ enum Input {
     User { text: String },
     Continue,
     Finish,
+}
+
+/// Bound the physical stack for the two owned CLI commands. Owners and models
+/// are opened by the closure inside this worker; logical allowances are unchanged.
+pub(crate) fn run_on_owned_stack(
+    operation: impl FnOnce() -> CliResult<()> + Send + 'static,
+) -> CliResult<()> {
+    let worker = std::thread::Builder::new()
+        .name("contextdb-owned-cli".into())
+        .stack_size(OWNED_WORKER_STACK_BYTES)
+        .spawn(operation)
+        .map_err(|_| {
+            CliError::from(ServiceError::new(
+                ErrorCode::Unavailable,
+                "owned CLI worker could not start",
+                false,
+            ))
+        })?;
+    worker.join().map_err(|_| {
+        CliError::from(ServiceError::new(
+            ErrorCode::Unavailable,
+            "owned CLI worker panicked; inspect retained operation state before continuing",
+            false,
+        ))
+    })?
 }
 
 pub(crate) fn run(path: &Path, config_path: &Path, start: bool) -> CliResult<()> {
@@ -543,4 +569,44 @@ fn emit(value: &serde_json::Value) -> CliResult<()> {
         .write_all(b"\n")
         .and_then(|()| output.flush())
         .map_err(|_| invalid("conversation response cannot be acknowledged"))
+}
+
+#[cfg(test)]
+mod stack_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn owned_worker_joins_typed_errors_and_unwinds_before_reporting_a_panic() {
+        let error = run_on_owned_stack(|| {
+            Err(ServiceError::new(
+                ErrorCode::IndexTooStale,
+                "retained source admission refused",
+                false,
+            )
+            .into())
+        })
+        .expect_err("worker returns the genuine typed error");
+        assert_eq!(error.0.code, ErrorCode::IndexTooStale);
+        assert!(!error.0.retryable);
+        struct Dropped(Arc<AtomicBool>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let observation = dropped.clone();
+        let error = run_on_owned_stack(move || {
+            let _guard = Dropped(observation);
+            panic!("controlled owned worker panic");
+        })
+        .expect_err("panic is not a successful operation or an implicit retry");
+        assert_eq!(error.0.code, ErrorCode::Unavailable);
+        assert!(!error.0.retryable);
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "join waits for worker resource unwinding"
+        );
+    }
 }

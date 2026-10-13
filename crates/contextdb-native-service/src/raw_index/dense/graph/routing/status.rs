@@ -2,6 +2,7 @@
 
 use super::super::prefix_segments_v2::types as interval_types;
 use super::super::prefix_v2::types as prefix_types;
+use super::query::{RoutedPointBase, RoutedPointDirectory};
 use super::*;
 use crate::raw_index::retained_generations;
 use serde::{Deserialize, Serialize};
@@ -121,25 +122,14 @@ impl NativeService {
             _ => return Err(integrity("routed status lost its current dense target")),
         }
 
-        let base = if generation.dense_prefix_base.is_some() {
-            let accepted =
-                self.accepted_prefix_base(&snapshot, &workspace, generation.number, parent)?;
-            self.check_prefix_generation_binding(
-                &snapshot, &workspace, generation, &accepted, parent,
-            )?;
-            parent.charge(1, KEY_BYTES).map_err(budget_error)?;
-            let live: prefix_types::DensePrefixBaseReceiptV2 = self
-                .prefix_read(
-                    &snapshot,
-                    &self.keyspaces.continuous,
-                    &prefix_types::receipt_key(&workspace, generation.number)?,
-                    parent,
-                )?
-                .ok_or_else(|| integrity("routed status live prefix base absent"))?;
-            if live != accepted {
-                return Err(integrity("routed status live prefix base differs"));
-            }
-            Some(accepted)
+        let admitted_base = if generation.dense_prefix_base.is_some() {
+            Some(self.routed_point_base(
+                &snapshot,
+                &workspace,
+                generation,
+                &observed.world,
+                parent,
+            )?)
         } else {
             parent.charge(2, KEY_BYTES * 2).map_err(budget_error)?;
             self.routed_status_absent(
@@ -157,15 +147,18 @@ impl NativeService {
             None
         };
 
-        let directory = if generation.dense_prefix_segments.is_some() {
+        let admitted_directory = if generation.dense_prefix_segments.is_some() {
             Some(
-                self.accepted_current_prefix_segment(
+                self.routed_point_directory(
                     &snapshot,
-                    &context.request.workspace_id,
+                    &workspace,
                     generation,
+                    &observed.world,
+                    admitted_base
+                        .as_ref()
+                        .ok_or_else(|| integrity("routed status directory lost its base"))?,
                     parent,
-                )?
-                .directory,
+                )?,
             )
         } else {
             parent.charge(2, KEY_BYTES * 2).map_err(budget_error)?;
@@ -184,31 +177,10 @@ impl NativeService {
             None
         };
 
-        let covered = if let Some(directory) = &directory {
-            let (receipt, manifest) = self.prefix_dense_target_binding(
-                &snapshot,
-                &workspace,
-                &directory.head.covered_dense,
-                parent,
-            )?;
-            if manifest != directory.head.covered {
-                return Err(integrity("routed status covered directory target differs"));
-            }
-            Some(receipt)
-        } else if let Some(base) = &base {
-            let (receipt, manifest) = self.prefix_dense_target_binding(
-                &snapshot,
-                &workspace,
-                &base.manifest.target,
-                parent,
-            )?;
-            if manifest != base.manifest.prefix {
-                return Err(integrity("routed status covered base target differs"));
-            }
-            Some(receipt)
-        } else {
-            None
-        };
+        let covered = admitted_directory
+            .as_ref()
+            .map(|directory| &directory.covered)
+            .or_else(|| admitted_base.as_ref().map(|base| &base.target));
 
         let router = if let Some(root) = &generation.dense_directory_router {
             Some(self.routed_point_router(
@@ -239,9 +211,11 @@ impl NativeService {
                 &snapshot,
                 &workspace,
                 generation,
-                base.as_ref()
+                admitted_base
+                    .as_ref()
                     .ok_or_else(|| integrity("routed status router lost its base"))?,
                 router,
+                admitted_directory.as_ref(),
                 parent,
             )?
         } else {
@@ -251,17 +225,16 @@ impl NativeService {
             let accepted_router = router
                 .as_ref()
                 .ok_or_else(|| integrity("routed status matching router absent"))?;
-            let covered = covered
-                .as_ref()
-                .ok_or_else(|| integrity("routed status matching router lost coverage"))?;
+            let covered =
+                covered.ok_or_else(|| integrity("routed status matching router lost coverage"))?;
             parent.charge(1, 8192).map_err(budget_error)?;
             if accepted_router.manifest.covered != covered.manifest()? {
                 return Err(integrity("routed status matching router endpoint differs"));
             }
-            if let Some(directory) = &directory {
+            if let Some(directory) = &admitted_directory {
                 let router = &accepted_router.manifest;
-                if router.covered_dense != directory.head.covered_dense
-                    || router.ending != directory.head.ending
+                if router.covered_dense != directory.publication.directory.head.covered_dense
+                    || router.ending != directory.publication.directory.head.ending
                 {
                     return Err(integrity("routed status matching fine ending differs"));
                 }
@@ -272,6 +245,13 @@ impl NativeService {
             receipt.raw_through == generation.through
                 && receipt.raw_sources == generation.projected_sources
         });
+        if let Some(covered) = covered {
+            let bytes = segments::crypto::metered_json_len(covered, parent, ROW_BYTES)?;
+            parent
+                .charge(bytes as u64 + 1, bytes as u64 * 16 + 4096)
+                .map_err(budget_error)?;
+        }
+        let covered = covered.cloned();
         parent.charge(1, 8192).map_err(budget_error)?;
         let result = NativeRoutedMaintenanceTarget {
             generation: generation.number,
@@ -280,8 +260,8 @@ impl NativeService {
             raw_sources: generation.projected_sources,
             authorization_epoch: generation.authorization_epoch,
             dense,
-            base,
-            directory,
+            base: admitted_base.map(|base| base.receipt),
+            directory: admitted_directory.map(|directory| directory.publication.directory),
             directory_ref: generation.dense_prefix_segments.clone(),
             covered,
             router,
@@ -450,13 +430,18 @@ impl NativeService {
         parent.check().map_err(budget_error)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Same-snapshot admitted base/directory targets avoid repeating native point proofs"
+    )]
     fn routed_status_router_coverage<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,
         generation: &Generation,
-        base: &prefix_types::DensePrefixBaseReceiptV2,
+        base: &RoutedPointBase,
         router: &DirectoryRouterReceiptV1,
+        directory: Option<&RoutedPointDirectory>,
         parent: &mut QueryBudget,
     ) -> ServiceResult<bool> {
         let manifest = &router.manifest;
@@ -465,8 +450,7 @@ impl NativeService {
             .dense
             .as_ref()
             .ok_or_else(|| integrity("routed status router lost Dense"))?;
-        let base_ref = self.prefix_segment_base_reference(snapshot, workspace, base, parent)?;
-        if manifest.coverage.base != base_ref
+        if manifest.coverage.base != base.reference
             || raw.generation != generation.number
             || raw.custody_version != generation.custody_version
             || raw.analyzer != generation.analyzer
@@ -496,8 +480,24 @@ impl NativeService {
             }
             _ => {}
         }
-        let (covered_receipt, covered_manifest) =
-            self.prefix_dense_target_binding(snapshot, workspace, &manifest.covered_dense, parent)?;
+        let (accepted_covered, covered_ref) =
+            directory.map_or((&base.target, &base.receipt.manifest.target), |directory| {
+                (
+                    &directory.covered,
+                    &directory.publication.directory.head.covered_dense,
+                )
+            });
+        let historical;
+        let covered_receipt = if manifest.covered_dense == *covered_ref {
+            accepted_covered
+        } else {
+            historical = self
+                .prefix_dense_target_binding(snapshot, workspace, &manifest.covered_dense, parent)?
+                .0;
+            &historical
+        };
+        parent.charge(1, 8192).map_err(budget_error)?;
+        let covered_manifest = covered_receipt.manifest()?;
         let covered = &manifest.covered;
         if &covered_manifest != covered
             || covered_receipt.generation != generation.number
@@ -520,7 +520,8 @@ impl NativeService {
         }
         self.verify_prefix_segment_capture_boundary(snapshot, workspace, &manifest.ending, parent)?;
         if manifest.coverage.directory.is_none()
-            && (covered != &base.manifest.prefix || manifest.covered_dense != base.manifest.target)
+            && (covered != &base.receipt.manifest.prefix
+                || manifest.covered_dense != base.receipt.manifest.target)
         {
             return Err(integrity("routed status base-only router target differs"));
         }

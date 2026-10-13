@@ -995,6 +995,15 @@ Only these explicit routed stages use the declared offline allowance of 250M
 work, 8 GiB logical bytes and 180 seconds, bound into the routed configuration.
 Each stage shares one parent through all projections and publications; normal
 reader steps retain their existing 2M/512MiB allowance.
+Both owned CLI commands run on a joined worker with an explicit 8 MiB physical
+stack; native IO, token accounting, logical budgets and configuration bytes are
+unchanged. A worker failure requires inspection of retained operation state.
+On Windows 10+, the pinned encoder starts atomically inside an unnamed
+kill-on-close job. Owner exit closes the job, including on an abrupt process
+failure. The small `contextdb-windows-job` crate contains the Win32 boundary;
+the runtime keeps its unsafe-code prohibition. Job setup failures refuse launch
+without an unmanaged fallback. Only explicit OS environment paths and null
+standard handles pass to the child; normal shutdown keeps its caller budget.
 Raw and router stages need no encoder. Seal first recovers the actual pending
 Dense target; otherwise it projects at most four whole sources. Each exact
 publication request is emitted before native acceptance and can be retained for
@@ -1005,8 +1014,12 @@ serving permission or source-availability claim.
 
 Before each reader step, the routed hook advances raw work and checks current
 coverage/profile plus a conservative raw-to-covered cutoff capacity bound. It
-projects at most one batch of four whole sources under the same parent, reserving
-64 possible spans per source. Remaining lag, exhausted capacity or a stale router
+projects at most eight batches of up to four CaptureWork items under the same
+parent. Work includes controls that produce no vectors. Each batch rechecks the
+accepted roots/profile and reserves 64 possible spans per remaining source slot;
+actual new spans reduce the next batch's capacity. Routed v2 binds this cadence
+and cannot silently replace a retained v1 run. Remaining lag, exhausted capacity,
+nonprogress or a stale router
 requires explicit maintenance. The hook never seals intervals or rebuilds the
 router. Pause the owner, seal, rebuild the router explicitly, then resume the same
 bound configuration; maintenance does not clear an unknown model outcome. Legacy

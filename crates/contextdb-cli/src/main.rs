@@ -967,7 +967,9 @@ fn run(cli: Cli) -> CliResult<()> {
             resume: _,
         } => {
             require_codex_operator_output(format)?;
-            owned_conversation::run(&path, &config, start)?;
+            owned_conversation::run_on_owned_stack(move || {
+                owned_conversation::run(&path, &config, start)
+            })?;
         }
         #[cfg(feature = "mcp")]
         Command::OwnedHybridIndex {
@@ -978,7 +980,9 @@ fn run(cli: Cli) -> CliResult<()> {
             routed_stage,
         } => {
             require_codex_operator_output(format)?;
-            owned_conversation::index(&path, &config, bootstrap, routed_stage)?;
+            owned_conversation::run_on_owned_stack(move || {
+                owned_conversation::index(&path, &config, bootstrap, routed_stage)
+            })?;
         }
         #[cfg(feature = "mcp")]
         Command::CodexBackup { path, output } => {

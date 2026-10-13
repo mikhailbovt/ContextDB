@@ -66,33 +66,17 @@ impl NativeService {
         }
         match path {
             DirectoryRouterFinePathV1::Base { base } => {
-                let receipt = self.accepted_prefix_base(
-                    snapshot,
-                    view.workspace(),
-                    view.generation().number,
-                    parent,
-                )?;
-                self.check_prefix_generation_binding(
-                    snapshot,
-                    view.workspace(),
-                    view.generation(),
-                    &receipt,
-                    parent,
-                )?;
-                if self.prefix_segment_base_reference(
-                    snapshot,
-                    view.workspace(),
-                    &receipt,
-                    parent,
-                )? != *base
-                    || &receipt != view.base()
-                {
+                if *base != view.router().manifest.coverage.base {
                     return Err(integrity(
                         "routed selected base differs from genuine native acceptance",
                     ));
                 }
+                let bytes = metered_json_len(view.base(), parent, MAX_PUBLICATION_BYTES)?;
+                parent
+                    .charge(bytes as u64 + 1, bytes as u64 * 16 + 4096)
+                    .map_err(budget_error)?;
                 Ok(VerifiedRoutedFinePath::Base {
-                    receipt,
+                    receipt: view.base().clone(),
                     path: path.clone(),
                 })
             }
@@ -102,20 +86,32 @@ impl NativeService {
                 receipt_digest,
                 content_digest,
             } => {
-                let accepted = self.accepted_prefix_segment_for_ordinal(
-                    snapshot,
-                    view.workspace(),
-                    view.generation().number,
-                    *ordinal,
-                    parent,
-                )?;
-                self.check_prefix_segment_generation_binding(
-                    snapshot,
-                    view.workspace(),
-                    view.generation(),
-                    &accepted,
-                    parent,
-                )?;
+                let accepted = if let Some(current) = view
+                    .current_directory()
+                    .filter(|current| current.delta.manifest.ordinal == *ordinal)
+                {
+                    let bytes = metered_json_len(current, parent, MAX_PUBLICATION_BYTES)?;
+                    parent
+                        .charge(bytes as u64 + 1, bytes as u64 * 16 + 4096)
+                        .map_err(budget_error)?;
+                    current.clone()
+                } else {
+                    let accepted = self.accepted_prefix_segment_for_ordinal(
+                        snapshot,
+                        view.workspace(),
+                        view.generation().number,
+                        *ordinal,
+                        parent,
+                    )?;
+                    self.check_prefix_segment_generation_binding(
+                        snapshot,
+                        view.workspace(),
+                        view.generation(),
+                        &accepted,
+                        parent,
+                    )?;
+                    accepted
+                };
                 let reference =
                     self.prefix_publication_ref(snapshot, accepted.delta.global_commit, parent)?;
                 let bytes = metered_encode(&accepted.delta, parent, MAX_PUBLICATION_BYTES)?;

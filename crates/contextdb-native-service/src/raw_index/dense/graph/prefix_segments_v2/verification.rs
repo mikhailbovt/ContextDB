@@ -4,7 +4,7 @@ use super::super::prefix_v2::types::DensePrefixBaseReceiptV2;
 use super::super::prefix_v2::verification::decode_allowance;
 use super::*;
 
-pub(super) fn seal_request_digest(
+pub(in crate::raw_index::dense::graph) fn seal_request_digest(
     database: &str,
     workspace: &str,
     request: &PrefixSegmentSealRequestV2,

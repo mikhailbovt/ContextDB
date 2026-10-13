@@ -99,7 +99,7 @@ impl HybridConfig {
         let routed = self.limits.routed.is_some();
         Ok(HybridSettingsBinding {
             profile: if routed {
-                "contextdb.cli-owned-routed-hybrid-settings.v1"
+                "contextdb.cli-owned-routed-hybrid-settings.v2"
             } else {
                 "contextdb.cli-owned-hybrid-settings.v1"
             },

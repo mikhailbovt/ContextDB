@@ -194,7 +194,7 @@ fn routed_binding_is_distinct_and_absent_routing_keeps_hybrid_bytes() {
         .expect("canonical routed JSON");
     assert_eq!(
         bound[1]["automatic_hybrid"]["profile"],
-        "contextdb.cli-owned-routed-hybrid-settings.v1"
+        "contextdb.cli-owned-routed-hybrid-settings.v2"
     );
     assert_eq!(
         bound[1]["automatic_hybrid"]["preparation"],
@@ -202,7 +202,7 @@ fn routed_binding_is_distinct_and_absent_routing_keeps_hybrid_bytes() {
     );
     assert_eq!(
         bound[1]["automatic_hybrid"]["projection_limits"],
-        json!([4, 1])
+        json!([4, 8])
     );
     assert_eq!(
         bound[1]["automatic_hybrid"]["maintenance"],

@@ -435,6 +435,7 @@ dependencies = [
  "contextdb-native-service",
  "contextdb-recall",
  "contextdb-service",
+ "contextdb-windows-job",
  "serde",
  "serde_json",
  "sha2",
@@ -970,6 +971,13 @@ dependencies = [
  "contextdb-storage",
  "redb",
  "tempfile",
+]
+
+[[package]]
+name = "contextdb-windows-job"
+version = "0.2.0-alpha.3"
+dependencies = [
+ "windows-sys",
 ]
 
 [[package]]

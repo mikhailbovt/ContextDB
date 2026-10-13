@@ -28,7 +28,7 @@
   ],
   "canonical_repository": "https://github.com/mikhailbovt/ContextDB",
   "cargo": {
-    "cargo_lock_sha256": "0484c228958ad4624e4d072e5d342ebdf12e07bddaf648e71ec7417593250b02",
+    "cargo_lock_sha256": "2c2a0dd28c20aef4cc0360c611286fde9d49c5ac6c1d5cbf592d104f3d4b9a50",
     "default_features": false,
     "dependency_kinds": [
       "normal",

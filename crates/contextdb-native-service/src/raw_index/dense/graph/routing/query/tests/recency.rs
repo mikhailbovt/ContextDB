@@ -1,6 +1,6 @@
 //! Authentic older rows still need a current accepted dense-head binding.
 use super::*;
-use contextdb_service::TokenizedText;
+use contextdb_service::{CognitiveMemoryService, TokenizedText, VerifyRequest};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug)]
@@ -72,6 +72,110 @@ fn admitted_callbacks(
     measured.validate(encoder.profile(), EmbeddingTextKind::Query, QUERY, parent)?;
     let embedded = encoder.embed(EmbeddingTextKind::Query, QUERY, parent)?;
     embedded.validate(encoder.profile(), EmbeddingTextKind::Query, QUERY, parent)
+}
+
+#[test]
+fn reused_opaque_view_refuses_changed_principal_and_new_dense_before_vector_reads() {
+    let f = fixture();
+    base(&f);
+    router(&f);
+    let (_, view) = f
+        .native
+        .admit_owned_routed_query_embedding_profile(
+            &f.context,
+            f.encoder.profile(),
+            &mut query_budget(),
+        )
+        .expect("genuine owner-minted current view");
+    let embedded = f
+        .encoder
+        .embed(EmbeddingTextKind::Query, QUERY, &mut query_budget())
+        .expect("exact controlled query observation");
+    let mut foreign = f.context.clone();
+    foreign.request.subject_id = contextdb_core::MemorySubjectId::new().to_string();
+    foreign.request.audiences = BTreeSet::from([foreign.request.subject_id.clone()]);
+    assert_eq!(
+        f.native
+            .search_original_spans_routed_in_view(
+                &foreign,
+                QUERY,
+                &embedded,
+                limits(),
+                &view,
+                &mut query_budget(),
+            )
+            .expect_err("opaque admission is bound to its exact principal")
+            .code,
+        ErrorCode::IndexTooStale
+    );
+
+    capture(&f, 4, "A genuinely newer sapphire orbital observation");
+    let advanced = project(&f, &f.encoder);
+    assert!(advanced.global_commit > view.current_dense_ref().global_commit);
+    let snapshot = f
+        .native
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("current source vectors");
+    let generation = read_generation(&f.native, &f.context, &mut query_budget());
+    assert_eq!(
+        generation.dense_prefix_base,
+        view.generation().dense_prefix_base
+    );
+    assert_eq!(
+        generation.dense_directory_router,
+        view.generation().dense_directory_router
+    );
+    let vectors = snapshot
+        .scan_prefix(
+            &f.native.keyspaces.continuous,
+            format!(
+                "{}dense/vector/",
+                generation_prefix(view.workspace(), generation.number)
+            )
+            .as_bytes(),
+        )
+        .expect("actual original vector rows");
+    assert!(!vectors.is_empty());
+    drop(snapshot);
+    let mut tx = f.native.engine.begin_write().expect("vector-read sentinel");
+    for row in &vectors {
+        tx.put(
+            &f.native.keyspaces.continuous,
+            row.key.clone(),
+            b"invalid vector sentinel".to_vec(),
+        )
+        .expect("damage only actual vector values");
+    }
+    tx.commit(Durability::Sync)
+        .expect("sentinel synchronization");
+    let outcome = f.native.search_original_spans_routed_in_view(
+        &f.context,
+        QUERY,
+        &embedded,
+        limits(),
+        &view,
+        &mut query_budget(),
+    );
+    let mut tx = f
+        .native
+        .engine
+        .begin_write()
+        .expect("restore genuine vector bytes");
+    for row in vectors {
+        tx.put(&f.native.keyspaces.continuous, row.key, row.value)
+            .expect("exact original vector restore");
+    }
+    tx.commit(Durability::Sync)
+        .expect("restore synchronization");
+    assert_eq!(outcome.expect_err("new Dense with unchanged graph roots closes reused admission before any damaged vector read").code,
+        ErrorCode::IndexTooStale);
+    f.native
+        .verify(VerifyRequest {
+            context: f.context.request.clone(),
+            deep: true,
+        })
+        .expect("restored authentic archive remains consistent");
 }
 
 #[test]

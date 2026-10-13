@@ -21,6 +21,9 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+contextdb-windows-job = { version = "0.2.0-alpha.3", path = "../contextdb-windows-job" }
+
 [dev-dependencies]
 contextdb-native-service.workspace = true
 tempfile.workspace = true

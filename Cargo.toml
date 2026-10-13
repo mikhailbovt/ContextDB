@@ -36,6 +36,7 @@ members = [
     "crates/contextdb-storage-memory",
     "crates/contextdb-storage-redb",
     "crates/contextdb-storage-bench",
+    "crates/contextdb-windows-job",
     "examples/embedded-rust",
 ]
 exclude = ["crates/contextdb-storage-rocksdb-bench"]

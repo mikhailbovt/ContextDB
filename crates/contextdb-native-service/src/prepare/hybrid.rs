@@ -134,7 +134,12 @@ impl NativeService {
         self.check_owned_hybrid_guard(&query.guard, budget)?;
         let limits = query.intent().limits;
         let (dense_hits, dense_frontier, dense_observation) = if let Some(routed) = limits.routed {
-            let mut dense = self.search_original_spans_routed(
+            let pinned = query
+                .guard
+                .routed_view
+                .as_ref()
+                .ok_or_else(|| stale("owned routed query admission absent"))?;
+            let mut dense = self.search_original_spans_routed_in_view(
                 &request.context,
                 &query.cues().text,
                 &query.embedded,
@@ -154,13 +159,9 @@ impl NativeService {
                     max_tail_work: limits.tail_work as usize,
                     max_tail_vectors: limits.tail_vectors as usize,
                 },
+                pinned,
                 budget,
             )?;
-            let pinned = query
-                .guard
-                .routed_view
-                .as_ref()
-                .ok_or_else(|| stale("owned routed query admission absent"))?;
             if dense.view_identity != pinned.identity() {
                 return Err(stale("owned routed search differs from the callback view"));
             }

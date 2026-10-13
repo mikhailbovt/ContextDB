@@ -24,6 +24,7 @@ mod selection;
 mod traverse;
 mod view;
 pub(crate) use view::VerifiedRoutedQueryView;
+pub(super) use view::{RoutedPointBase, RoutedPointDirectory};
 
 /// Finite traversal allowances shared by routing, fine paths and fresh vectors.
 #[derive(Clone, Copy, Debug)]
@@ -138,8 +139,8 @@ fn validate_limits(limits: DenseRoutedQueryLimits) -> ServiceResult<()> {
 }
 
 impl NativeService {
-    /// Point-only routing over the complete accepted directory, then selected
-    /// genuine fine paths and a complete fresh interval. No graph is built here.
+    /// Metered recency admission, then bounded routing and genuine fine/fresh
+    /// source reads over the accepted directory. No graph is built here.
     pub fn search_original_spans_routed(
         &self,
         context: &AuthenticatedRequestContext,
@@ -154,7 +155,27 @@ impl NativeService {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         let view = self.routed_query_view(&snapshot, context, parent)?;
-        self.check_routed_query_view(context, &view, parent)?;
+        self.search_original_spans_routed_in_view(
+            context, query_text, embedded, limits, &view, parent,
+        )
+    }
+
+    /// Reuse this owner's opaque admission; every read still checks current roots.
+    pub(crate) fn search_original_spans_routed_in_view(
+        &self,
+        context: &AuthenticatedRequestContext,
+        query_text: &str,
+        embedded: &EmbeddedText,
+        limits: DenseRoutedQueryLimits,
+        view: &VerifiedRoutedQueryView,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<DenseRoutedQueryResult> {
+        validate_limits(limits)?;
+        self.check_routed_query_view(context, view, parent)?;
+        let snapshot = self
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .map_err(storage_error)?;
         embedded.validate(
             &view.current_dense().profile,
             EmbeddingTextKind::Query,
@@ -165,7 +186,7 @@ impl NativeService {
             self,
             &snapshot,
             context,
-            &view,
+            view,
             limits.max_tail_work,
             parent,
         )?;
@@ -190,7 +211,7 @@ impl NativeService {
             self,
             &snapshot,
             context,
-            &view,
+            view,
             embedded,
             coarse_caps,
             limits.coarse_ef_search,
@@ -209,8 +230,8 @@ impl NativeService {
         let mut paths = Vec::with_capacity(selected_paths.len() + 1);
         let mut hits = Vec::new();
         for (index, path) in selected_paths.iter().enumerate() {
-            self.check_routed_query_view(context, &view, parent)?;
-            let admitted = self.resolve_routed_fine_path(&snapshot, &view, path, parent)?;
+            self.check_routed_query_view(context, view, parent)?;
+            let admitted = self.resolve_routed_fine_path(&snapshot, view, path, parent)?;
             parent
                 .charge(coarse.scores.len() as u64 + 1, 0)
                 .map_err(budget_error)?;
@@ -245,7 +266,7 @@ impl NativeService {
                 self,
                 &snapshot,
                 context,
-                &view,
+                view,
                 &admitted,
                 embedded,
                 assigned,
@@ -266,7 +287,7 @@ impl NativeService {
             self,
             &snapshot,
             context,
-            &view,
+            view,
             embedded,
             &fresh,
             assigned,
@@ -277,7 +298,7 @@ impl NativeService {
         let fresh_completion = fresh_path.completion;
         append_hits(&mut hits, found, parent)?;
         paths.push(fresh_path);
-        self.check_routed_query_view(context, &view, parent)?;
+        self.check_routed_query_view(context, view, parent)?;
         let raw_lag = self.tail_raw_lag(
             &snapshot,
             view.workspace(),
@@ -387,7 +408,7 @@ impl NativeService {
             selection_complete,
             paths,
         };
-        self.check_routed_query_view(context, &view, parent)?;
+        self.check_routed_query_view(context, view, parent)?;
         let ledger = ledger.finish()?;
         Ok(DenseRoutedQueryResult {
             hits,

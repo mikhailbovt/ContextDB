@@ -177,8 +177,15 @@ fn fixture(token_bodies: Vec<Vec<u8>>, cancel_after_token: Option<QueryCancellat
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000);
+        // The owned Windows launcher deliberately passes only explicit env.
+        command
+            .env_clear()
+            .env("CONTEXTDB_EMBEDDING_TEST_CHILD", "1");
+        if let Some(value) = std::env::var_os("SystemRoot") {
+            command.env("SystemRoot", value);
+        }
     }
-    let child = command.spawn().expect("harmless owned fixture child");
+    let child = spawn_backend(&mut command).expect("harmless owned fixture child");
     let adapter = OwnedLocalEmbedding {
         profile: TextEmbeddingProfile::qwen3_06b_q8_llama_b10964(ContentDigest::from_bytes(
             [3; 32],

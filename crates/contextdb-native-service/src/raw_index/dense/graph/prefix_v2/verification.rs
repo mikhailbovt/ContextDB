@@ -4,7 +4,8 @@ use super::super::segments::types::AcceptedPublicationRef;
 use super::*;
 use serde::de::DeserializeOwned;
 
-pub(super) const LOCATOR_OPERATION: &str = "raw_span_ann_prefix_locator_v2";
+pub(in crate::raw_index::dense::graph) const LOCATOR_OPERATION: &str =
+    "raw_span_ann_prefix_locator_v2";
 
 /// Only this module can mint the target consumed by complete prefix replay.
 pub(in crate::raw_index::dense::graph) struct VerifiedDensePrefixTarget {
@@ -29,7 +30,7 @@ impl VerifiedDensePrefixTarget {
     }
 }
 
-pub(super) fn request_digest(
+pub(in crate::raw_index::dense::graph) fn request_digest(
     database: &str,
     workspace: &str,
     request: &DensePrefixBaseRequestV2,
@@ -364,7 +365,7 @@ impl NativeService {
         Ok(reference)
     }
 
-    pub(super) fn require_prefix_base_feature<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn require_prefix_base_feature<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         budget: &mut QueryBudget,

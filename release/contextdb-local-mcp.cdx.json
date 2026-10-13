@@ -1225,6 +1225,31 @@
       "version": "0.2.0-alpha.3"
     },
     {
+      "author": "Mikhail Bovt and ContextDB contributors",
+      "bom-ref": "pkg:cargo/contextdb-windows-job@0.2.0-alpha.3",
+      "description": "Isolated Windows owned-process job lifetime boundary",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/mikhailbovt/ContextDB"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "contextdb-windows-job",
+      "purl": "pkg:cargo/contextdb-windows-job@0.2.0-alpha.3",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.0-alpha.3"
+    },
+    {
       "author": "RustCrypto Developers",
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#cpufeatures@0.3.0",
       "description": "Lightweight runtime CPU feature detection for aarch64, loongarch64, and x86/x86_64 targets, with no_std support and support for mobile targets including Android and iOS ",
@@ -4653,6 +4678,7 @@
         "pkg:cargo/contextdb-core@0.2.0-alpha.3",
         "pkg:cargo/contextdb-recall@0.2.0-alpha.3",
         "pkg:cargo/contextdb-service@0.2.0-alpha.3",
+        "pkg:cargo/contextdb-windows-job@0.2.0-alpha.3",
         "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
         "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.151",
         "registry+https://github.com/rust-lang/crates.io-index#sha2@0.11.0"
@@ -4856,6 +4882,12 @@
         "registry+https://github.com/rust-lang/crates.io-index#fjall@3.1.8"
       ],
       "ref": "pkg:cargo/contextdb-storage-fjall@0.2.0-alpha.3"
+    },
+    {
+      "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#windows-sys@0.61.2"
+      ],
+      "ref": "pkg:cargo/contextdb-windows-job@0.2.0-alpha.3"
     },
     {
       "dependsOn": [],
@@ -5565,7 +5597,7 @@
         },
         {
           "name": "contextdb:dependency-graph-sha256",
-          "value": "e938a28e3cd7d00e39800db2b3cc9e7e86f165683dbd2c76855cd61563ce44b1"
+          "value": "e470b7bf169c994c86fc0f9eeb56a31f609fc158934dabbce9db398bd2c99b60"
         }
       ],
       "purl": "pkg:cargo/contextdb-cli@0.2.0-alpha.3",

@@ -16,9 +16,9 @@ pub(super) const BATCH_EVENTS: u32 = 256;
 pub(super) const HYBRID_PROFILE: &str = "keep-uninterpreted+native-bm25-dense-tail-advance.v1";
 pub(super) const HYBRID_MAX_BATCHES: u8 = 8;
 pub(super) const HYBRID_BATCH_EVENTS: u32 = 64;
-pub(super) const ROUTED_PROFILE: &str = "keep-uninterpreted+native-bm25-routed-tail-once.v1";
+pub(super) const ROUTED_PROFILE: &str = "keep-uninterpreted+native-bm25-routed-tail-bounded.v2";
 pub(super) const ROUTED_BATCH_EVENTS: u32 = 4;
-pub(super) const ROUTED_MAX_BATCHES: u8 = 1;
+pub(super) const ROUTED_MAX_BATCHES: u8 = 8;
 
 mod routed;
 

@@ -11,6 +11,12 @@ use super::super::verification::directory_router_request_digest;
 use super::super::*;
 use std::mem::size_of;
 
+#[path = "points.rs"]
+mod points;
+pub(in crate::raw_index::dense::graph::routing) use points::{
+    RoutedPointBase, RoutedPointDirectory,
+};
+
 pub(crate) struct VerifiedRoutedQueryView {
     workspace: String,
     generation: Generation,
@@ -33,6 +39,9 @@ impl VerifiedRoutedQueryView {
     }
     pub(crate) fn base(&self) -> &DensePrefixBaseReceiptV2 {
         &self.base
+    }
+    pub(super) fn current_directory(&self) -> Option<&PrefixSegmentPublicationV2> {
+        self.head.as_ref()
     }
     pub(crate) fn router(&self) -> &DirectoryRouterReceiptV1 {
         &self.router
@@ -136,32 +145,52 @@ impl NativeService {
             ));
         }
         let router = self.routed_point_router(snapshot, &workspace, number, root, parent)?;
-        let base = self.accepted_prefix_base(snapshot, &workspace, number, parent)?;
-        self.check_prefix_generation_binding(snapshot, &workspace, &generation, &base, parent)?;
-        let base_ref = self.prefix_segment_base_reference(snapshot, &workspace, &base, parent)?;
-        if router.manifest.coverage.base != base_ref
+        let admitted_base =
+            self.routed_point_base(snapshot, &workspace, &generation, &world, parent)?;
+        let base = &admitted_base.receipt;
+        if router.manifest.coverage.base != admitted_base.reference
             || router.manifest.coverage.directory != generation.dense_prefix_segments
         {
             return Err(stale_index());
         }
-        let head = if generation.dense_prefix_segments.is_some() {
-            Some(self.accepted_current_prefix_segment(
+        let admitted_directory = if generation.dense_prefix_segments.is_some() {
+            Some(self.routed_point_directory(
                 snapshot,
-                &context.request.workspace_id,
+                &workspace,
                 &generation,
+                &world,
+                &admitted_base,
                 parent,
             )?)
         } else {
             None
         };
+        if admitted_directory
+            .as_ref()
+            .map(|directory| &directory.reference)
+            != generation.dense_prefix_segments.as_ref()
+        {
+            return Err(integrity(
+                "routed admitted directory differs from current head",
+            ));
+        }
         let covered = &router.manifest.covered;
-        let (covered_receipt, covered_manifest) = self.prefix_dense_target_binding(
-            snapshot,
-            &workspace,
-            &router.manifest.covered_dense,
-            parent,
-        )?;
+        let head = admitted_directory
+            .as_ref()
+            .map(|directory| &directory.publication);
+        let (covered_receipt, covered_ref) = admitted_directory.as_ref().map_or(
+            (&admitted_base.target, &base.manifest.target),
+            |directory| {
+                (
+                    &directory.covered,
+                    &directory.publication.directory.head.covered_dense,
+                )
+            },
+        );
+        parent.charge(1, 8192).map_err(budget_error)?;
+        let covered_manifest = covered_receipt.manifest()?;
         if &covered_manifest != covered
+            || router.manifest.covered_dense != *covered_ref
             || covered_receipt.generation != number
             || covered_receipt.authorization_epoch != generation.authorization_epoch
         {
@@ -173,7 +202,7 @@ impl NativeService {
             &router.manifest.ending,
             parent,
         )?;
-        match &head {
+        match head {
             Some(head)
                 if head.directory.head.covered != *covered
                     || head.directory.head.covered_dense != router.manifest.covered_dense
@@ -197,8 +226,19 @@ impl NativeService {
             )?
             .ok_or_else(stale_index)?;
         let current_ref = self.prefix_publication_ref(snapshot, current.global_commit, parent)?;
-        let (accepted_current, current_manifest) =
-            self.prefix_dense_target_binding(snapshot, &workspace, &current_ref, parent)?;
+        let current_manifest = if current_ref == *covered_ref {
+            if current != *covered_receipt {
+                return Err(integrity("routed current/covered dense receipt differs"));
+            }
+            covered_manifest
+        } else {
+            let (accepted, manifest) =
+                self.prefix_dense_target_binding(snapshot, &workspace, &current_ref, parent)?;
+            if accepted != current {
+                return Err(integrity("routed current dense receipt differs"));
+            }
+            manifest
+        };
         let latest = generation.dense.as_ref().ok_or_else(stale_index)?;
         self.check_routed_projection_recency(
             snapshot,
@@ -210,8 +250,7 @@ impl NativeService {
             parent,
         )?;
         let raw = &router.manifest.raw;
-        if accepted_current != current
-            || &current_manifest != latest
+        if &current_manifest != latest
             || current.generation != number
             || current.authorization_epoch != generation.authorization_epoch
             || raw.generation != number
@@ -317,9 +356,9 @@ impl NativeService {
             workspace,
             generation,
             world,
-            base,
+            base: admitted_base.receipt,
             router,
-            head,
+            head: admitted_directory.map(|directory| directory.publication),
             current_receipt: current,
             current_dense_ref: current_ref,
             principal,
