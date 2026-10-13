@@ -7,6 +7,10 @@ use super::*;
 use crate::raw_index::retained_generations;
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod progress;
+mod witness;
+pub(crate) use progress::NativeStatusAdmissionSeed;
+
 #[cfg(test)]
 mod tests;
 
@@ -58,6 +62,63 @@ struct StatusSnapshot {
     generation: Generation,
 }
 
+struct StatusProof {
+    observed: StatusSnapshot,
+    current: Option<DenseProjectionReceipt>,
+    current_ref: Option<AcceptedPublicationRef>,
+    base: Option<RoutedPointBase>,
+    directory: Option<RoutedPointDirectory>,
+    router: Option<DirectoryRouterReceiptV1>,
+    router_matches_directory: bool,
+}
+
+impl StatusProof {
+    fn covered(&self) -> Option<&DenseProjectionReceipt> {
+        self.directory
+            .as_ref()
+            .map(|directory| &directory.covered)
+            .or_else(|| self.base.as_ref().map(|base| &base.target))
+    }
+
+    fn into_target(
+        self,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<(StatusSnapshot, NativeRoutedMaintenanceTarget)> {
+        let generation = &self.observed.generation;
+        let dense_matches_raw = self.current.as_ref().is_some_and(|receipt| {
+            receipt.raw_through == generation.through
+                && receipt.raw_sources == generation.projected_sources
+        });
+        let covered = self.covered();
+        if let Some(covered) = covered {
+            let bytes = segments::crypto::metered_json_len(covered, parent, ROW_BYTES)?;
+            parent
+                .charge(bytes as u64 + 1, bytes as u64 * 16 + 4096)
+                .map_err(budget_error)?;
+        }
+        let covered = covered.cloned();
+        parent.charge(1, 8192).map_err(budget_error)?;
+        let result = NativeRoutedMaintenanceTarget {
+            generation: generation.number,
+            known_at: self.observed.world.watermarks.journal,
+            raw_through: generation.through,
+            raw_sources: generation.projected_sources,
+            authorization_epoch: generation.authorization_epoch,
+            dense: self.current,
+            base: self.base.map(|base| base.receipt),
+            directory: self
+                .directory
+                .map(|directory| directory.publication.directory),
+            directory_ref: generation.dense_prefix_segments.clone(),
+            covered,
+            router: self.router,
+            router_matches_directory: self.router_matches_directory,
+            dense_matches_raw,
+        };
+        Ok((self.observed, result))
+    }
+}
+
 impl NativeService {
     /// Read authenticated current maintenance metadata without source or ANN reads.
     ///
@@ -88,44 +149,60 @@ impl NativeService {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         let observed = self.routed_status_snapshot(&snapshot, context, &workspace, parent)?;
+        let proof = self.routed_status_proof(&snapshot, &snapshot, &workspace, observed, parent)?;
+        let (observed, result) = proof.into_target(parent)?;
+        self.routed_status_fence(context, &workspace, &observed, &result, parent)?;
+        parent.check().map_err(budget_error)?;
+        Ok(result)
+    }
+
+    fn routed_status_proof<S: ReadSnapshot, P: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        point_snapshot: &P,
+        workspace: &str,
+        observed: StatusSnapshot,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<StatusProof> {
         let generation = &observed.generation;
-        self.validate_raw_bm25_generation(&snapshot, generation, parent)?;
-        self.validate_dense_generation(&snapshot, &workspace, generation, parent)?;
+        self.validate_raw_bm25_generation(snapshot, generation, parent)?;
+        self.validate_dense_generation(snapshot, workspace, generation, parent)?;
 
         parent.charge(1, KEY_BYTES).map_err(budget_error)?;
         let dense: Option<DenseProjectionReceipt> = self.prefix_read(
-            &snapshot,
+            snapshot,
             &self.keyspaces.continuous,
-            &dense::receipt_key(&workspace, generation.number),
+            &dense::receipt_key(workspace, generation.number),
             parent,
         )?;
-        match (&generation.dense, &dense) {
+        let current_ref = match (&generation.dense, &dense) {
             (Some(latest), Some(receipt)) => {
                 let reference =
-                    self.prefix_publication_ref(&snapshot, receipt.global_commit, parent)?;
+                    self.prefix_publication_ref(snapshot, receipt.global_commit, parent)?;
                 let (accepted, manifest) =
-                    self.prefix_dense_target_binding(&snapshot, &workspace, &reference, parent)?;
+                    self.prefix_dense_target_binding(snapshot, workspace, &reference, parent)?;
                 if &accepted != receipt || &manifest != latest {
                     return Err(integrity("routed status current dense target differs"));
                 }
                 self.check_routed_projection_recency(
-                    &snapshot,
-                    &workspace,
+                    snapshot,
+                    workspace,
                     generation,
                     receipt,
                     &reference,
                     &observed.world,
                     parent,
                 )?;
+                Some(reference)
             }
-            (None, None) => {}
+            (None, None) => None,
             _ => return Err(integrity("routed status lost its current dense target")),
-        }
+        };
 
         let admitted_base = if generation.dense_prefix_base.is_some() {
             Some(self.routed_point_base(
-                &snapshot,
-                &workspace,
+                point_snapshot,
+                workspace,
                 generation,
                 &observed.world,
                 parent,
@@ -133,15 +210,15 @@ impl NativeService {
         } else {
             parent.charge(2, KEY_BYTES * 2).map_err(budget_error)?;
             self.routed_status_absent(
-                &snapshot,
+                point_snapshot,
                 &self.keyspaces.continuous,
-                &prefix_types::receipt_key(&workspace, generation.number)?,
+                &prefix_types::receipt_key(workspace, generation.number)?,
                 parent,
             )?;
             self.routed_status_absent(
-                &snapshot,
+                point_snapshot,
                 &self.keyspaces.idempotency,
-                &prefix_types::retained_locator_key(&workspace, generation.number)?,
+                &prefix_types::retained_locator_key(workspace, generation.number)?,
                 parent,
             )?;
             None
@@ -150,8 +227,8 @@ impl NativeService {
         let admitted_directory = if generation.dense_prefix_segments.is_some() {
             Some(
                 self.routed_point_directory(
-                    &snapshot,
-                    &workspace,
+                    point_snapshot,
+                    workspace,
                     generation,
                     &observed.world,
                     admitted_base
@@ -163,15 +240,15 @@ impl NativeService {
         } else {
             parent.charge(2, KEY_BYTES * 2).map_err(budget_error)?;
             self.routed_status_absent(
-                &snapshot,
+                point_snapshot,
                 &self.keyspaces.continuous,
-                &interval_types::directory_head_key(&workspace, generation.number)?,
+                &interval_types::directory_head_key(workspace, generation.number)?,
                 parent,
             )?;
             self.routed_status_absent(
-                &snapshot,
+                point_snapshot,
                 &self.keyspaces.idempotency,
-                &interval_types::retained_locator_key(&workspace, generation.number, 1)?,
+                &interval_types::retained_locator_key(workspace, generation.number, 1)?,
                 parent,
             )?;
             None
@@ -184,8 +261,8 @@ impl NativeService {
 
         let router = if let Some(root) = &generation.dense_directory_router {
             Some(self.routed_point_router(
-                &snapshot,
-                &workspace,
+                point_snapshot,
+                workspace,
                 generation.number,
                 root,
                 parent,
@@ -193,23 +270,23 @@ impl NativeService {
         } else {
             parent.charge(2, KEY_BYTES * 2).map_err(budget_error)?;
             self.routed_status_absent(
-                &snapshot,
+                point_snapshot,
                 &self.keyspaces.continuous,
-                &head_key(&workspace, generation.number)?,
+                &head_key(workspace, generation.number)?,
                 parent,
             )?;
             self.routed_status_absent(
-                &snapshot,
+                point_snapshot,
                 &self.keyspaces.idempotency,
-                &retained_locator_key(&workspace, generation.number, 1)?,
+                &retained_locator_key(workspace, generation.number, 1)?,
                 parent,
             )?;
             None
         };
         let router_matches_directory = if let Some(router) = &router {
             self.routed_status_router_coverage(
-                &snapshot,
-                &workspace,
+                point_snapshot,
+                workspace,
                 generation,
                 admitted_base
                     .as_ref()
@@ -241,36 +318,15 @@ impl NativeService {
             }
         }
 
-        let dense_matches_raw = dense.as_ref().is_some_and(|receipt| {
-            receipt.raw_through == generation.through
-                && receipt.raw_sources == generation.projected_sources
-        });
-        if let Some(covered) = covered {
-            let bytes = segments::crypto::metered_json_len(covered, parent, ROW_BYTES)?;
-            parent
-                .charge(bytes as u64 + 1, bytes as u64 * 16 + 4096)
-                .map_err(budget_error)?;
-        }
-        let covered = covered.cloned();
-        parent.charge(1, 8192).map_err(budget_error)?;
-        let result = NativeRoutedMaintenanceTarget {
-            generation: generation.number,
-            known_at: observed.world.watermarks.journal,
-            raw_through: generation.through,
-            raw_sources: generation.projected_sources,
-            authorization_epoch: generation.authorization_epoch,
-            dense,
-            base: admitted_base.map(|base| base.receipt),
-            directory: admitted_directory.map(|directory| directory.publication.directory),
-            directory_ref: generation.dense_prefix_segments.clone(),
-            covered,
+        Ok(StatusProof {
+            observed,
+            current: dense,
+            current_ref,
+            base: admitted_base,
+            directory: admitted_directory,
             router,
             router_matches_directory,
-            dense_matches_raw,
-        };
-        self.routed_status_fence(context, &workspace, &observed, &result, parent)?;
-        parent.check().map_err(budget_error)?;
-        Ok(result)
+        })
     }
 
     fn routed_status_snapshot<S: ReadSnapshot>(
@@ -285,6 +341,16 @@ impl NativeService {
         })?;
         let world =
             self.current_directory_router_heads(snapshot, &context.request.workspace_id, parent)?;
+        self.routed_status_index(snapshot, workspace, world, parent)
+    }
+
+    fn routed_status_index<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        workspace: &str,
+        world: crate::WorkspaceState,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<StatusSnapshot> {
         parent
             .charge(2, KEY_BYTES * 2 + 4096)
             .map_err(budget_error)?;

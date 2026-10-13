@@ -348,6 +348,108 @@ fn stale_router_ending_requires_its_own_real_capture_acceptance() {
 }
 
 #[test]
+fn owner_seed_refresh_keeps_real_projection_and_rechecks_retained_primary() {
+    for corrupt_primary in [false, true] {
+        let f = fixture();
+        base(&f);
+        router(&f);
+        let mut tiny = QueryBudget::new(1, 1, Duration::from_secs(30), Default::default());
+        let refused = f.native.routed_status_admission_seed(&f.context, &mut tiny);
+        assert!(matches!(refused, Err(error) if error.code == ErrorCode::BudgetExhausted));
+
+        let seed = f
+            .native
+            .routed_status_admission_seed(&f.context, &mut budget())
+            .expect("complete actual owner seed");
+        let before = seed.target().dense.as_ref().expect("current Dense").through;
+        let current = f
+            .native
+            .project_original_spans(&f.context, &f.encoder, 4, &mut budget())
+            .expect("genuine remaining source projection");
+        assert!(current.through > before && current.caught_up);
+        let workspace = digest_bytes(f.context.request.workspace_id.as_bytes());
+        let reference = read_generation(&f.native, &f.context, &mut budget())
+            .dense_prefix_base
+            .expect("actual certified base reference");
+        let snapshot = f
+            .native
+            .engine
+            .begin_read(SnapshotSelector::Latest)
+            .expect("actual projected snapshot");
+        let original = snapshot
+            .get(
+                &f.native.keyspaces.idempotency,
+                reference.request_digest.as_bytes(),
+            )
+            .expect("read native base primary")
+            .expect("retained accepted primary");
+        drop(snapshot);
+        if corrupt_primary {
+            let mut tx = f
+                .native
+                .engine
+                .begin_write()
+                .expect("immutable control fault");
+            tx.delete(
+                &f.native.keyspaces.idempotency,
+                reference.request_digest.as_bytes().to_vec(),
+            )
+            .expect("remove only the retained base primary after projection");
+            tx.commit(Durability::Sync).expect("durable primary fault");
+        }
+        let outcome =
+            f.native
+                .refresh_routed_status_admission_seed(seed, &f.context, &mut budget());
+        if corrupt_primary {
+            let mut tx = f
+                .native
+                .engine
+                .begin_write()
+                .expect("restore actual primary");
+            tx.put(
+                &f.native.keyspaces.idempotency,
+                reference.request_digest.as_bytes().to_vec(),
+                original,
+            )
+            .expect("restore exact primary bytes");
+            tx.commit(Durability::Sync)
+                .expect("durable primary restoration");
+            assert!(matches!(outcome, Err(error) if error.code == ErrorCode::IndexTooStale));
+        } else {
+            let refreshed = outcome.expect("genuine progress retains complete immutable proof");
+            assert_eq!(refreshed.target().dense.as_ref(), Some(&current));
+            assert!(
+                refreshed.target().router_matches_directory && refreshed.target().dense_matches_raw
+            );
+            let parts = refreshed
+                .into_parts(&f.native, &f.context, &mut budget())
+                .expect("same owner and exact authenticated context consume the seed");
+            assert_eq!(parts.current.as_ref(), Some(&current));
+            assert_eq!(
+                parts
+                    .current_ref
+                    .as_ref()
+                    .expect("genuine native reference")
+                    .global_commit,
+                current.global_commit
+            );
+            assert_eq!(
+                parts.generation.dense.as_ref(),
+                Some(&current.manifest().expect("actual manifest"))
+            );
+            assert_eq!(parts.world.watermarks.journal, status(&f).known_at);
+            assert_eq!(parts.workspace, workspace);
+        }
+        assert!(
+            f.native
+                .verify_native(true)
+                .expect("restored source/native deep verification")
+                .valid
+        );
+    }
+}
+
+#[test]
 fn status_requires_operator_processing_capability_and_the_same_parent() {
     let f = fixture();
     let mut denied = f.context.clone();

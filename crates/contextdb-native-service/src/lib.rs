@@ -87,6 +87,7 @@ pub use payload::{
     CAPTURE_MAX_PAYLOAD_BYTES, CAPTURE_MAX_REQUEST_PARTS, NativePayloadKeyInventory,
     NativePayloadPruningProgress,
 };
+pub use prepare::NativeRoutedPreparationTimings;
 pub use raw_index::dense::graph::prefix_segments_v2::types::{
     PrefixDeltaManifestV2, PrefixDeltaReceiptV2, PrefixSegmentDirectoryHeadV2,
     PrefixSegmentDirectoryReceiptV2, PrefixSegmentDirectoryRefV2, PrefixSegmentPublicationV2,

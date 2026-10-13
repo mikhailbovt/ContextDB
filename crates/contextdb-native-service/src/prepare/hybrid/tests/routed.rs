@@ -54,6 +54,67 @@ fn check_routed_envelope(envelope: &RouterEnvelope, original: ObservationId) {
 }
 
 #[test]
+fn native_routed_composite_refuses_wrong_owned_call_and_request_before_projection() {
+    let f = routed_fixture();
+    let (request, mut intent) = refusals::pending(&f);
+    intent.limits = routed_settings(Arc::clone(&f.encoder))
+        .automatic_hybrid
+        .expect("routed")
+        .limits;
+    let mut original = crate::capture::tests::request(
+        25,
+        "Unprojected permitted source remains untouched on refusal.",
+    );
+    original.context = f.context.clone();
+    original.event.session_id = Some(f.identity.session_id);
+    f.native
+        .append_event(original)
+        .expect("genuine pending source work");
+    let forwards = f.encoder.source_forwards.load(Ordering::SeqCst);
+    let sequence = f
+        .native
+        .engine
+        .begin_read(SnapshotSelector::Latest)
+        .expect("before")
+        .sequence();
+    for wrong_call in [false, true] {
+        let mut current = request.clone();
+        let mut declared = intent.clone();
+        if wrong_call {
+            declared.call_id = ModelCallId::new();
+        } else {
+            current.explicit_memory_request = true;
+        }
+        let mut timings = NativeRoutedPreparationTimings::default();
+        let error = f
+            .native
+            .prepare_context_with_routed_maintenance(
+                current,
+                declared,
+                &ReferenceTokenizer,
+                &ReferenceOutgoingEncoder(&ReferenceTokenizer),
+                f.encoder.as_ref(),
+                &mut budget(),
+                &mut timings,
+            )
+            .expect_err("current owned admission must precede maintenance callbacks");
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        assert_eq!(timings.prepare_micros, 0);
+        assert_eq!(f.encoder.source_forwards.load(Ordering::SeqCst), forwards);
+        assert_eq!(f.encoder.measurements.load(Ordering::SeqCst), 0);
+        assert_eq!(f.encoder.query_forwards.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            f.native
+                .engine
+                .begin_read(SnapshotSelector::Latest)
+                .expect("after")
+                .sequence(),
+            sequence
+        );
+    }
+}
+
+#[test]
 fn encrypted_owned_routed_prepares_each_model_step_after_registered_tool_and_cold_resume() {
     let f = routed_fixture();
     let reader = Reader::new();
@@ -77,7 +138,7 @@ fn encrypted_owned_routed_prepares_each_model_step_after_registered_tool_and_col
         )
         .expect("captured genuine user input");
     let fence = OwnerDispatchFence::new(Arc::clone(&f.native));
-    let hook = Preparation {
+    let hook = RoutedPreparation {
         native: Arc::clone(&f.native),
         encoder: Arc::clone(&f.encoder),
     };
@@ -224,7 +285,7 @@ fn encrypted_owned_routed_stale_coverage_refuses_before_any_tokenizer_or_query_f
     f.native
         .append_event(original)
         .expect("new permitted archive original");
-    let hook = Preparation {
+    let hook = RoutedPreparation {
         native: Arc::clone(&f.native),
         encoder: Arc::clone(&f.encoder),
     };
@@ -297,7 +358,7 @@ fn encrypted_owned_routed_revocation_after_tokenization_prevents_query_inference
         Some((Arc::clone(&f.native), f.context.clone(), f.copper));
     f.encoder.revoke_after_measure.store(true, Ordering::SeqCst);
     let fence = OwnerDispatchFence::new(Arc::clone(&f.native));
-    let hook = Preparation {
+    let hook = RoutedPreparation {
         native: Arc::clone(&f.native),
         encoder: Arc::clone(&f.encoder),
     };
@@ -433,7 +494,7 @@ fn encrypted_owned_routed_root_republication_before_capture_and_dispatch_refuses
         runtime
             .accept_user("Find ARCHIVE_COPPER.".into(), now(), &mut budget())
             .expect("actual user");
-        let hook = Preparation {
+        let hook = RoutedPreparation {
             native: Arc::clone(&f.native),
             encoder: Arc::clone(&f.encoder),
         };

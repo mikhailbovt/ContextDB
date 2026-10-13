@@ -19,6 +19,19 @@ pub(in crate::raw_index::dense::graph::routing) use points::{
     RoutedPointBase, RoutedPointDirectory,
 };
 
+struct RoutedServingMetadata {
+    workspace: String,
+    state: IndexState,
+    generation: Generation,
+    world: crate::WorkspaceState,
+    admitted_base: RoutedPointBase,
+    admitted_directory: Option<RoutedPointDirectory>,
+    router: DirectoryRouterReceiptV1,
+    current: DenseProjectionReceipt,
+    current_ref: AcceptedPublicationRef,
+    head_rows: Option<prefix_segments_v2::heads::CertifiedCurrentHeadRows>,
+}
+
 pub(crate) struct VerifiedRoutedQueryView {
     workspace: String,
     generation: Generation,
@@ -73,6 +86,182 @@ impl VerifiedRoutedQueryView {
 }
 
 impl NativeService {
+    pub(crate) fn routed_query_view_from_status_seed(
+        &self,
+        seed: status::NativeStatusAdmissionSeed<'_>,
+        context: &AuthenticatedRequestContext,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<crate::prepare::routed::RoutedPreparationAdmission> {
+        if !seed.target().router_matches_directory {
+            return Err(stale_index());
+        }
+        let parts = seed.into_parts(self, context, parent)?;
+        let cost = crate::budgeted::auth::ContextCost::for_context(context, parent)?;
+        for capability in [
+            Capability::Recall,
+            Capability::ReadEvidence,
+            Capability::RawEvidence,
+            Capability::ModelProcessing,
+        ] {
+            cost.require_capability(context, capability, parent)?;
+        }
+        let snapshot = parts.snapshot;
+        let world = parts.world;
+        let state = parts.state;
+        let generation = parts.generation;
+        let workspace = parts.workspace;
+        let admitted_base = parts.base.ok_or_else(stale_index)?;
+        let admitted_directory = parts.directory;
+        let router = parts.router.ok_or_else(stale_index)?;
+        let current = parts.current.ok_or_else(stale_index)?;
+        let current_ref = parts.current_ref.ok_or_else(stale_index)?;
+        let number = generation.number;
+        let root = generation
+            .dense_directory_router
+            .as_ref()
+            .ok_or_else(stale_index)?;
+        if state.active != Some(number)
+            || world.workspace_digest != workspace
+            || world
+                .directory_routers
+                .as_ref()
+                .and_then(|m| m.get(&number))
+                != Some(root)
+            || world.prefix_bases.as_ref().and_then(|m| m.get(&number))
+                != generation.dense_prefix_base.as_ref()
+            || world
+                .prefix_segment_heads
+                .as_ref()
+                .and_then(|m| m.get(&number))
+                != generation.dense_prefix_segments.as_ref()
+            || router.manifest.coverage.base != admitted_base.reference
+            || router.manifest.coverage.directory != generation.dense_prefix_segments
+            || admitted_directory
+                .as_ref()
+                .map(|directory| &directory.reference)
+                != generation.dense_prefix_segments.as_ref()
+        {
+            return Err(integrity(
+                "routed status handoff differs from current certified roots",
+            ));
+        }
+        let base = &admitted_base.receipt;
+        let covered = &router.manifest.covered;
+        let head = admitted_directory
+            .as_ref()
+            .map(|directory| &directory.publication);
+        let (covered_receipt, covered_ref) = admitted_directory.as_ref().map_or(
+            (&admitted_base.target, &base.manifest.target),
+            |directory| {
+                (
+                    &directory.covered,
+                    &directory.publication.directory.head.covered_dense,
+                )
+            },
+        );
+        let covered_profile_bytes = metered_json_len(&covered_receipt.profile, parent, ROW_BYTES)?;
+        let current_profile_bytes = metered_json_len(&current.profile, parent, ROW_BYTES)?;
+        parent
+            .charge(
+                (covered_profile_bytes as u64 + current_profile_bytes as u64) * 8 + 2,
+                (covered_profile_bytes as u64 + current_profile_bytes as u64) * 16 + 16 * 1024,
+            )
+            .map_err(budget_error)?;
+        let covered_manifest = covered_receipt.manifest()?;
+        let current_manifest = current.manifest()?;
+        if &covered_manifest != covered
+            || router.manifest.covered_dense != *covered_ref
+            || covered_receipt.generation != number
+            || covered_receipt.authorization_epoch != generation.authorization_epoch
+        {
+            return Err(integrity("routed status covered dense acceptance differs"));
+        }
+        match head {
+            Some(head)
+                if head.directory.head.covered != *covered
+                    || head.directory.head.covered_dense != router.manifest.covered_dense
+                    || head.directory.head.ending != router.manifest.ending =>
+            {
+                return Err(integrity(
+                    "routed status sealed ending differs from fine head",
+                ));
+            }
+            None if base.manifest.prefix != *covered
+                || base.manifest.target != router.manifest.covered_dense =>
+            {
+                return Err(integrity("routed status base-only target differs"));
+            }
+            _ => {}
+        }
+        if let Some(directory) = &admitted_directory
+            && directory.ending.reference() != &router.manifest.ending
+        {
+            return Err(integrity("routed status admitted capture ending differs"));
+        }
+        // The native seed has already authenticated every immutable point and
+        // complete live Dense suffix under this exact snapshot. Only serving
+        // policy controls, its actual profile and current fence remain to mint.
+        let latest = generation.dense.as_ref().ok_or_else(stale_index)?;
+        let raw = &router.manifest.raw;
+        if &current_manifest != latest
+            || current.generation != number
+            || current.authorization_epoch != generation.authorization_epoch
+            || raw.generation != number
+            || raw.custody_version != generation.custody_version
+            || raw.analyzer != generation.analyzer
+            || generation.bm25.as_ref() != Some(&raw.bm25)
+            || raw.authorization_epoch != generation.authorization_epoch
+            || raw.removal_through != generation.removal_through
+            || raw.through > generation.through
+            || raw.projected_sources > generation.projected_sources
+            || (raw.through == generation.through
+                && raw.projected_sources != generation.projected_sources)
+            || covered.profile != latest.profile
+            || covered.profile_digest != latest.profile_digest
+            || covered.vector_space_id != latest.vector_space_id
+            || covered.through > latest.through
+            || covered.sources > latest.sources
+            || covered.spans > latest.spans
+            || covered.embedded_sources > latest.embedded_sources
+            || covered.omitted_sources > latest.omitted_sources
+            || (covered.through == latest.through && covered != latest)
+            || router.manifest.ending.work.workspace_commit > covered.through
+            || router.manifest.ending.global_commit > router.manifest.covered_dense.global_commit
+        {
+            return Err(integrity(
+                "routed status raw/dense/profile/capture handoff differs",
+            ));
+        }
+        let bytes = metered_json_len(&world, parent, 128 * 1024)?;
+        parent
+            .charge(bytes as u64 + 1, bytes as u64 * 16 + 8192)
+            .map_err(budget_error)?;
+        let preparation_world = world.clone();
+        let view = self.finish_routed_query_view(
+            &snapshot,
+            context,
+            cost,
+            RoutedServingMetadata {
+                workspace,
+                state,
+                generation,
+                world,
+                admitted_base,
+                admitted_directory,
+                router,
+                current,
+                current_ref,
+                head_rows: Some(parts.head_rows),
+            },
+            parent,
+        )?;
+        Ok(crate::prepare::routed::RoutedPreparationAdmission {
+            snapshot,
+            world: preparation_world,
+            view,
+        })
+    }
+
     pub(crate) fn routed_query_view<S: ReadSnapshot>(
         &self,
         snapshot: &S,
@@ -315,6 +504,48 @@ impl NativeService {
                 "routed actual raw/dense/profile/capture admission differs",
             ));
         }
+        self.finish_routed_query_view(
+            snapshot,
+            context,
+            cost,
+            RoutedServingMetadata {
+                workspace,
+                state,
+                generation,
+                world,
+                admitted_base,
+                admitted_directory,
+                router,
+                current,
+                current_ref,
+                head_rows,
+            },
+            parent,
+        )
+    }
+
+    fn finish_routed_query_view<S: ReadSnapshot>(
+        &self,
+        snapshot: &S,
+        context: &AuthenticatedRequestContext,
+        cost: crate::budgeted::auth::ContextCost,
+        metadata: RoutedServingMetadata,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<VerifiedRoutedQueryView> {
+        let RoutedServingMetadata {
+            workspace,
+            state,
+            generation,
+            world,
+            admitted_base,
+            admitted_directory,
+            router,
+            current,
+            current_ref,
+            head_rows,
+        } = metadata;
+        let number = generation.number;
+        let covered = &router.manifest.covered;
         let (space_digest, space) =
             self.directory_router_space(covered, &router.manifest.recipe, parent)?;
         if space_digest != router.manifest.coarse_space_digest
@@ -511,6 +742,16 @@ impl NativeService {
             .begin_read(SnapshotSelector::Latest)
             .map_err(storage_error)?;
         let view = self.routed_query_view(&snapshot, context, parent)?;
+        self.check_owned_routed_query_embedding_profile(profile, &view, parent)?;
+        Ok((view.identity(), view))
+    }
+
+    pub(crate) fn check_owned_routed_query_embedding_profile(
+        &self,
+        profile: &TextEmbeddingProfile,
+        view: &VerifiedRoutedQueryView,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<()> {
         let bytes = metered_json_len(profile, parent, ROW_BYTES)?;
         parent
             .charge(bytes as u64 + 1, bytes as u64 * 4 + 8192)
@@ -523,7 +764,7 @@ impl NativeService {
                 "routed query encoder differs from admitted source profile",
             ));
         }
-        Ok((view.identity(), view))
+        Ok(())
     }
 
     pub(crate) fn check_routed_query_view(

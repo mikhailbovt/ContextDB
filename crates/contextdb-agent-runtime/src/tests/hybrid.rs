@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod composite;
+
 #[derive(Debug)]
 struct UncalledQueryEncoder(TextEmbeddingProfile);
 impl TextEmbeddingAdapter for UncalledQueryEncoder {

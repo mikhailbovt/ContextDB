@@ -595,12 +595,20 @@ impl NativeService {
         Ok(admission)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The native handoff pins its actual preparation snapshot and serving view"
+    )]
     pub(super) fn encode_owned_hybrid_query(
         &self,
         request: &PrepareContextRequest,
         fence: &PrepareFence,
         intent: OwnedHybridIntent,
         encoder: &dyn TextEmbeddingAdapter,
+        admitted_routed_view: Option<
+            crate::raw_index::dense::graph::routing::query::VerifiedRoutedQueryView,
+        >,
+        preparation_snapshot: &crate::encryption::NativeSnapshot,
         budget: &mut QueryBudget,
     ) -> ServiceResult<OwnedHybridQuery> {
         // Encoder settings are fixed native metadata, never caller vector data.
@@ -611,12 +619,18 @@ impl NativeService {
             .after_receipt
             .as_ref()
             .ok_or_else(|| invalid("owned query checkpoint absent"))?;
-        let snapshot = self
-            .engine
-            .begin_read(SnapshotSelector::Latest)
-            .map_err(storage_error)?;
+        let fresh_snapshot;
+        let snapshot = if admitted_routed_view.is_some() {
+            preparation_snapshot
+        } else {
+            fresh_snapshot = self
+                .engine
+                .begin_read(SnapshotSelector::Latest)
+                .map_err(storage_error)?;
+            &fresh_snapshot
+        };
         let admission = self.admit_owned_query(
-            &snapshot,
+            snapshot,
             &request.context,
             checkpoint,
             &request.model_profile,
@@ -626,7 +640,6 @@ impl NativeService {
             budget,
         )?;
         self.validate_owned_query_base(&admission, &request.base, budget)?;
-        drop(snapshot);
         if request.base.control.iter().any(|message| {
             matches!(
                 message.id.as_str(),
@@ -639,11 +652,18 @@ impl NativeService {
         }
         intent.limits.validate()?;
         let (graph_digest, segmented_view, routed_view) = if intent.limits.routed.is_some() {
-            let (graph, view) = self.admit_owned_routed_query_embedding_profile(
-                &request.context,
-                &profile,
-                budget,
-            )?;
+            let (graph, view) = if let Some(view) = admitted_routed_view {
+                if view.known_at() != fence.known_at {
+                    return Err(stale(
+                        "owned routed handoff differs from preparation knowledge",
+                    ));
+                }
+                self.check_owned_routed_query_embedding_profile(&profile, &view, budget)?;
+                self.check_routed_query_view(&request.context, &view, budget)?;
+                (view.identity(), view)
+            } else {
+                self.admit_owned_routed_query_embedding_profile(&request.context, &profile, budget)?
+            };
             (graph, None, Some(view))
         } else if intent.limits.segments.is_some() {
             let (graph, view) = self.admit_owned_segmented_query_embedding_profile(

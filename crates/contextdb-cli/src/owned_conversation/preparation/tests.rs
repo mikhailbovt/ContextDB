@@ -17,6 +17,7 @@ use std::{
     time::Duration,
 };
 
+mod composite;
 mod routed;
 
 fn digest(bytes: &[u8]) -> ContentDigest {

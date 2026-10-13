@@ -2,12 +2,15 @@
 
 use std::sync::Arc;
 
-use contextdb_agent_runtime::{KeepUninterpreted, PreparationHook};
-use contextdb_native_service::NativeService;
+use contextdb_agent_runtime::{
+    KeepUninterpreted, OwnedHybridPreparer, PreparationHook, PreparationPhaseTimings,
+};
+use contextdb_context::{OutgoingEncoder, TokenCounter};
+use contextdb_native_service::{NativeRoutedPreparationTimings, NativeService};
 use contextdb_recall::QueryBudget;
 use contextdb_service::{
-    AuthenticatedRequestContext, ErrorCode, OwnedHybridLimits, ServiceError, ServiceResult,
-    TextEmbeddingAdapter,
+    AuthenticatedRequestContext, ErrorCode, OwnedHybridIntent, OwnedHybridLimits,
+    PrepareContextRequest, PreparedContext, ServiceError, ServiceResult, TextEmbeddingAdapter,
 };
 
 pub(super) const PROFILE: &str = "keep-uninterpreted+native-raw-outbox-advance.v1";
@@ -63,9 +66,59 @@ impl NativePreparation {
             routed: Some(limits),
         }
     }
+
+    fn admit_composite_configuration(
+        &self,
+        intent: &OwnedHybridIntent,
+        query_encoder: &dyn TextEmbeddingAdapter,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        let installed = self.routed.ok_or_else(|| {
+            ServiceError::new(
+                ErrorCode::InvalidArgument,
+                "composite preparation requires the installed routed profile",
+                false,
+            )
+        })?;
+        let encoder = self.hybrid.as_ref().ok_or_else(|| {
+            ServiceError::new(
+                ErrorCode::InvalidArgument,
+                "composite preparation requires its installed encoder",
+                false,
+            )
+        })?;
+        // Both profiles have bounded fields; pay validation and equality work.
+        parent.charge(8192, 0).map_err(|_| {
+            ServiceError::new(
+                ErrorCode::BudgetExhausted,
+                "composite preparation parent allowance exhausted",
+                false,
+            )
+        })?;
+        installed.validate()?;
+        intent.validate()?;
+        encoder.profile().validate()?;
+        query_encoder.profile().validate()?;
+        if installed.routed.is_none()
+            || installed.segments.is_some()
+            || intent.limits != installed
+            || query_encoder.profile() != encoder.profile()
+        {
+            return Err(ServiceError::new(
+                ErrorCode::IntegrityFailure,
+                "composite preparation differs from the installed limits or encoder profile",
+                false,
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl PreparationHook for NativePreparation {
+    fn owned_hybrid_preparer(&self) -> Option<&dyn OwnedHybridPreparer> {
+        self.routed.map(|_| self as &dyn OwnedHybridPreparer)
+    }
+
     fn before_prepare(
         &self,
         context: &AuthenticatedRequestContext,
@@ -138,5 +191,39 @@ impl PreparationHook for NativePreparation {
             "raw index catch-up exceeded the host allowance; retained work requires explicit continuation",
             true,
         ))
+    }
+}
+
+impl OwnedHybridPreparer for NativePreparation {
+    fn prepare_owned_hybrid(
+        &self,
+        request: PrepareContextRequest,
+        intent: OwnedHybridIntent,
+        tokenizer: &dyn TokenCounter,
+        outgoing: &dyn OutgoingEncoder,
+        query_encoder: &dyn TextEmbeddingAdapter,
+        parent: &mut QueryBudget,
+        timings: &mut PreparationPhaseTimings,
+    ) -> ServiceResult<PreparedContext> {
+        let started = std::time::Instant::now();
+        timings.prepare_micros = 0;
+        let admitted = self.admit_composite_configuration(&intent, query_encoder, parent);
+        timings.hook_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        admitted?;
+        let mut native_timings = NativeRoutedPreparationTimings::default();
+        let result = self.owner.prepare_context_with_routed_maintenance(
+            request,
+            intent,
+            tokenizer,
+            outgoing,
+            query_encoder,
+            parent,
+            &mut native_timings,
+        );
+        timings.hook_micros = timings
+            .hook_micros
+            .saturating_add(native_timings.hook_micros);
+        timings.prepare_micros = native_timings.prepare_micros;
+        result
     }
 }

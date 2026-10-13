@@ -32,6 +32,8 @@ mod fusion;
 mod hybrid;
 mod natural;
 mod raw;
+pub(crate) mod routed;
+pub use routed::NativeRoutedPreparationTimings;
 pub(super) mod scorer;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -244,7 +246,7 @@ impl PrepareContextPort for NativeService {
         encoder: &dyn OutgoingEncoder,
         budget: &mut QueryBudget,
     ) -> ServiceResult<PreparedContext> {
-        self.prepare_context_inner(request, tokenizer, encoder, None, budget)
+        self.prepare_context_inner(request, tokenizer, encoder, None, None, budget)
     }
 
     fn prepare_context_with_query_encoder(
@@ -261,6 +263,7 @@ impl PrepareContextPort for NativeService {
             tokenizer,
             encoder,
             Some((intent, query_encoder)),
+            None,
             budget,
         )
     }
@@ -276,6 +279,7 @@ impl NativeService {
             contextdb_service::OwnedHybridIntent,
             &dyn contextdb_service::TextEmbeddingAdapter,
         )>,
+        routed_admission: Option<routed::RoutedPreparationAdmission>,
         budget: &mut QueryBudget,
     ) -> ServiceResult<PreparedContext> {
         let hybrid_context_cost = hybrid
@@ -367,11 +371,28 @@ impl NativeService {
             self.resolve_capture_receipt(&request.context, receipt)?;
         }
         budget.check().map_err(budget_error)?;
-        let snapshot = self
-            .engine
-            .begin_read(SnapshotSelector::Latest)
-            .map_err(storage_error)?;
-        let (_, world) = if hybrid.is_some() {
+        let (snapshot, admitted_world, routed_view) = if let Some(frame) = routed_admission {
+            if hybrid
+                .as_ref()
+                .is_none_or(|(intent, _)| intent.limits.routed.is_none())
+            {
+                return Err(invalid(
+                    "native routed admission requires its owned routed intent",
+                ));
+            }
+            (frame.snapshot, Some(frame.world), Some(frame.view))
+        } else {
+            (
+                self.engine
+                    .begin_read(SnapshotSelector::Latest)
+                    .map_err(storage_error)?,
+                None,
+                None,
+            )
+        };
+        let world = if let Some(world) = admitted_world {
+            world
+        } else if hybrid.is_some() {
             crate::budgeted::metadata(&snapshot, budget, |reader| {
                 self.select_snapshot(
                     reader,
@@ -379,12 +400,14 @@ impl NativeService {
                     request.known_at,
                 )
             })?
+            .1
         } else {
             self.select_snapshot(
                 &snapshot,
                 &request.context.request.workspace_id,
                 request.known_at,
             )?
+            .1
         };
         let known = world.watermarks.journal;
         if request
@@ -568,7 +591,15 @@ impl NativeService {
         }
         let mut hybrid_query = hybrid
             .map(|(intent, encoder)| {
-                self.encode_owned_hybrid_query(&request, &fence, intent, encoder, budget)
+                self.encode_owned_hybrid_query(
+                    &request,
+                    &fence,
+                    intent,
+                    encoder,
+                    routed_view,
+                    &snapshot,
+                    budget,
+                )
             })
             .transpose()?;
         let mut hybrid_observation = None;

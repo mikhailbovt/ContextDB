@@ -9,8 +9,9 @@ use contextdb_service::*;
 
 use super::{
     CacheResidencyController, CacheResidencyPolicy, ModelDispatchFence, ModelReconciliation,
-    PreparationHook, ReaderAdapter, ReaderOutcome, ReaderReply, RollingPolicy, RuntimeMeasurements,
-    StepMeasurement, charge, context_error, exhausted, invalid, rolling,
+    PreparationHook, PreparationPhaseTimings, ReaderAdapter, ReaderOutcome, ReaderReply,
+    RollingPolicy, RuntimeMeasurements, StepMeasurement, charge, context_error, exhausted, invalid,
+    rolling,
     telemetry::{self, Telemetry},
 };
 
@@ -640,10 +641,18 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                 if evicted != 0 {
                     self.save_checkpoint(now, budget)?;
                 }
-                let started = Instant::now();
-                let hook_result = hook.before_prepare(&self.context, budget);
-                measurement.preparation_hook_micros += telemetry::elapsed(started);
-                hook_result?;
+                let composite = self
+                    .settings
+                    .automatic_hybrid
+                    .as_ref()
+                    .filter(|hybrid| hybrid.limits.routed.is_some())
+                    .and_then(|_| hook.owned_hybrid_preparer());
+                if composite.is_none() {
+                    let started = Instant::now();
+                    let hook_result = hook.before_prepare(&self.context, budget);
+                    measurement.preparation_hook_micros += telemetry::elapsed(started);
+                    hook_result?;
+                }
                 let mut routes = extra_routes.to_vec();
                 // The owner recomputes and authorizes hybrid query cues from the
                 // exact post-rotation base. Runtime supplies no dense text/vector.
@@ -721,19 +730,41 @@ impl<S: OwnedRunPort + PrepareContextPort + PayloadPort + ?Sized> OwnedAgentRunt
                         limits: hybrid.limits,
                     };
                     intent.validate()?;
-                    self.owner.prepare_context_with_query_encoder(
-                        request,
-                        intent,
-                        reader.tokenizer(),
-                        reader,
-                        hybrid.query_encoder.as_ref(),
-                        budget,
-                    )
+                    if let Some(composite) = composite {
+                        let mut timings = PreparationPhaseTimings::default();
+                        let result = composite.prepare_owned_hybrid(
+                            request,
+                            intent,
+                            reader.tokenizer(),
+                            reader,
+                            hybrid.query_encoder.as_ref(),
+                            budget,
+                            &mut timings,
+                        );
+                        measurement.preparation_hook_micros = measurement
+                            .preparation_hook_micros
+                            .saturating_add(timings.hook_micros);
+                        measurement.prepare_micros = measurement
+                            .prepare_micros
+                            .saturating_add(timings.prepare_micros);
+                        result
+                    } else {
+                        self.owner.prepare_context_with_query_encoder(
+                            request,
+                            intent,
+                            reader.tokenizer(),
+                            reader,
+                            hybrid.query_encoder.as_ref(),
+                            budget,
+                        )
+                    }
                 } else {
                     self.owner
                         .prepare_context(request, reader.tokenizer(), reader, budget)
                 };
-                measurement.prepare_micros += telemetry::elapsed(started);
+                if composite.is_none() {
+                    measurement.prepare_micros += telemetry::elapsed(started);
+                }
                 match preparation {
                     Ok(result) => {
                         if measurement.prepare_attempts == 1 {

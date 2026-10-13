@@ -216,41 +216,108 @@ pub(super) struct Preparation {
     pub native: Arc<NativeService>,
     pub encoder: Arc<Encoder>,
 }
+
+#[derive(Debug)]
+pub(super) struct RoutedPreparation {
+    pub native: Arc<NativeService>,
+    pub encoder: Arc<Encoder>,
+}
+impl PreparationHook for RoutedPreparation {
+    fn owned_hybrid_preparer(&self) -> Option<&dyn OwnedHybridPreparer> {
+        Some(self)
+    }
+    fn before_prepare(
+        &self,
+        context: &AuthenticatedRequestContext,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<()> {
+        // Only explicit fixture setup uses this path. Runtime must select the
+        // composite for a routed step, with this corpus's declared interpreter.
+        Preparation {
+            native: Arc::clone(&self.native),
+            encoder: Arc::clone(&self.encoder),
+        }
+        .before_prepare(context, parent)
+    }
+}
+impl OwnedHybridPreparer for RoutedPreparation {
+    fn prepare_owned_hybrid(
+        &self,
+        request: PrepareContextRequest,
+        intent: OwnedHybridIntent,
+        tokenizer: &dyn TokenCounter,
+        outgoing: &dyn OutgoingEncoder,
+        query_encoder: &dyn TextEmbeddingAdapter,
+        parent: &mut QueryBudget,
+        timings: &mut PreparationPhaseTimings,
+    ) -> ServiceResult<PreparedContext> {
+        // This controlled corpus supplies its actual interpretation receipts.
+        // The production text hook continues to keep unresolved input unknown.
+        let started = std::time::Instant::now();
+        let interpreted = publish_fixture_interpretations(&self.native, &request.context, parent);
+        timings.hook_micros = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        interpreted?;
+        let mut native_timings = NativeRoutedPreparationTimings::default();
+        let result = self.native.prepare_context_with_routed_maintenance(
+            request,
+            intent,
+            tokenizer,
+            outgoing,
+            query_encoder,
+            parent,
+            &mut native_timings,
+        );
+        timings.hook_micros = timings
+            .hook_micros
+            .saturating_add(native_timings.hook_micros);
+        timings.prepare_micros = native_timings.prepare_micros;
+        result
+    }
+}
+fn publish_fixture_interpretations(
+    native: &NativeService,
+    context: &AuthenticatedRequestContext,
+    parent: &mut QueryBudget,
+) -> ServiceResult<()> {
+    for scope in &context.request.scopes {
+        let scope = scope.parse().expect("fixture scope");
+        let input = native.interpretation_inputs(context, scope, parent)?;
+        native.publish_assertions(
+            PublishAssertionsRequest {
+                context: context.clone(),
+                idempotency_key: format!("hybrid-contract/{scope}/{}", input.scope_epoch),
+                scope,
+                expected_scope_epoch: input.scope_epoch,
+                covered_through: input.through,
+                pipeline: PipelineIdentity {
+                    name: "controlled-no-state-corpus".into(),
+                    version: "1".into(),
+                    schema_version: "1".into(),
+                },
+                interpretations: input
+                    .events
+                    .into_iter()
+                    .map(|event_id| EventInterpretation {
+                        event_id,
+                        disposition: InterpretationDisposition::NoStateChange,
+                    })
+                    .collect(),
+                mutations: vec![],
+                after_receipt: None,
+            },
+            parent,
+        )?;
+    }
+    Ok(())
+}
+
 impl PreparationHook for Preparation {
     fn before_prepare(
         &self,
         context: &AuthenticatedRequestContext,
         parent: &mut QueryBudget,
     ) -> ServiceResult<()> {
-        for scope in &context.request.scopes {
-            let scope = scope.parse().expect("fixture scope");
-            let input = self.native.interpretation_inputs(context, scope, parent)?;
-            self.native.publish_assertions(
-                PublishAssertionsRequest {
-                    context: context.clone(),
-                    idempotency_key: format!("hybrid-contract/{scope}/{}", input.scope_epoch),
-                    scope,
-                    expected_scope_epoch: input.scope_epoch,
-                    covered_through: input.through,
-                    pipeline: PipelineIdentity {
-                        name: "controlled-no-state-corpus".into(),
-                        version: "1".into(),
-                        schema_version: "1".into(),
-                    },
-                    interpretations: input
-                        .events
-                        .into_iter()
-                        .map(|event_id| EventInterpretation {
-                            event_id,
-                            disposition: InterpretationDisposition::NoStateChange,
-                        })
-                        .collect(),
-                    mutations: vec![],
-                    after_receipt: None,
-                },
-                parent,
-            )?;
-        }
+        publish_fixture_interpretations(&self.native, context, parent)?;
         loop {
             if self
                 .native

@@ -1031,6 +1031,14 @@ bound configuration; maintenance does not clear an unknown model outcome. Legacy
 absent settings retain the earlier behavior and allowance. This text-only CLI
 does not accept tool-result protocols; embedded hosts retain that separate path.
 
+The native routed host combines this maintenance with context preparation. Its
+first admission fully checks the current targets; after projection, it rereads
+every witnessed immutable control page and independently authenticates the new
+world, Dense publication and complete suffix. Serving then consumes that same
+snapshot, adding query permissions and signed policy controls. This private
+admission expires with the attempt; callback fences remain fresh, and capture
+and dispatch retain their independent checks after the model-request append.
+
 Preparation unions matching ranges across routes before materializing one
 immutable source. Conflicting versions or equal-range digests refuse; the bounded
 rendering frontier cannot silently discard additional ranges. Protected routing
