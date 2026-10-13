@@ -126,6 +126,7 @@ fn observation(base: &OutgoingBase) -> OwnedHybridObservation {
                 raw_through: 2,
             }),
             segmented_dense_witness: None,
+            routed_dense_witness: None,
         });
     }
     OwnedHybridObservation {

@@ -45,7 +45,7 @@ impl NativeService {
     }
 
     /// A bounded exact primary/event point join, without recursive predecessor replay.
-    fn directory_router_point_receipt<S: ReadSnapshot>(
+    pub(in crate::raw_index::dense::graph) fn directory_router_point_receipt<S: ReadSnapshot>(
         &self,
         snapshot: &S,
         workspace: &str,

@@ -71,6 +71,46 @@ struct LeaseRecord {
     bytes: u64,
     model: Option<ModelAdmission>,
     trace_controls: Option<router_trace::controls::RouterTraceControls>,
+    routed: Option<RoutedLeaseBinding>,
+}
+
+/// Retained from the owner-sealed envelope, never supplied by a model or caller.
+/// It deliberately omits the process-local query view and permits only the
+/// exact captured ModelRequested successor at the main-model handoff.
+#[derive(Clone, Debug)]
+struct RoutedLeaseBinding {
+    roots: router_trace::hybrid::routed::HybridRoutedBinding,
+    known_at: u64,
+    intent: contextdb_service::OwnedHybridIntent,
+    checkpoint: CaptureReceipt,
+    allocated_bytes: u64,
+}
+
+impl RoutedLeaseBinding {
+    fn from_observation(
+        observation: &router_trace::hybrid::OwnedHybridObservation,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<Option<Self>> {
+        if observation.intent.limits.routed.is_none() {
+            return Ok(None);
+        }
+        let witness = observation
+            .routes
+            .iter()
+            .find(|route| route.route == router_trace::hybrid::HybridRouteKind::Dense)
+            .and_then(|route| route.routed_dense_witness.as_ref())
+            .ok_or_else(|| invalid("sealed routed preparation lost its owner binding"))?;
+        let allocated_bytes = 32768 + observation.checkpoint_receipt.token.len() as u64 * 4;
+        parent.charge(16, allocated_bytes).map_err(budget_error)?;
+        witness.binding.validate()?;
+        Ok(Some(Self {
+            roots: witness.binding.clone(),
+            known_at: observation.known_at,
+            intent: observation.intent.clone(),
+            checkpoint: observation.checkpoint_receipt.clone(),
+            allocated_bytes,
+        }))
+    }
 }
 
 #[derive(Debug, Default)]
@@ -228,6 +268,7 @@ impl NativeService {
             ));
         }
         let mut trace_bytes = 0;
+        let mut routed = None;
         let trace_controls = match &prepared.router_trace {
             Some(trace) => {
                 if seal.trace_digest != Some(trace.trace_digest)
@@ -249,6 +290,9 @@ impl NativeService {
                     return Err(invalid("prepared trace belongs to another native view"));
                 }
                 trace_bytes = trace.canonical_json.len() as u64;
+                if let Some(observation) = &envelope.owned_hybrid {
+                    routed = RoutedLeaseBinding::from_observation(observation, budget)?;
+                }
                 Some(envelope.origins)
             }
             None if seal.trace_digest.is_none()
@@ -267,9 +311,12 @@ impl NativeService {
             seal,
             fence,
             originals: prepared.assembly.read_set.originals.clone(),
-            bytes: assembly_bytes.len() as u64 + trace_bytes,
+            bytes: assembly_bytes.len() as u64
+                + trace_bytes
+                + routed.as_ref().map_or(0, |binding| binding.allocated_bytes),
             model: None,
             trace_controls,
+            routed,
         };
         self.check_lease_principal(context, &record)?;
         Ok(record)
@@ -315,6 +362,33 @@ impl NativeService {
             }
         }
         self.check_lease_clock(&record)?;
+        if let Some(routed) = &record.routed {
+            let current_checkpoint = checkpoint
+                .ok_or_else(|| invalid("routed capture requires its current owned checkpoint"))?;
+            if current_checkpoint != &routed.checkpoint {
+                return Err(changed("routed checkpoint changed before prepared capture"));
+            }
+            self.check_routed_query_binding(snapshot, &request.context, &routed.roots, budget)?;
+            budgeted::metadata(snapshot, budget, |reader| {
+                if self
+                    .workspace_state(reader, &request.context.request.workspace_id)?
+                    .watermarks
+                    .journal
+                    != routed.known_at
+                {
+                    return Err(changed("routed workspace advanced before prepared capture"));
+                }
+                Ok(())
+            })?;
+            if request.event.event_id != routed.intent.request_event
+                || !matches!(&request.event.payload, EventPayload::Assembly { manifest }
+                    if manifest.model_call_id == routed.intent.call_id)
+            {
+                return Err(invalid(
+                    "routed prepared capture differs from its exact query intent",
+                ));
+            }
+        }
         self.check_lease_policy(snapshot, &request.context, &record, budget)?;
         if !self.lease_scopes_current(snapshot, &request.context, &record, budget)? {
             return Err(changed("scope changed before prepared capture"));
@@ -333,6 +407,20 @@ impl NativeService {
             .pending_model
             .as_ref()
             .ok_or_else(|| invalid("run has no pending model request"))?;
+        if let Some(routed) = &record.routed
+            && (state
+                .groups
+                .last()
+                .filter(|group| !group.complete)
+                .map(|group| group.sequence)
+                != Some(routed.intent.interaction_sequence)
+                || pending.call_id != routed.intent.call_id
+                || pending.request_event != routed.intent.request_event)
+        {
+            return Err(invalid(
+                "routed captured intent differs from its owned interaction",
+            ));
+        }
         if prepared.assembly.model_profile_digest
             != contextdb_context::router::canonical_digest(&state.model_profile, budget)
                 .map_err(router_trace::trace_error)?

@@ -19,8 +19,12 @@ use serde::{Deserialize, Serialize};
 use super::{RouterEnvelope, trace_error};
 use crate::{integrity, invalid, raw_index::budget_error};
 
+pub(crate) mod routed;
 pub(crate) mod segments;
+pub(crate) use routed::HybridRoutedDenseWitness;
+pub(crate) use routed::event_hybrid_query_modes;
 pub(crate) use segments::HybridSegmentedDenseWitness;
+#[cfg(test)]
 pub(crate) use segments::event_has_segmented_hybrid;
 
 pub(crate) const HYBRID_OBSERVATION_REVISION: &str = "contextdb.native-owned-hybrid-observation.v1";
@@ -278,6 +282,9 @@ pub(crate) struct HybridRouteObservation {
     /// Distinct segmented owner provenance; never a reader control block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub segmented_dense_witness: Option<HybridSegmentedDenseWitness>,
+    /// Arbitrary prefix-v2 routing provenance, separate from the ordinal-prefix profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routed_dense_witness: Option<HybridRoutedDenseWitness>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -357,7 +364,9 @@ impl OwnedHybridObservation {
     fn validate_shape(&self, budget: &mut QueryBudget) -> ServiceResult<()> {
         budget.check().map_err(budget_error)?;
         self.intent.validate()?;
-        let expected_revision = if self.intent.limits.segments.is_some() {
+        let expected_revision = if self.intent.limits.routed.is_some() {
+            routed::ROUTED_HYBRID_OBSERVATION_REVISION
+        } else if self.intent.limits.segments.is_some() {
             segments::SEGMENTED_HYBRID_OBSERVATION_REVISION
         } else {
             HYBRID_OBSERVATION_REVISION
@@ -545,6 +554,16 @@ impl OwnedHybridObservation {
                 .charge(route.admitted_sources.len() as u64 + 1, 1024)
                 .map_err(budget_error)?;
             route.validate(&self.intent, self.known_at, budget)?;
+            if let Some(witness) = route.routed_dense_witness.as_ref() {
+                budget.charge(8192, 16384).map_err(budget_error)?;
+                if witness.source_profile_digest != self.profile_digest
+                    || witness.source_space_id != self.embedding_profile.vector_space_id()?
+                {
+                    return Err(integrity(
+                        "routed source space differs from the exact query encoder",
+                    ));
+                }
+            }
             route_union.extend(route.admitted_sources.iter().copied());
             if route_union.len() > MAX_SOURCES {
                 return Err(integrity(
@@ -651,8 +670,26 @@ impl HybridRouteObservation {
             ));
         }
         if self.route == HybridRouteKind::Dense {
-            if intent.limits.segments.is_some() {
-                if self.dense_witness.is_some() {
+            if intent.limits.routed.is_some() {
+                if self.dense_witness.is_some()
+                    || self.segmented_dense_witness.is_some()
+                    || self.completion == C::SegmentSelectionLimit
+                {
+                    return Err(integrity(
+                        "routed hybrid route carries another profile witness",
+                    ));
+                }
+                self.routed_dense_witness
+                    .as_ref()
+                    .ok_or_else(|| {
+                        integrity("routed hybrid route lacks protected routing witness")
+                    })?
+                    .validate(self, intent, known_at, budget)?;
+            } else if intent.limits.segments.is_some() {
+                if self.dense_witness.is_some()
+                    || self.routed_dense_witness.is_some()
+                    || self.completion == C::RankedLimit
+                {
                     return Err(integrity(
                         "segmented hybrid route carries the old base witness",
                     ));
@@ -665,7 +702,8 @@ impl HybridRouteObservation {
                     .validate(self, intent, known_at, budget)?;
             } else {
                 if self.segmented_dense_witness.is_some()
-                    || self.completion == C::SegmentSelectionLimit
+                    || self.routed_dense_witness.is_some()
+                    || matches!(self.completion, C::SegmentSelectionLimit | C::RankedLimit)
                 {
                     return Err(integrity("old hybrid profile carries segmented provenance"));
                 }
@@ -718,6 +756,7 @@ impl HybridRouteObservation {
             }
         } else if self.dense_witness.is_some()
             || self.segmented_dense_witness.is_some()
+            || self.routed_dense_witness.is_some()
             || self.dense_lag
             || self.tail_witness_complete
             || self.tail_scoring_complete

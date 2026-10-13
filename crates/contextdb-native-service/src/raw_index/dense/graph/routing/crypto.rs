@@ -594,13 +594,14 @@ impl NativeService {
         let token = self.router_row_token(workspace, m, row, COHORT_MAC, parent)?;
         install(row, token, |r| r.validate(m))
     }
-    pub(crate) fn check_router_cohort(
+    /// Authenticate policy control and opaque partition bytes without ANN decoding.
+    pub(crate) fn check_router_cohort_control(
         &self,
         workspace: &str,
         m: &DirectoryRouterManifestV1,
         row: &DirectoryRouterCohortV1,
         parent: &mut QueryBudget,
-    ) -> ServiceResult<AnnPartitionManifestV2> {
+    ) -> ServiceResult<()> {
         let token = self.router_row_token(workspace, m, row, COHORT_MAC, parent)?;
         row.validate(m)?;
         if row.token != token {
@@ -612,6 +613,28 @@ impl NativeService {
                 row.partition.len() as u64 * 5 + 4096,
             )
             .map_err(budget_error)?;
+        let summary = m
+            .cohorts
+            .iter()
+            .find(|c| c.policy_domain == row.policy_domain)
+            .ok_or_else(|| integrity("router cohort summary absent"))?;
+        if router_hash(b"", &row.policies, ROW_BYTES, parent)?.to_string() != row.policy_domain
+            || ContentDigest::from_bytes(*blake3::hash(&row.partition).as_bytes())
+                != summary.partition_digest
+        {
+            return Err(integrity("router cohort policy/partition control differs"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check_router_cohort(
+        &self,
+        workspace: &str,
+        m: &DirectoryRouterManifestV1,
+        row: &DirectoryRouterCohortV1,
+        parent: &mut QueryBudget,
+    ) -> ServiceResult<AnnPartitionManifestV2> {
+        self.check_router_cohort_control(workspace, m, row, parent)?;
         let partition = AnnPartitionManifestV2::decode_json(&row.partition).map_err(ann_error)?;
         let (index, summary) = m
             .cohorts
@@ -622,10 +645,7 @@ impl NativeService {
         let domain = *blake3::Hash::from_hex(&row.policy_domain)
             .map_err(ann_error)?
             .as_bytes();
-        if router_hash(b"", &row.policies, ROW_BYTES, parent)?.to_string() != row.policy_domain
-            || ContentDigest::from_bytes(*blake3::hash(&row.partition).as_bytes())
-                != summary.partition_digest
-            || partition.encode_json().map_err(ann_error)? != row.partition
+        if partition.encode_json().map_err(ann_error)? != row.partition
             || partition.generation != m.raw.generation
             || partition.policy_digest != domain
             || partition.vector_space_id != m.coarse_space_id

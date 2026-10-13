@@ -86,6 +86,37 @@ impl NativeService {
                 "model dispatch differs from the checkpoint and sealed request",
             ));
         }
+        if let Some(routed) = &record.routed {
+            if checkpoint != &routed.checkpoint
+                || call != routed.intent.call_id
+                || request.event_id != routed.intent.request_event
+                || routed.known_at.checked_add(1) != Some(request.workspace_commit)
+                || state
+                    .groups
+                    .last()
+                    .filter(|group| !group.complete)
+                    .map(|group| group.sequence)
+                    != Some(routed.intent.interaction_sequence)
+            {
+                return Err(changed(
+                    "routed model handoff differs from its sealed current query",
+                ));
+            }
+            self.check_routed_query_binding(&snapshot, context, &routed.roots, budget)?;
+            budgeted::metadata(&snapshot, budget, |reader| {
+                if self
+                    .workspace_state(reader, &context.request.workspace_id)?
+                    .watermarks
+                    .journal
+                    != request.workspace_commit
+                {
+                    return Err(changed(
+                        "routed workspace advanced after its model request capture",
+                    ));
+                }
+                Ok(())
+            })?;
+        }
         if registry.entries.values().any(|entry| {
             entry
                 .model

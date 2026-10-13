@@ -95,6 +95,9 @@ pub use raw_index::dense::graph::prefix_segments_v2::types::{
 pub use raw_index::dense::graph::prefix_v2::types::{
     DensePrefixBaseManifestV2, DensePrefixBaseReceiptV2, DensePrefixBaseRequestV2,
 };
+pub use raw_index::dense::graph::routing::query::{
+    DenseRoutedQueryCompletion, DenseRoutedQueryLimits, DenseRoutedQueryResult,
+};
 pub use raw_index::dense::graph::routing::types::{
     DirectoryRouterCoverageV1, DirectoryRouterManifestV1, DirectoryRouterPublishRequestV1,
     DirectoryRouterReceiptV1, DirectoryRouterRefV1,
@@ -3556,6 +3559,7 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 && feature != router_trace::TRACE_REPLAY_FEATURE
                 && feature != router_trace::hybrid::HYBRID_FEATURE
                 && feature != router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE
+                && feature != router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE
                 && feature != owned::OWNED_FEATURE
                 && feature != owned::TOOL_PAGES_FEATURE
                 && feature != owned::PAGE_RECALL_FEATURE
@@ -3620,6 +3624,18 @@ fn validate_manifest(manifest: &Manifest, database_id: &str) -> ServiceResult<()
                 || !manifest
                     .features
                     .contains(raw_index::dense::graph::segments::types::FEATURE)))
+        || (manifest
+            .features
+            .contains(router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE)
+            && (!manifest
+                .features
+                .contains(router_trace::hybrid::HYBRID_FEATURE)
+                || !manifest
+                    .features
+                    .contains(raw_index::dense::graph::routing::types::FEATURE)
+                || !manifest
+                    .features
+                    .contains(raw_index::dense::graph::prefix_v2::types::FEATURE)))
         || (manifest.features.contains(owned::PAGE_RECALL_FEATURE)
             && (!manifest.features.contains(owned::TOOL_PAGES_FEATURE)
                 || !manifest.features.contains(payload::SOURCE_FEATURE)

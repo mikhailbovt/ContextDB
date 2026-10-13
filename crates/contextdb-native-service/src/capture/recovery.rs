@@ -80,6 +80,9 @@ pub(in super::super) struct CaptureRecovery {
     /// This marker grants neither current source access nor query completeness.
     #[serde(default, skip_serializing_if = "is_false")]
     pub(in super::super) owned_hybrid_segments: bool,
+    /// Routing observations remain explicitly declared after request body pruning.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(in super::super) owned_hybrid_routed: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -155,6 +158,27 @@ impl CaptureRecovery {
         {
             return Err(integrity(
                 "capture recovery segmented hybrid feature is absent or incompatible",
+            ));
+        }
+        if self.owned_hybrid_routed
+            && (!self.owned_hybrid
+                || self.owned_hybrid_segments
+                || !matches!(self.payload.shape, PayloadShape::Assembly)
+                || !self.router_trace.as_ref().is_some_and(|header| {
+                    header.version == contextdb_core::ROUTER_REPLAY_TRACE_VERSION
+                })
+                || !manifest
+                    .features
+                    .contains(crate::router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE)
+                || !manifest
+                    .features
+                    .contains(crate::raw_index::dense::graph::routing::types::FEATURE)
+                || !manifest
+                    .features
+                    .contains(crate::raw_index::dense::graph::prefix_v2::types::FEATURE))
+        {
+            return Err(integrity(
+                "capture recovery routed hybrid feature is absent or incompatible",
             ));
         }
         if (matches!(self.provenance, Some(EventProvenance::ModelOutput { .. }))
@@ -253,6 +277,8 @@ impl CaptureRecovery {
                 .map(|trace| trace.header.clone()),
             _ => None,
         };
+        let (owned_hybrid_segments, owned_hybrid_routed) =
+            crate::router_trace::hybrid::event_hybrid_query_modes(event)?;
         let metadata = Self {
             version: if router_trace.is_some() { 2 } else { 1 },
             scope_ids: event.scope_ids.clone(),
@@ -287,7 +313,8 @@ impl CaptureRecovery {
             router_trace,
             original_page_recall: matches!(&event.payload, EventPayload::Assembly { manifest } if manifest.original_page_recall),
             owned_hybrid: crate::router_trace::hybrid::event_has_hybrid(event)?,
-            owned_hybrid_segments: crate::router_trace::hybrid::event_has_segmented_hybrid(event)?,
+            owned_hybrid_segments,
+            owned_hybrid_routed,
         };
         if encode(&metadata)?.len() > MAX_RECOVERY_BYTES {
             return Err(exhausted("capture recovery metadata exceeds 1 MiB"));

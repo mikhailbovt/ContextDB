@@ -3,6 +3,7 @@
 use super::fusion::{SourceRoute, SourceRouteInput};
 use super::*;
 use crate::owned::OwnedQueryAdmission;
+use crate::router_trace::hybrid::routed::ROUTED_HYBRID_OBSERVATION_REVISION;
 use crate::router_trace::hybrid::segments::SEGMENTED_HYBRID_OBSERVATION_REVISION;
 use crate::router_trace::hybrid::{
     HYBRID_OBSERVATION_REVISION, HybridCompletion, HybridDenseWitness, HybridPreflightObservation,
@@ -28,6 +29,7 @@ pub(super) struct OwnedHybridGuard {
     graph_digest: ContentDigest,
     segmented_view:
         Option<crate::raw_index::dense::graph::segments::query::VerifiedSegmentQueryView>,
+    routed_view: Option<crate::raw_index::dense::graph::routing::query::VerifiedRoutedQueryView>,
 }
 impl std::fmt::Debug for OwnedHybridGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -37,6 +39,10 @@ impl std::fmt::Debug for OwnedHybridGuard {
             .field(
                 "segmented_view",
                 &self.segmented_view.as_ref().map(|view| view.identity()),
+            )
+            .field(
+                "routed_view",
+                &self.routed_view.as_ref().map(|view| view.identity()),
             )
             .finish_non_exhaustive()
     }
@@ -127,9 +133,68 @@ impl NativeService {
         }
         self.check_owned_hybrid_guard(&query.guard, budget)?;
         let limits = query.intent().limits;
-        let (dense_hits, dense_frontier, dense_observation) = if let Some(segments) =
-            limits.segments
-        {
+        let (dense_hits, dense_frontier, dense_observation) = if let Some(routed) = limits.routed {
+            let mut dense = self.search_original_spans_routed(
+                &request.context,
+                &query.cues().text,
+                &query.embedded,
+                crate::DenseRoutedQueryLimits {
+                    graph: crate::DenseGraphQueryLimits {
+                        limit: limits.sources as usize,
+                        max_node_reads: limits.node_reads as usize,
+                        max_vector_reads: limits.vector_reads as usize,
+                        max_discovered: limits.discovered as usize,
+                        ef_search: limits.ef_search as usize,
+                    },
+                    max_fine_paths: routed.max_fine_paths as usize,
+                    coarse_node_reads: routed.coarse_node_reads as usize,
+                    coarse_vector_reads: routed.coarse_vector_reads as usize,
+                    coarse_discovered: routed.coarse_discovered as usize,
+                    coarse_ef_search: routed.coarse_ef_search as usize,
+                    max_tail_work: limits.tail_work as usize,
+                    max_tail_vectors: limits.tail_vectors as usize,
+                },
+                budget,
+            )?;
+            let pinned = query
+                .guard
+                .routed_view
+                .as_ref()
+                .ok_or_else(|| stale("owned routed query admission absent"))?;
+            if dense.view_identity != pinned.identity() {
+                return Err(stale("owned routed search differs from the callback view"));
+            }
+            let hits = segmented_source_hits(std::mem::take(&mut dense.hits), budget)?;
+            let frontier = std::mem::take(&mut dense.admitted_sources);
+            let mut observation =
+                route_observation(HybridRouteKind::Dense, &frontier, &hits, budget)?;
+            observation.completion = match dense.completion {
+                crate::DenseRoutedQueryCompletion::Complete => HybridCompletion::Complete,
+                crate::DenseRoutedQueryCompletion::TailWorkLimit => HybridCompletion::TailWorkLimit,
+                crate::DenseRoutedQueryCompletion::TailVectorLimit => {
+                    HybridCompletion::TailVectorLimit
+                }
+                crate::DenseRoutedQueryCompletion::NodeLimit => HybridCompletion::BaseLimit,
+                crate::DenseRoutedQueryCompletion::VectorLimit => HybridCompletion::VectorLimit,
+                crate::DenseRoutedQueryCompletion::DiscoveryLimit => {
+                    HybridCompletion::DiscoveryLimit
+                }
+                crate::DenseRoutedQueryCompletion::DenseLag => HybridCompletion::DenseLag,
+                crate::DenseRoutedQueryCompletion::RawLag => HybridCompletion::RawLag,
+            };
+            observation.source_coverage_incomplete = dense.permitted_tail_omissions
+                || dense.completion != crate::DenseRoutedQueryCompletion::Complete;
+            observation.raw_lag = dense.raw_lag;
+            observation.dense_lag = dense.dense_lag;
+            observation.tail_witness_complete = dense.tail_witness_complete;
+            observation.tail_scoring_complete = dense.tail_scoring_complete;
+            observation.node_reads = dense.node_reads;
+            observation.vector_reads = dense.vector_reads;
+            observation.discovered = dense.discovered;
+            observation.tail_vector_reads = dense.tail_vector_reads;
+            observation.routed_dense_witness = Some(dense.witness);
+            (hits, frontier, observation)
+        } else if let Some(segments) = limits.segments {
             let mut dense = self.search_original_spans_segmented(
                 &request.context,
                 &query.cues().text,
@@ -395,7 +460,9 @@ impl NativeService {
             )?);
         }
         let observation = OwnedHybridObservation {
-            revision: if limits.segments.is_some() {
+            revision: if limits.routed.is_some() {
+                ROUTED_HYBRID_OBSERVATION_REVISION
+            } else if limits.segments.is_some() {
                 SEGMENTED_HYBRID_OBSERVATION_REVISION
             } else {
                 HYBRID_OBSERVATION_REVISION
@@ -485,7 +552,15 @@ impl NativeService {
                 "owned query segmented admission differs from its intent",
             ));
         }
-        let graph_digest = if let Some(view) = &guard.segmented_view {
+        if guard.intent.limits.routed.is_some() != guard.routed_view.is_some() {
+            return Err(stale(
+                "owned query routed admission differs from its intent",
+            ));
+        }
+        let graph_digest = if let Some(view) = &guard.routed_view {
+            self.check_routed_query_view(&guard.context, view, budget)?;
+            guard.graph_digest
+        } else if let Some(view) = &guard.segmented_view {
             self.check_segment_query_view(&guard.context, view, budget)?;
             guard.graph_digest
         } else {
@@ -561,16 +636,25 @@ impl NativeService {
                 "owned query base uses a reserved native status identity",
             ));
         }
-        let (graph_digest, segmented_view) = if intent.limits.segments.is_some() {
+        intent.limits.validate()?;
+        let (graph_digest, segmented_view, routed_view) = if intent.limits.routed.is_some() {
+            let (graph, view) = self.admit_owned_routed_query_embedding_profile(
+                &request.context,
+                &profile,
+                budget,
+            )?;
+            (graph, None, Some(view))
+        } else if intent.limits.segments.is_some() {
             let (graph, view) = self.admit_owned_segmented_query_embedding_profile(
                 &request.context,
                 &profile,
                 budget,
             )?;
-            (graph, Some(view))
+            (graph, Some(view), None)
         } else {
             (
                 self.admit_owned_query_embedding_profile(&request.context, &profile, budget)?,
+                None,
                 None,
             )
         };
@@ -592,6 +676,7 @@ impl NativeService {
             profile: profile.clone(),
             graph_digest,
             segmented_view,
+            routed_view,
         };
         let input_base_digest =
             router::canonical_digest(&request.base, budget).map_err(service_error)?;
@@ -839,6 +924,7 @@ fn route_observation(
         tail_vector_reads: 0,
         dense_witness: None,
         segmented_dense_witness: None,
+        routed_dense_witness: None,
     })
 }
 

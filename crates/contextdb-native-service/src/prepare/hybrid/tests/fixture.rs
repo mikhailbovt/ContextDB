@@ -508,6 +508,14 @@ pub(super) fn fixture() -> Fixture {
     fixture_with_encoder(Arc::new(Encoder::new()))
 }
 pub(super) fn fixture_with_encoder(encoder: Arc<Encoder>) -> Fixture {
+    fixture_with_publication(encoder, false)
+}
+
+pub(super) fn routed_fixture() -> Fixture {
+    fixture_with_publication(Arc::new(Encoder::new()), true)
+}
+
+fn fixture_with_publication(encoder: Arc<Encoder>, routed: bool) -> Fixture {
     let root = tempfile::tempdir().expect("owned hybrid directory");
     let (ld, ledger) = crate::suppression::tests::authority(DATABASE);
     let (kd, keys) = crate::encryption::tests::authority(DATABASE);
@@ -572,10 +580,36 @@ pub(super) fn fixture_with_encoder(encoder: Arc<Encoder>) -> Fixture {
     };
     hook.before_prepare(&context, &mut encoder.budget())
         .expect("actual source projection");
-    let graph = native
-        .publish_original_span_graph(&context, &mut encoder.budget())
-        .expect("actual native graph publication");
-    assert_eq!(graph.manifest.nodes, 24);
+    let graph_nodes = if routed {
+        let target = native
+            .project_original_spans(&context, encoder.as_ref(), 64, &mut encoder.budget())
+            .expect("genuine accepted current dense target");
+        let base = native
+            .publish_original_span_prefix_base(
+                &context,
+                &crate::DensePrefixBaseRequestV2 {
+                    generation: 1,
+                    target,
+                },
+                &mut encoder.budget(),
+            )
+            .expect("genuine prefix-v2 base publication");
+        let request = native
+            .original_span_directory_router_target(&context, 1, &mut encoder.budget())
+            .expect("complete native router target");
+        let router = native
+            .publish_original_span_directory_router(&context, &request, &mut encoder.budget())
+            .expect("complete base-only native router");
+        assert_eq!(router.manifest.coverage_count, 1);
+        base.manifest.nodes
+    } else {
+        native
+            .publish_original_span_graph(&context, &mut encoder.budget())
+            .expect("actual native graph publication")
+            .manifest
+            .nodes
+    };
+    assert_eq!(graph_nodes, 24);
     assert_eq!(encoder.source_forwards.load(Ordering::SeqCst), 24);
     // This structural integration test does not measure wall-clock latency.
     // Keep the real 30-second lease rules independent of parallel CI load.
@@ -597,6 +631,6 @@ pub(super) fn fixture_with_encoder(encoder: Arc<Encoder>) -> Fixture {
         encoder,
         copper,
         silver,
-        graph_nodes: graph.manifest.nodes,
+        graph_nodes,
     }
 }

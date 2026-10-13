@@ -931,8 +931,8 @@ includes prepared removals before exact outbox joins; all construction uses the
 operator's parent budget. Owner roots, retained acceptance and source/shared copy
 verification survive cold retry and paged generation GC. The base remains
 immutable after indexing advances. This family is exclusive with v1 graph bases
-per generation and has no serving, runtime or CLI profile yet. Prefixes above the
-finite bootstrap gates, arbitrary-directory routing and useful recall remain open.
+per generation. The embedded routed profile below serves this family; CLI
+maintenance, larger bootstrap inputs and useful recall remain open.
 
 `seal_original_span_prefix_segment` extends this independent base through the
 separate `continuous-raw-span-ann-prefix-segments-v2` maintenance family. Each
@@ -944,8 +944,8 @@ Signed before/after states and exact outbox joins include omission-only interval
 without inventing vectors. Current owner stamps, immutable ordinal locators,
 cold reconstruction and source/shared copy proofs remain valid through paged GC.
 An exact old request returns its historical receipt without replacing the current
-directory. Full scans can exhaust the operator budget. This family has no serving,
-runtime, CLI or coarse-routing activation; high-recall discovery remains a gate.
+directory. Full scans can exhaust the operator budget. CLI maintenance and
+high-recall discovery remain gates.
 
 `publish_original_span_directory_router` adds complete, separate offline routing
 maintenance over the prefix base and every accepted interval. Streamed coverage
@@ -957,8 +957,23 @@ for an exactly zero mean. Routing rows have shared ownership and cannot become
 original evidence. A fourth owner map, immutable revision locators, cold replay
 and paged GC bind the full final topology. Fine append makes existing coverage
 stale; replacement is explicit maintenance. Full rebuilds can exhaust the parent.
-Serving, runtime and CLI activation remain open, as do useful recall and physical
-per-source key closure for shared derived rows.
+CLI activation, useful recall and physical per-source key closure for shared
+derived rows remain open.
+
+`OwnedHybridLimits::routed` enables separate embedded serving over these real
+prefix-v2 paths. Point admission requires exact current router/base/directory
+coverage before tokenization, without rebuilding or replaying all history per
+step. Signed cohort control rows physically include opaque partition bytes;
+permission checks precede partition decoding and all ANN traversal/vector reads.
+Coarse selection may choose any covered ordinal. Coarse, fine and fresh work use
+one total allowance, with reserved fine/fresh opportunities and one dense source
+rank for RRF. Routing centroids never become evidence or utility candidates.
+Protected replay under `continuous-owned-hybrid-routed-v1` records actual scores,
+selected paths, quotas and fresh proof. Current roots remain fenced through
+prepared capture and model dispatch; automatic preparation repeats after tools.
+Ranked path selection and locally
+complete ANN work do not establish exhaustive semantic recall. None preserves
+earlier profiles, and routed and segmented settings are mutually exclusive.
 
 Preparation unions matching ranges across routes before materializing one
 immutable source. Conflicting versions or equal-range digests refuse; the bounded

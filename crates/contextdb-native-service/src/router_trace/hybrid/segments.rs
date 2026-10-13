@@ -2,7 +2,9 @@
 //! become reader controls, current source grants, or whole-database success.
 
 use super::{HybridCompletion, HybridRouteObservation, integrity, zero};
-use contextdb_core::{ContentDigest, EventEnvelope};
+use contextdb_core::ContentDigest;
+#[cfg(test)]
+use contextdb_core::EventEnvelope;
 use contextdb_recall::QueryBudget;
 use contextdb_service::{OwnedHybridIntent, ServiceResult};
 use serde::{
@@ -107,7 +109,7 @@ pub(crate) struct HybridSegmentedDenseWitness {
     pub paths: Vec<HybridDensePathObservation>,
 }
 
-fn bounded<'de, D: Deserializer<'de>, T: Deserialize<'de>, const CAP: usize>(
+pub(super) fn bounded<'de, D: Deserializer<'de>, T: Deserialize<'de>, const CAP: usize>(
     d: D,
 ) -> Result<Vec<T>, D::Error> {
     struct Bound<T, const CAP: usize>(std::marker::PhantomData<T>);
@@ -344,50 +346,9 @@ impl HybridSegmentedDenseWitness {
 
 /// Conservative retained-format discovery. Admission validates the entire
 /// observation separately; this streaming marker never establishes authority.
+#[cfg(test)]
 pub(crate) fn event_has_segmented_hybrid(event: &EventEnvelope) -> ServiceResult<bool> {
-    let Some(pages) = super::protected_pages(event)? else {
-        return Ok(false);
-    };
-    #[derive(Deserialize)]
-    struct Marker {
-        #[serde(default)]
-        owned_hybrid: Option<Observation>,
-    }
-    #[derive(Deserialize)]
-    struct Observation {
-        revision: Revision,
-        intent: Intent,
-    }
-    struct Revision(bool);
-    impl<'de> Deserialize<'de> for Revision {
-        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-            struct Compare;
-            impl<'de> Visitor<'de> for Compare {
-                type Value = Revision;
-                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    f.write_str("protected observation revision")
-                }
-                fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Revision, E> {
-                    Ok(Revision(s == SEGMENTED_HYBRID_OBSERVATION_REVISION))
-                }
-            }
-            d.deserialize_str(Compare)
-        }
-    }
-    #[derive(Deserialize)]
-    struct Intent {
-        limits: Limits,
-    }
-    #[derive(Deserialize)]
-    struct Limits {
-        #[serde(default)]
-        segments: Option<serde::de::IgnoredAny>,
-    }
-    let marker: Marker = serde_json::from_reader(pages)
-        .map_err(|_| integrity("segmented hybrid marker has malformed protected JSON"))?;
-    Ok(marker.owned_hybrid.is_some_and(|observation| {
-        observation.revision.0 || observation.intent.limits.segments.is_some()
-    }))
+    super::routed::event_hybrid_query_modes(event).map(|(segmented, _)| segmented)
 }
 
 #[cfg(test)]
@@ -514,6 +475,7 @@ mod tests {
             tail_vector_reads: 2,
             dense_witness: None,
             segmented_dense_witness: None,
+            routed_dense_witness: None,
         };
         (witness, route, intent)
     }

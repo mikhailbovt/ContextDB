@@ -603,7 +603,8 @@ impl NativeService {
                     )
                     .map_err(crate::raw_index::budget_error)?;
             }
-            if super::router_trace::hybrid::event_has_segmented_hybrid(event)? {
+            let (segmented, routed) = super::router_trace::hybrid::event_hybrid_query_modes(event)?;
+            if segmented || routed {
                 if trace.header.version != contextdb_core::ROUTER_REPLAY_TRACE_VERSION {
                     return Err(integrity(
                         "segmented hybrid capture requires replay trace v2",
@@ -653,9 +654,18 @@ impl NativeService {
                     ));
                 }
                 let format: Manifest = decode(&format_bytes, "segmented hybrid capture manifest")?;
-                if !format
-                    .features
-                    .contains(super::raw_index::dense::graph::segments::types::FEATURE)
+                let required = if routed {
+                    &[
+                        super::raw_index::dense::graph::routing::types::FEATURE,
+                        super::raw_index::dense::graph::prefix_v2::types::FEATURE,
+                        super::raw_index::dense::FEATURE,
+                    ][..]
+                } else {
+                    &[super::raw_index::dense::graph::segments::types::FEATURE][..]
+                };
+                if required
+                    .iter()
+                    .any(|feature| !format.features.contains(*feature))
                 {
                     return Err(integrity(
                         "segmented hybrid capture lacks its native segment declaration",
@@ -663,7 +673,11 @@ impl NativeService {
                 }
                 self.enable_capture_extension(
                     &mut transaction,
-                    super::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE,
+                    if routed {
+                        super::router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE
+                    } else {
+                        super::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE
+                    },
                 )?;
             }
         }
@@ -1181,6 +1195,9 @@ impl NativeService {
                 || manifest
                     .features
                     .contains(super::router_trace::hybrid::segments::SEGMENTED_HYBRID_FEATURE)
+                || manifest
+                    .features
+                    .contains(super::router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE)
             {
                 return Err(integrity(
                     "router trace format lacks an accepted protected capture",
@@ -1345,6 +1362,17 @@ impl NativeService {
         {
             return Err(integrity(
                 "segmented hybrid format lacks an accepted protected query capture",
+            ));
+        }
+        if manifest
+            .features
+            .contains(super::router_trace::hybrid::routed::ROUTED_HYBRID_FEATURE)
+            && !accepted
+                .iter()
+                .any(|(_, recovery)| recovery.owned_hybrid_routed)
+        {
+            return Err(integrity(
+                "routed hybrid format lacks an accepted protected query capture",
             ));
         }
         accepted.sort_by_key(|(record, _)| record.receipt.workspace_commit);

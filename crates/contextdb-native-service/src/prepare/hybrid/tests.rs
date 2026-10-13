@@ -14,6 +14,7 @@ use std::sync::{
 mod fixture;
 mod real;
 mod refusals;
+mod routed;
 mod segments;
 use fixture::*;
 

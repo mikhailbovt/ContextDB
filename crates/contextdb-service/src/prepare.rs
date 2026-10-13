@@ -23,7 +23,7 @@ mod hybrid;
 mod recall;
 #[cfg(test)]
 mod tests;
-pub use hybrid::{OwnedHybridIntent, OwnedHybridLimits, OwnedSegmentLimits};
+pub use hybrid::{OwnedHybridIntent, OwnedHybridLimits, OwnedRoutedLimits, OwnedSegmentLimits};
 pub use recall::deterministic_prepare_recall;
 
 /// Explicit protected trace mode. Required never falls back to an omitted trace.

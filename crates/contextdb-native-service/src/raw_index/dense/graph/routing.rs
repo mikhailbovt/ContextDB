@@ -8,6 +8,7 @@ pub(crate) mod heads;
 mod inputs;
 mod proof;
 mod publication;
+pub(crate) mod query;
 mod reconstruction;
 pub(crate) mod types;
 mod verification;

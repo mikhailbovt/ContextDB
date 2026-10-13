@@ -89,6 +89,11 @@ impl HybridConfig {
                 "segmented queries require an embedded maintenance host; CLI segment maintenance is not available yet",
             ));
         }
+        if self.limits.routed.is_some() {
+            return Err(invalid(
+                "routed queries require an embedded maintenance host; CLI directory-router maintenance is not available yet",
+            ));
+        }
         self.embedding_profile()?.validate()?;
         Ok(())
     }
